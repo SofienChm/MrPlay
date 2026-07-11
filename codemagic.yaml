@@ -1,0 +1,54 @@
+workflows:
+  ios-build:
+    name: iOS Build
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: Codemagic admin
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      vars:
+        FLUTTER_DISABLE_SPM: "true"
+      groups:
+        - mrplay_prod
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: never
+          include: false
+    scripts:
+      - name: Disable Swift Package Manager Engine Globally
+        script: |
+          flutter config --no-enable-swift-package-manager
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install --repo-update
+          cd ..
+      - name: Initialize keychain
+        script: keychain initialize
+      - name: Fetch signing files from App Store Connect
+        script: |
+          app-store-connect fetch-signing-files com.mrplay.app \
+            --type IOS_APP_STORE \
+            --create \
+            --certificate-key "$CERTIFICATE_PRIVATE_KEY"
+      - name: Add certificates to keychain
+        script: keychain add-certificates
+      - name: Apply provisioning profiles
+        script: xcode-project use-profiles
+      - name: Build IPA
+        script: |
+          flutter build ipa --release --export-method app-store --build-number $BUILD_NUMBER
+    artifacts:
+      - build/ios/ipa/*.ipa
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
