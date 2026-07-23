@@ -76,20 +76,23 @@ class _BrowserScreenState extends State<BrowserScreen>
         if (!mounted) return;
         setState(() => _isInPip = call.arguments as bool);
       } else if (call.method == 'pauseFromNative') {
-        await _webViewController?.evaluateJavascript(source: JsSnippets.pauseVideo);
-        if (_bgWebViewController != null) {
-          try { await _bgWebViewController!.evaluateJavascript(source: JsSnippets.pauseVideo); } catch (_) {}
+        // Swift already paused the WebView via JS directly
+        // Just update Flutter state, don't re-inject JS
+        if (mounted) {
+          setState(() {
+            _isPlayingInBackground = false; // or whatever state you track
+          });
         }
       } else if (call.method == 'resumeFromNative') {
-        await _webViewController?.evaluateJavascript(source: JsSnippets.resumeVideo);
-        _injectVisibilitySpoof();
-        if (_bgWebViewController != null) {
-          try {
-            await _bgWebViewController!.evaluateJavascript(source: 'window.__mrplayBgInjected = false; window.__mrplayUserPaused = false;');
-            await _bgWebViewController!.evaluateJavascript(source: JsSnippets.bgWebViewInject);
-          } catch (_) {}
+        // Swift already resumed the WebView
+        // Just update state
+        if (mounted) {
+          setState(() {
+            _isPlayingInBackground = true;
+          });
         }
       }
+
     });
   }
 

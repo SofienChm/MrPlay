@@ -78,14 +78,8 @@ import WebKit
   private func pausePlayback() {
     isPaused = true
     updateNowPlayingInfo(title: nil, rate: 0.0)
-    // Send method channel to Dart FIRST (before audio deactivation)
-    // to give Dart time to set __mrplayUserPaused before the interval fires
-    methodChannel?.invokeMethod("pauseFromNative", arguments: nil)
-    do {
-      try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    } catch {
-      print("Failed to deactivate audio session: \(error)")
-    }
+    
+    // 1. Pause WebView FIRST (while audio session is still active)
     let js = """
       window.__mrplayUserPaused = true;
       if (window.__mrplaySpoofInterval) { clearInterval(window.__mrplaySpoofInterval); window.__mrplaySpoofInterval = null; }
@@ -95,26 +89,44 @@ import WebKit
       if (v && !v.paused) v.pause();
     """
     evaluateInAllWebViews(js)
-  }
+    
+    // 2. Notify Dart AFTER JS pause
+    methodChannel?.invokeMethod("pauseFromNative", arguments: nil)
+    
+    // 3. Deactivate audio session with delay (let JS finish)
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("Failed to deactivate audio session: \(error)")
+        }
+    }
+}
 
   private func resumePlayback() {
-    isPaused = false
-    updateNowPlayingInfo(title: nil, rate: 1.0)
-    do {
-      let session = AVAudioSession.sharedInstance()
-      try session.setCategory(.playback, mode: .default, options: [])
-      try session.setActive(true)
-    } catch {
-      print("Failed to reactivate audio session: \(error)")
-    }
-    let js = """
-      window.__mrplayUserPaused = false;
-      var v = document.querySelector('video');
-      if (v && v.paused) v.play().catch(function(){});
-    """
-    evaluateInAllWebViews(js)
-    methodChannel?.invokeMethod("resumeFromNative", arguments: nil)
-    startBackgroundTask()
+      isPaused = false
+      
+      // 1. Reactivate audio session FIRST
+      do {
+          let session = AVAudioSession.sharedInstance()
+          try session.setCategory(.playback, mode: .default, options: [])
+          try session.setActive(true)
+      } catch {
+          print("Failed to reactivate audio session: \(error)")
+      }
+      
+      // 2. Resume WebView AFTER audio session is active
+      let js = """
+        window.__mrplayUserPaused = false;
+        window.__mrplayExternallyPaused = false;
+        var v = document.querySelector('video');
+        if (v && v.paused) v.play().catch(function(){});
+      """
+      evaluateInAllWebViews(js)
+      
+      updateNowPlayingInfo(title: nil, rate: 1.0)
+      methodChannel?.invokeMethod("resumeFromNative", arguments: nil)
+      startBackgroundTask()
   }
 
   private func evaluateInAllWebViews(_ js: String) {
