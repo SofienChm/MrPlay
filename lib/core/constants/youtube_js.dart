@@ -40,22 +40,86 @@ class YouTubeJS {
 
   static const String inlinePlaybackScript = '''
     (function() {
-      var meta = document.createElement('meta');
-      meta.name = 'viewport';
-      meta.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
-      document.head.appendChild(meta);
+      'use strict';
       
-      function setupVideos() {
-        document.querySelectorAll('video').forEach(function(video) {
-          video.setAttribute('playsinline', 'true');
-          video.setAttribute('webkit-playsinline', 'true');
-          video.style.objectFit = 'contain';
+      var video = null;
+      var originalRequestFullscreen = null;
+      var originalWebkitRequestFullscreen = null;
+      
+      function setupVideoOverrides() {
+        video = document.querySelector('video');
+        if (!video) return;
+        
+        video.setAttribute('playsinline', 'true');
+        video.setAttribute('webkit-playsinline', 'true');
+        video.setAttribute('x5-playsinline', 'true');
+        video.setAttribute('t7-video-player-type', 'inline');
+        video.style.objectFit = 'contain';
+        
+        if (!originalRequestFullscreen) {
+          originalRequestFullscreen = video.requestFullscreen;
+        }
+        if (!originalWebkitRequestFullscreen) {
+          originalWebkitRequestFullscreen = video.webkitRequestFullscreen;
+        }
+        
+        video.requestFullscreen = function() {
+          console.log('MrPlay: Blocked requestFullscreen');
+          return Promise.resolve();
+        };
+        
+        video.webkitRequestFullscreen = function() {
+          console.log('MrPlay: Blocked webkitRequestFullscreen');
+          return;
+        };
+        
+        video.webkitEnterFullScreen = function() {
+          console.log('MrPlay: Blocked webkitEnterFullScreen');
+          return;
+        };
+        
+        video.webkitExitFullScreen = function() {
+          console.log('MrPlay: Blocked webkitExitFullScreen');
+          return;
+        };
+        
+        video.addEventListener('click', function(e) {
+          if (video.webkitDisplayingFullscreen) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+      }
+      
+      setupVideoOverrides();
+      
+      var videoObserver = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+          mutation.addedNodes.forEach(function(node) {
+            if (node.tagName === 'VIDEO') {
+              setupVideoOverrides();
+            }
+          });
+        });
+      });
+      
+      if (document.body) {
+        videoObserver.observe(document.body, { childList: true, subtree: true });
+      } else {
+        document.addEventListener('DOMContentLoaded', function() {
+          videoObserver.observe(document.body, { childList: true, subtree: true });
         });
       }
       
-      setupVideos();
-      var videoObserver = new MutationObserver(setupVideos);
-      videoObserver.observe(document.body, { childList: true, subtree: true });
+      document.requestFullscreen = function() {
+        console.log('MrPlay: Blocked document.requestFullscreen');
+        return Promise.resolve();
+      };
+      
+      document.webkitRequestFullscreen = function() {
+        console.log('MrPlay: Blocked document.webkitRequestFullscreen');
+        return;
+      };
     })();
   ''';
 
@@ -66,11 +130,34 @@ class YouTubeJS {
       var video = null;
       var wasPlaying = false;
       var backgroundInterval = null;
+      var audioCtx = null;
       
       function findVideo() {
         video = document.querySelector('video');
         return video;
       }
+      
+      function createAudioContext() {
+        var AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          audioCtx = new AudioContext();
+          
+          var oscillator = audioCtx.createOscillator();
+          var gainNode = audioCtx.createGain();
+          gainNode.gain.value = 0.001;
+          oscillator.connect(gainNode);
+          gainNode.connect(audioCtx.destination);
+          oscillator.start();
+          
+          setInterval(function() {
+            if (audioCtx.state === 'suspended') {
+              audioCtx.resume();
+            }
+          }, 1000);
+        }
+      }
+      
+      createAudioContext();
       
       var originalPause = HTMLMediaElement.prototype.pause;
       HTMLMediaElement.prototype.pause = function() {
@@ -88,16 +175,15 @@ class YouTubeJS {
         if (document.hidden) {
           wasPlaying = !video.paused;
           if (wasPlaying) {
+            if (audioCtx && audioCtx.state === 'suspended') {
+              audioCtx.resume();
+            }
             video.play().catch(function(e) {
               console.log('MrPlay: Background play retry needed');
             });
           }
         } else {
           wasPlaying = false;
-          if (backgroundInterval) {
-            clearInterval(backgroundInterval);
-            backgroundInterval = null;
-          }
         }
       });
       
@@ -107,35 +193,28 @@ class YouTubeJS {
         
         if (document.hidden && wasPlaying && video.paused) {
           console.log('MrPlay: Forcing background resume');
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
           video.play().catch(function(e) {});
         }
       }, 250);
-      
-      var AudioContext = window.AudioContext || window.webkitAudioContext;
-      if (AudioContext) {
-        var ctx = new AudioContext();
-        document.addEventListener('visibilitychange', function() {
-          if (document.hidden && ctx.state === 'suspended') {
-            ctx.resume();
-          }
-        });
-      }
       
       setInterval(function() {
         if (!video) findVideo();
         if (!video) return;
         
-        var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title');
-        var channelEl = document.querySelector('.ytd-channel-name a, .slim-owner-channel-name a');
-        var thumbEl = document.querySelector('.ytp-cued-thumbnail-overlay-image');
+        var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
+        var channelEl = document.querySelector('.ytd-channel-name a, .slim-owner-channel-name a, #text a');
+        var thumbEl = document.querySelector('.ytp-cued-thumbnail-overlay-image, .html5-main-video');
         
         var data = {
           isPlaying: !video.paused,
           currentTime: video.currentTime || 0,
           duration: video.duration || 0,
-          title: titleEl ? titleEl.textContent.trim() : '',
-          channel: channelEl ? channelEl.textContent.trim() : '',
-          thumbnail: thumbEl ? thumbEl.style.backgroundImage : ''
+          title: titleEl ? titleEl.textContent.trim().substring(0, 100) : '',
+          channel: channelEl ? channelEl.textContent.trim().substring(0, 100) : '',
+          thumbnail: thumbEl ? (thumbEl.style.backgroundImage || '') : ''
         };
         
         if (window.videoState && window.videoState.postMessage) {
@@ -145,6 +224,17 @@ class YouTubeJS {
     })();
   ''';
 
-  static const String pauseScript = 'document.querySelector("video").pause();';
-  static const String playScript = 'document.querySelector("video").play();';
+  static const String pauseScript = '''
+    (function() {
+      var video = document.querySelector("video");
+      if (video) video.pause();
+    })();
+  ''';
+
+  static const String playScript = '''
+    (function() {
+      var video = document.querySelector("video");
+      if (video) video.play();
+    })();
+  ''';
 }

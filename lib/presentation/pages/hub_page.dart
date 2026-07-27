@@ -1,12 +1,33 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
+import '../../data/models/platform_model.dart';
 import '../widgets/platform_card.dart';
 import '../router/app_router.dart';
 import '../../app.dart';
 
 class HubPage extends StatelessWidget {
   const HubPage({super.key});
+
+  void _onPlatformTap(BuildContext context, PlatformModel platform) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+        ),
+      ),
+    );
+
+    MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
+
+    Future.delayed(Duration(milliseconds: 800), () {
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,9 +114,7 @@ class HubPage extends StatelessWidget {
                       final platform = PlatformConstants.platforms[index];
                       return PlatformCard(
                         platform: platform,
-                        onTap: () {
-                          MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
-                        },
+                        onTap: () => _onPlatformTap(context, platform),
                       );
                     },
                   ),

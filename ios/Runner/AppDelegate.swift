@@ -2,6 +2,7 @@ import UIKit
 import Flutter
 import AVFoundation
 import MediaPlayer
+import WebKit
 
 @UIApplicationMain
 @objc class AppDelegate: FlutterAppDelegate {
@@ -147,9 +148,16 @@ import MediaPlayer
     }
     
     do {
-      try AVAudioSession.sharedInstance().setActive(true)
+      try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
     } catch {
-      print("MrPlay: Failed to keep audio active in background: \(error)")
+      print("MrPlay: Failed to keep audio active: \(error)")
+    }
+    
+    DispatchQueue.main.asyncAfter(deadline: .now() + 25) {
+      if self.backgroundTask != .invalid {
+        application.endBackgroundTask(self.backgroundTask)
+        self.backgroundTask = .invalid
+      }
     }
   }
   
@@ -157,6 +165,12 @@ import MediaPlayer
     if backgroundTask != .invalid {
       application.endBackgroundTask(backgroundTask)
       backgroundTask = .invalid
+    }
+    
+    do {
+      try AVAudioSession.sharedInstance().setActive(true)
+    } catch {
+      print("MrPlay: Failed to reactivate audio: \(error)")
     }
   }
 }

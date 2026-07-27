@@ -17,6 +17,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
   late final WebViewController controller;
   bool isMini = false;
   bool isReady = false;
+  bool _isLoading = true;
   VideoInfo? currentVideo;
 
   @override
@@ -32,7 +33,11 @@ class PersistentWebViewState extends State<PersistentWebView> {
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (String url) {
+            setState(() => _isLoading = true);
+          },
           onPageFinished: (String url) {
+            setState(() => _isLoading = false);
             if (url.contains('youtube.com')) {
               controller.runJavaScript(YouTubeJS.inlinePlaybackScript);
               controller.runJavaScript(YouTubeJS.adBlockScript);
@@ -124,6 +129,19 @@ class PersistentWebViewState extends State<PersistentWebView> {
   @override
   Widget build(BuildContext context) {
     if (!isReady || currentVideo == null) return const SizedBox.shrink();
+
+    if (_isLoading && !isMini) {
+      return Container(
+        height: MediaQuery.of(context).size.height,
+        width: double.infinity,
+        color: Colors.black,
+        child: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+          ),
+        ),
+      );
+    }
 
     return SizedBox(
       height: isMini ? 70 : MediaQuery.of(context).size.height,
