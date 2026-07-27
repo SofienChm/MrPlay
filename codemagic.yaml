@@ -17,8 +17,8 @@ workflows:
       events:
         - push
       branch_patterns:
-        - pattern: v2
-          include: true
+        - pattern: never
+          include: false
     scripts:
       - name: Disable Swift Package Manager Engine Globally
         script: |
