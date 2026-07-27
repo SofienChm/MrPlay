@@ -20,10 +20,10 @@ class AudioService {
     required double currentTime,
   }) async {
     await _channel.invokeMethod('updateNowPlayingInfo', {
-      'title': title,
-      'artist': artist,
-      'duration': duration,
-      'currentTime': currentTime,
+      'title': title.isNotEmpty ? title : 'MrPlay',
+      'artist': artist.isNotEmpty ? artist : 'YouTube',
+      'duration': duration > 0 ? duration : 0,
+      'currentTime': currentTime > 0 ? currentTime : 0,
     });
   }
 

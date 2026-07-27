@@ -34,7 +34,9 @@ class PersistentWebViewState extends State<PersistentWebView> {
         NavigationDelegate(
           onPageFinished: (String url) {
             if (url.contains('youtube.com')) {
+              controller.runJavaScript(YouTubeJS.inlinePlaybackScript);
               controller.runJavaScript(YouTubeJS.adBlockScript);
+              controller.runJavaScript(YouTubeJS.backgroundAudioScript);
             }
           },
         ),
@@ -112,6 +114,13 @@ class PersistentWebViewState extends State<PersistentWebView> {
     controller.runJavaScript(js);
   }
 
+  Widget _buildFullWebView() {
+    return Padding(
+      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      child: WebViewWidget(controller: controller),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!isReady || currentVideo == null) return const SizedBox.shrink();
@@ -127,7 +136,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
               ignoring: isMini,
               child: SizedBox(
                 height: isMini ? 0 : MediaQuery.of(context).size.height,
-                child: WebViewWidget(controller: controller),
+                child: _buildFullWebView(),
               ),
             ),
           ),
