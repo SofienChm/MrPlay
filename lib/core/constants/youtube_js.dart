@@ -7,7 +7,7 @@ class YouTubeJS {
         'ytd-display-ad-renderer', 'ytd-promoted-sparkles-web-renderer',
         'ytd-video-masthead-ad-renderer', 'ytd-banner-promo-renderer',
         '.ytd-ad-slot-renderer', 'ytd-in-feed-ad-layout-renderer',
-        'ytd-ad-slot-renderer', '.ytp-ad-progress-list', '.ytp-ad-duration-remaining'
+        '.ytp-ad-progress-list', '.ytp-ad-duration-remaining'
       ];
       
       function hideAds() {
@@ -25,7 +25,7 @@ class YouTubeJS {
       adObserver.observe(document.body, { childList: true, subtree: true });
       
       setInterval(function() {
-        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button');
+        var skipBtn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern');
         if (skipBtn) skipBtn.click();
         
         var video = document.querySelector('video');
@@ -34,7 +34,7 @@ class YouTubeJS {
           video.playbackRate = 16;
           setTimeout(function() { video.playbackRate = 1; }, 500);
         }
-      }, 1000);
+      }, 500);
     })();
   ''';
 
@@ -42,84 +42,117 @@ class YouTubeJS {
     (function() {
       'use strict';
       
-      var video = null;
-      var originalRequestFullscreen = null;
-      var originalWebkitRequestFullscreen = null;
-      
       function setupVideoOverrides() {
-        video = document.querySelector('video');
-        if (!video) return;
+        var videos = document.querySelectorAll('video');
+        videos.forEach(function(video) {
+          video.setAttribute('playsinline', 'true');
+          video.setAttribute('webkit-playsinline', 'true');
+          video.setAttribute('x5-playsinline', 'true');
+          video.setAttribute('t7-video-player-type', 'inline');
+          video.style.objectFit = 'contain';
+          video.style.width = '100%';
+          video.style.height = '100%';
+        });
+      }
+      
+      function blockFullscreen() {
+        try {
+          Object.defineProperty(HTMLVideoElement.prototype, 'requestFullscreen', {
+            value: function() { return Promise.resolve(); },
+            writable: false
+          });
+        } catch(e) {}
         
-        video.setAttribute('playsinline', 'true');
-        video.setAttribute('webkit-playsinline', 'true');
-        video.setAttribute('x5-playsinline', 'true');
-        video.setAttribute('t7-video-player-type', 'inline');
-        video.style.objectFit = 'contain';
+        try {
+          Object.defineProperty(HTMLVideoElement.prototype, 'webkitRequestFullscreen', {
+            value: function() {},
+            writable: false
+          });
+        } catch(e) {}
         
-        if (!originalRequestFullscreen) {
-          originalRequestFullscreen = video.requestFullscreen;
-        }
-        if (!originalWebkitRequestFullscreen) {
-          originalWebkitRequestFullscreen = video.webkitRequestFullscreen;
-        }
+        try {
+          Object.defineProperty(HTMLVideoElement.prototype, 'webkitEnterFullScreen', {
+            value: function() {},
+            writable: false
+          });
+        } catch(e) {}
         
-        video.requestFullscreen = function() {
-          console.log('MrPlay: Blocked requestFullscreen');
-          return Promise.resolve();
-        };
+        try {
+          Object.defineProperty(HTMLVideoElement.prototype, 'webkitEnterFullscreen', {
+            value: function() {},
+            writable: false
+          });
+        } catch(e) {}
         
-        video.webkitRequestFullscreen = function() {
-          console.log('MrPlay: Blocked webkitRequestFullscreen');
-          return;
-        };
+        try {
+          Object.defineProperty(HTMLVideoElement.prototype, 'mozRequestFullScreen', {
+            value: function() {},
+            writable: false
+          });
+        } catch(e) {}
         
-        video.webkitEnterFullScreen = function() {
-          console.log('MrPlay: Blocked webkitEnterFullScreen');
-          return;
-        };
+        try {
+          Object.defineProperty(HTMLVideoElement.prototype, 'msRequestFullscreen', {
+            value: function() {},
+            writable: false
+          });
+        } catch(e) {}
         
-        video.webkitExitFullScreen = function() {
-          console.log('MrPlay: Blocked webkitExitFullScreen');
-          return;
-        };
+        try {
+          Object.defineProperty(document, 'fullscreenEnabled', {
+            value: false,
+            writable: false
+          });
+          Object.defineProperty(document, 'webkitFullscreenEnabled', {
+            value: false,
+            writable: false
+          });
+        } catch(e) {}
+      }
+      
+      function blockFullscreenEvents() {
+        document.addEventListener('fullscreenchange', function(e) {
+          if (document.fullscreenElement) {
+            document.exitFullscreen().catch(function(){});
+          }
+        }, true);
         
-        video.addEventListener('click', function(e) {
-          if (video.webkitDisplayingFullscreen) {
-            e.preventDefault();
-            e.stopPropagation();
+        document.addEventListener('webkitfullscreenchange', function(e) {
+          if (document.webkitFullscreenElement) {
+            document.webkitExitFullscreen().catch(function(){});
           }
         }, true);
       }
       
+      function blockDocumentFullscreen() {
+        try {
+          Object.defineProperty(document, 'requestFullscreen', {
+            value: function() { return Promise.resolve(); },
+            writable: false
+          });
+        } catch(e) {}
+        
+        try {
+          Object.defineProperty(document, 'webkitRequestFullscreen', {
+            value: function() {},
+            writable: false
+          });
+        } catch(e) {}
+      }
+      
       setupVideoOverrides();
+      blockFullscreen();
+      blockFullscreenEvents();
+      blockDocumentFullscreen();
       
       var videoObserver = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-          mutation.addedNodes.forEach(function(node) {
-            if (node.tagName === 'VIDEO') {
-              setupVideoOverrides();
-            }
-          });
-        });
+        setupVideoOverrides();
+        blockFullscreen();
       });
       
       if (document.body) {
-        videoObserver.observe(document.body, { childList: true, subtree: true });
-      } else {
-        document.addEventListener('DOMContentLoaded', function() {
-          videoObserver.observe(document.body, { childList: true, subtree: true });
-        });
+        videoObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
       }
-      
-      document.requestFullscreen = function() {
-        console.log('MrPlay: Blocked document.requestFullscreen');
-        return Promise.resolve();
-      };
-      
-      document.webkitRequestFullscreen = function() {
-        console.log('MrPlay: Blocked document.webkitRequestFullscreen');
-        return;
-      };
     })();
   ''';
 
@@ -129,8 +162,8 @@ class YouTubeJS {
       
       var video = null;
       var wasPlaying = false;
-      var backgroundInterval = null;
       var audioCtx = null;
+      var backgroundInterval = null;
       
       function findVideo() {
         video = document.querySelector('video');
@@ -138,35 +171,49 @@ class YouTubeJS {
       }
       
       function createAudioContext() {
-        var AudioContext = window.AudioContext || window.webkitAudioContext;
-        if (AudioContext) {
-          audioCtx = new AudioContext();
-          
-          var oscillator = audioCtx.createOscillator();
-          var gainNode = audioCtx.createGain();
-          gainNode.gain.value = 0.001;
-          oscillator.connect(gainNode);
-          gainNode.connect(audioCtx.destination);
-          oscillator.start();
-          
-          setInterval(function() {
-            if (audioCtx.state === 'suspended') {
-              audioCtx.resume();
-            }
-          }, 1000);
-        }
+        try {
+          var AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (AudioContext && !audioCtx) {
+            audioCtx = new AudioContext();
+            var oscillator = audioCtx.createOscillator();
+            var gainNode = audioCtx.createGain();
+            gainNode.gain.value = 0.001;
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+          }
+        } catch(e) {}
       }
       
       createAudioContext();
       
-      var originalPause = HTMLMediaElement.prototype.pause;
-      HTMLMediaElement.prototype.pause = function() {
-        if (this === video && document.hidden) {
-          console.log('MrPlay: Blocked background pause');
-          return Promise.resolve();
-        }
-        return originalPause.apply(this, arguments);
-      };
+      try {
+        var originalPause = HTMLMediaElement.prototype.pause;
+        Object.defineProperty(HTMLMediaElement.prototype, 'pause', {
+          value: function() {
+            if (this === video && document.hidden) {
+              return;
+            }
+            return originalPause.apply(this, arguments);
+          },
+          writable: true,
+          configurable: true
+        });
+      } catch(e) {}
+      
+      try {
+        var originalPlay = HTMLMediaElement.prototype.play;
+        Object.defineProperty(HTMLMediaElement.prototype, 'play', {
+          value: function() {
+            if (audioCtx && audioCtx.state === 'suspended') {
+              audioCtx.resume();
+            }
+            return originalPlay.apply(this, arguments);
+          },
+          writable: true,
+          configurable: true
+        });
+      } catch(e) {}
       
       document.addEventListener('visibilitychange', function() {
         if (!video) findVideo();
@@ -178,49 +225,31 @@ class YouTubeJS {
             if (audioCtx && audioCtx.state === 'suspended') {
               audioCtx.resume();
             }
-            video.play().catch(function(e) {
-              console.log('MrPlay: Background play retry needed');
-            });
+            video.play().catch(function() {});
           }
         } else {
-          wasPlaying = false;
+          if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume();
+          }
         }
       });
       
+      if (backgroundInterval) clearInterval(backgroundInterval);
       backgroundInterval = setInterval(function() {
         if (!video) findVideo();
         if (!video) return;
         
         if (document.hidden && wasPlaying && video.paused) {
-          console.log('MrPlay: Forcing background resume');
           if (audioCtx && audioCtx.state === 'suspended') {
             audioCtx.resume();
           }
-          video.play().catch(function(e) {});
+          video.play().catch(function() {});
         }
-      }, 250);
-      
-      setInterval(function() {
-        if (!video) findVideo();
-        if (!video) return;
         
-        var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
-        var channelEl = document.querySelector('.ytd-channel-name a, .slim-owner-channel-name a, #text a');
-        var thumbEl = document.querySelector('.ytp-cued-thumbnail-overlay-image, .html5-main-video');
-        
-        var data = {
-          isPlaying: !video.paused,
-          currentTime: video.currentTime || 0,
-          duration: video.duration || 0,
-          title: titleEl ? titleEl.textContent.trim().substring(0, 100) : '',
-          channel: channelEl ? channelEl.textContent.trim().substring(0, 100) : '',
-          thumbnail: thumbEl ? (thumbEl.style.backgroundImage || '') : ''
-        };
-        
-        if (window.videoState && window.videoState.postMessage) {
-          window.videoState.postMessage(JSON.stringify(data));
+        if (!document.hidden && video.paused) {
+          wasPlaying = false;
         }
-      }, 500);
+      }, 200);
     })();
   ''';
 
@@ -235,6 +264,15 @@ class YouTubeJS {
     (function() {
       var video = document.querySelector("video");
       if (video) video.play();
+    })();
+  ''';
+
+  static const String toggleScript = '''
+    (function() {
+      var video = document.querySelector("video");
+      if (video) {
+        if (video.paused) video.play(); else video.pause();
+      }
     })();
   ''';
 }

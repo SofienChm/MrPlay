@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 class AudioService {
   static const MethodChannel _channel = MethodChannel('com.mrplay/audio');
+  static const MethodChannel _webViewChannel = MethodChannel('com.mrplay/webview');
 
   static Function(String)? _remoteControlHandler;
 
@@ -29,6 +30,10 @@ class AudioService {
 
   static Future<void> setPlaybackState(bool isPlaying) async {
     await _channel.invokeMethod('setPlaybackState', isPlaying);
+  }
+
+  static Future<void> configureWebView() async {
+    await _webViewChannel.invokeMethod('configureForPlayback');
   }
 
   static void setRemoteControlHandler(Function(String) handler) {

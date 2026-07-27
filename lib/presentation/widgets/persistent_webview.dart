@@ -19,13 +19,21 @@ class PersistentWebViewState extends State<PersistentWebView> {
   bool isMini = false;
   bool isReady = false;
   bool _isLoading = true;
+
   VideoInfo? currentVideo;
+  Timer? _videoStateTimer;
 
   @override
   void initState() {
     super.initState();
     _initWebView();
     _initRemoteControls();
+  }
+
+  @override
+  void dispose() {
+    _videoStateTimer?.cancel();
+    super.dispose();
   }
 
   void _initWebView() {
@@ -39,11 +47,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
           },
           onPageFinished: (String url) {
             setState(() => _isLoading = false);
-            if (url.contains('youtube.com')) {
-              controller.runJavaScript(YouTubeJS.inlinePlaybackScript);
-              controller.runJavaScript(YouTubeJS.adBlockScript);
-              controller.runJavaScript(YouTubeJS.backgroundAudioScript);
-            }
+            _injectYouTubeScripts(url);
           },
         ),
       )
@@ -51,6 +55,46 @@ class PersistentWebViewState extends State<PersistentWebView> {
         'videoState',
         onMessageReceived: _onVideoState,
       );
+
+    AudioService.configureWebView();
+  }
+
+  void _injectYouTubeScripts(String url) {
+    if (!url.contains('youtube.com')) return;
+
+    Future.delayed(const Duration(milliseconds: 300), () {
+      controller.runJavaScript(YouTubeJS.inlinePlaybackScript);
+      controller.runJavaScript(YouTubeJS.adBlockScript);
+      controller.runJavaScript(YouTubeJS.backgroundAudioScript);
+    });
+
+    _videoStateTimer?.cancel();
+    _videoStateTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      controller.runJavaScript('''
+        (function() {
+          if (window.videoState && window.videoState.postMessage) {
+            var video = document.querySelector('video');
+            if (video) {
+              var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
+              var channelEl = document.querySelector('.ytd-channel-name a, .slim-owner-channel-name a, #text a');
+              var thumbEl = document.querySelector('.ytp-cued-thumbnail-overlay-image, .html5-main-video');
+              window.videoState.postMessage(JSON.stringify({
+                isPlaying: !video.paused,
+                currentTime: video.currentTime || 0,
+                duration: video.duration || 0,
+                title: titleEl ? titleEl.textContent.trim().substring(0, 100) : '',
+                channel: channelEl ? channelEl.textContent.trim().substring(0, 100) : '',
+                thumbnail: thumbEl ? (thumbEl.style.backgroundImage || '') : ''
+              }));
+            }
+          }
+        })();
+      ''');
+    });
   }
 
   void _initRemoteControls() {
@@ -63,14 +107,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
           controller.runJavaScript(YouTubeJS.pauseScript);
           break;
         case 'toggle':
-          controller.runJavaScript('''
-            (function() {
-              var video = document.querySelector("video");
-              if (video) {
-                if (video.paused) video.play(); else video.pause();
-              }
-            })();
-          ''');
+          controller.runJavaScript(YouTubeJS.toggleScript);
           break;
       }
     });
@@ -95,6 +132,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
   }
 
   void loadUrl(String url) {
+    _videoStateTimer?.cancel();
     controller.loadRequest(Uri.parse(url));
     setState(() {
       isReady = true;
@@ -112,6 +150,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
   void maximize() => setState(() => isMini = false);
 
   void close() {
+    _videoStateTimer?.cancel();
     controller.loadRequest(Uri.parse('about:blank'));
     setState(() {
       isMini = false;
