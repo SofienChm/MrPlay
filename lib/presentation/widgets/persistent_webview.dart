@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -99,6 +100,11 @@ class PersistentWebViewState extends State<PersistentWebView> {
       isReady = true;
       _isLoading = true;
     });
+    Timer(const Duration(seconds: 5), () {
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    });
   }
 
   void minimize() => setState(() => isMini = true);
@@ -133,29 +139,6 @@ class PersistentWebViewState extends State<PersistentWebView> {
   Widget build(BuildContext context) {
     if (!isReady) return const SizedBox.shrink();
 
-    if (_isLoading && !isMini) {
-      return SizedBox(
-        height: MediaQuery.of(context).size.height,
-        width: double.infinity,
-        child: Stack(
-          children: [
-            Padding(
-              padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
-              child: WebViewWidget(controller: controller),
-            ),
-            Container(
-              color: Colors.black,
-              child: Center(
-                child: CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
     return SizedBox(
       height: isMini ? 70 : MediaQuery.of(context).size.height,
       width: double.infinity,
@@ -171,6 +154,17 @@ class PersistentWebViewState extends State<PersistentWebView> {
               ),
             ),
           ),
+          if (_isLoading && !isMini)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.7),
+                child: Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                  ),
+                ),
+              ),
+            ),
           if (!isMini)
             Positioned(
               top: MediaQuery.of(context).padding.top + 10,
