@@ -95,7 +95,10 @@ class PersistentWebViewState extends State<PersistentWebView> {
 
   void loadUrl(String url) {
     controller.loadRequest(Uri.parse(url));
-    setState(() => isReady = true);
+    setState(() {
+      isReady = true;
+      _isLoading = true;
+    });
   }
 
   void minimize() => setState(() => isMini = true);
@@ -128,17 +131,27 @@ class PersistentWebViewState extends State<PersistentWebView> {
 
   @override
   Widget build(BuildContext context) {
-    if (!isReady || currentVideo == null) return const SizedBox.shrink();
+    if (!isReady) return const SizedBox.shrink();
 
     if (_isLoading && !isMini) {
-      return Container(
+      return SizedBox(
         height: MediaQuery.of(context).size.height,
         width: double.infinity,
-        color: Colors.black,
-        child: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-          ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+              child: WebViewWidget(controller: controller),
+            ),
+            Container(
+              color: Colors.black,
+              child: Center(
+                child: CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                ),
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -174,7 +187,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
                 ),
               ),
             ),
-          if (isMini)
+          if (isMini && currentVideo != null)
             Positioned(
               left: 0,
               right: 0,
