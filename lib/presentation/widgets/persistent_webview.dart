@@ -1,16 +1,20 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/constants/youtube_js.dart';
+import '../../models/video.dart';
+import '../../providers/player_provider.dart';
 
-class PersistentWebView extends StatefulWidget {
+class PersistentWebView extends ConsumerStatefulWidget {
   const PersistentWebView({super.key});
 
   @override
-  State<PersistentWebView> createState() => PersistentWebViewState();
+  ConsumerState<PersistentWebView> createState() => PersistentWebViewState();
 }
 
-class PersistentWebViewState extends State<PersistentWebView> {
+class PersistentWebViewState extends ConsumerState<PersistentWebView> {
   late final WebViewController controller;
   bool isReady = false;
   bool _isLoading = false;
@@ -50,12 +54,70 @@ class PersistentWebViewState extends State<PersistentWebView> {
             if (mounted) {
               setState(() => _isLoading = false);
             }
-            if (url.contains('youtube.com')) {
-              controller.runJavaScript(YouTubeJS.adBlockScript);
-            }
+            _onPageLoaded(url);
           },
         ),
-      );
+      )
+      ..addJavaScriptChannel('playerInfo', onMessageReceived: _onPlayerInfo);
+  }
+
+  void _onPageLoaded(String url) {
+    if (url.contains('youtube.com')) {
+      controller.runJavaScript(YouTubeJS.adBlockScript);
+
+      if (url.contains('/watch')) {
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          controller.runJavaScript('''
+            (function() {
+              var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
+              var thumbEl = document.querySelector('.ytp-cued-thumbnail-overlay-image, .html5-main-video');
+              var videoId = window.location.search.match(/[?&]v=([^&]+)/);
+              var thumbUrl = '';
+              if (videoId) {
+                thumbUrl = 'https://i.ytimg.com/vi/' + videoId[1] + '/hqdefault.jpg';
+              } else if (thumbEl) {
+                var bg = thumbEl.style.backgroundImage;
+                if (bg) {
+                  var match = bg.match(/url\\("?(.+?)"?\\)/);
+                  if (match) thumbUrl = match[1];
+                }
+              }
+              var title = titleEl ? titleEl.textContent.trim().substring(0, 200) : '';
+              if (title && window.playerInfo && window.playerInfo.postMessage) {
+                window.playerInfo.postMessage(JSON.stringify({
+                  id: videoId ? videoId[1] : '',
+                  title: title,
+                  thumbnailUrl: thumbUrl,
+                  videoUrl: window.location.href,
+                  platform: 'YouTube'
+                }));
+              }
+            })();
+          ''');
+        });
+      }
+    }
+  }
+
+  void _onPlayerInfo(JavaScriptMessage message) {
+    try {
+      final data = jsonDecode(message.message) as Map<String, dynamic>;
+      final title = data['title'] as String? ?? '';
+      if (title.isNotEmpty) {
+        final video = Video(
+          id: data['id'] ?? '',
+          title: title,
+          thumbnailUrl: data['thumbnailUrl'] ?? '',
+          videoUrl: data['videoUrl'] ?? '',
+          platform: data['platform'] ?? 'YouTube',
+        );
+        // TODO: Replace WebView playback with native video_player in Phase 2
+        final currentId = ref.read(playerProvider).currentVideo?.id;
+        if (currentId != video.id) {
+          ref.read(playerProvider.notifier).play(video);
+        }
+      }
+    } catch (_) {}
   }
 
   void loadUrl(String url) {

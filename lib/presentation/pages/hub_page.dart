@@ -4,11 +4,18 @@ import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/platform_model.dart';
 import '../widgets/platform_card.dart';
-import '../router/app_router.dart';
+import '../pages/search_page.dart';
 import '../../app.dart';
 
 class HubPage extends StatefulWidget {
-  const HubPage({super.key});
+  final VoidCallback? onNavigateToFavorites;
+  final VoidCallback? onNavigateToSettings;
+
+  const HubPage({
+    super.key,
+    this.onNavigateToFavorites,
+    this.onNavigateToSettings,
+  });
 
   @override
   State<HubPage> createState() => _HubPageState();
@@ -87,16 +94,25 @@ class _HubPageState extends State<HubPage> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     IconButton(
-                      icon: const Icon(Icons.settings, color: Colors.white),
+                      icon: const Icon(Icons.search, color: Colors.white),
                       onPressed: () {
-                        Navigator.pushNamed(context, AppRouter.settings);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const SearchPage()),
+                        );
                       },
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.favorite, color: Colors.white),
-                      onPressed: () {
-                        Navigator.pushNamed(context, AppRouter.favorites);
-                      },
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.favorite, color: Colors.white),
+                          onPressed: widget.onNavigateToFavorites,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.settings, color: Colors.white),
+                          onPressed: widget.onNavigateToSettings,
+                        ),
+                      ],
                     ),
                   ],
                 ),
