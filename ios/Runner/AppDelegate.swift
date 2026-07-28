@@ -49,76 +49,11 @@ import WebKit
         result(FlutterMethodNotImplemented)
       }
     }
-
-    let webviewChannel = FlutterMethodChannel(
-      name: "com.mrplay/webview",
-      binaryMessenger: controller.binaryMessenger
-    )
-    
-    webviewChannel.setMethodCallHandler { [weak self] (call, result) in
-      switch call.method {
-      case "configureForPlayback":
-        self?.configureWKWebViewForPlayback()
-        result(nil)
-      case "configureForBackground":
-        self?.configureWKWebViewForBackground()
-        result(nil)
-      default:
-        result(FlutterMethodNotImplemented)
-      }
-    }
     
     self.setupRemoteControls()
     
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
-  }
-  
-  func findWKWebView(in view: UIView) -> WKWebView? {
-    if let webView = view as? WKWebView {
-      return webView
-    }
-    for subview in view.subviews {
-      if let found = findWKWebView(in: subview) {
-        return found
-      }
-    }
-    return nil
-  }
-  
-  func configureWKWebViewForPlayback() {
-    guard let webView = findWKWebView(in: self.window ?? UIView()) else {
-      print("MrPlay: WKWebView not found, retrying in 0.5s")
-      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-        self?.configureWKWebViewForPlayback()
-      }
-      return
-    }
-    
-    let config = webView.configuration
-    config.allowsInlineMediaPlayback = true
-    if #available(iOS 15.0, *) {
-      config.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypes(rawValue: 0)
-    } else {
-      config.mediaTypesRequiringUserActionForPlayback = []
-    }
-    config.allowsAirPlayForMediaPlayback = true
-    
-    webView.allowsBackForwardNavigationGestures = true
-    
-    print("MrPlay: WKWebView configured for inline + background playback")
-  }
-  
-  func configureWKWebViewForBackground() {
-    guard let webView = findWKWebView(in: self.window ?? UIView()) else {
-      return
-    }
-    webView.configuration.allowsInlineMediaPlayback = true
-    if #available(iOS 15.0, *) {
-      webView.configuration.mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypes(rawValue: 0)
-    } else {
-      webView.configuration.mediaTypesRequiringUserActionForPlayback = []
-    }
   }
   
   func enableBackgroundAudio() {

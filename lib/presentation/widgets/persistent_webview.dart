@@ -49,15 +49,12 @@ class PersistentWebViewState extends State<PersistentWebView> {
         'videoState',
         onMessageReceived: _onVideoState,
       );
-
-    AudioService.configureWebView();
   }
 
   void _injectYouTubeScripts(String url) {
     if (!url.contains('youtube.com')) return;
 
     Future.delayed(const Duration(milliseconds: 300), () {
-      controller.runJavaScript(YouTubeJS.inlinePlaybackScript);
       controller.runJavaScript(YouTubeJS.adBlockScript);
       controller.runJavaScript(YouTubeJS.backgroundAudioScript);
     });
