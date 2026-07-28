@@ -63,23 +63,7 @@ class _HubPageState extends State<HubPage> {
   }
 
   void _onPlatformTap(PlatformModel platform) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-        ),
-      ),
-    );
-
     MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
-
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (mounted && Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
-    });
   }
 
   @override
