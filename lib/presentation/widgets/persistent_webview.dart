@@ -19,9 +19,10 @@ class PersistentWebViewState extends State<PersistentWebView> {
   bool isMini = false;
   bool isReady = false;
   bool _isLoading = true;
-
+  String _currentUrl = '';
   VideoInfo? currentVideo;
   Timer? _videoStateTimer;
+  Timer? _loadingTimer;
 
   @override
   void initState() {
@@ -33,6 +34,7 @@ class PersistentWebViewState extends State<PersistentWebView> {
   @override
   void dispose() {
     _videoStateTimer?.cancel();
+    _loadingTimer?.cancel();
     super.dispose();
   }
 
@@ -43,10 +45,24 @@ class PersistentWebViewState extends State<PersistentWebView> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) {
-            setState(() => _isLoading = true);
+            if (url != _currentUrl) {
+              setState(() {
+                _isLoading = true;
+                _currentUrl = url;
+              });
+              _loadingTimer?.cancel();
+              _loadingTimer = Timer(const Duration(seconds: 3), () {
+                if (mounted && _isLoading) {
+                  setState(() => _isLoading = false);
+                }
+              });
+            }
           },
           onPageFinished: (String url) {
-            setState(() => _isLoading = false);
+            _loadingTimer?.cancel();
+            if (mounted) {
+              setState(() => _isLoading = false);
+            }
             _injectYouTubeScripts(url);
           },
         ),
@@ -133,12 +149,14 @@ class PersistentWebViewState extends State<PersistentWebView> {
 
   void loadUrl(String url) {
     _videoStateTimer?.cancel();
+    _loadingTimer?.cancel();
     controller.loadRequest(Uri.parse(url));
     setState(() {
       isReady = true;
       _isLoading = true;
+      _currentUrl = url;
     });
-    Timer(const Duration(seconds: 5), () {
+    _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted && _isLoading) {
         setState(() => _isLoading = false);
       }
@@ -151,11 +169,14 @@ class PersistentWebViewState extends State<PersistentWebView> {
 
   void close() {
     _videoStateTimer?.cancel();
+    _loadingTimer?.cancel();
     controller.loadRequest(Uri.parse('about:blank'));
     setState(() {
       isMini = false;
       isReady = false;
+      _isLoading = false;
       currentVideo = null;
+      _currentUrl = '';
     });
   }
 
@@ -194,11 +215,20 @@ class PersistentWebViewState extends State<PersistentWebView> {
             ),
           ),
           if (_isLoading && !isMini)
-            Positioned.fill(
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 60,
+              right: 16,
               child: Container(
-                color: Colors.black.withValues(alpha: 0.7),
-                child: Center(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: const SizedBox(
+                  width: 20,
+                  height: 20,
                   child: CircularProgressIndicator(
+                    strokeWidth: 2,
                     valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
                   ),
                 ),
