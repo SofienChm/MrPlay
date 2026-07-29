@@ -18,7 +18,7 @@
     <string>Apple Distribution</string>
     <key>provisioningProfiles</key>
     <dict>
-        <key>com.mrplay.mrplay</key>
+        <key>com.mrplay.app</key>
         <string>MrPlay App Store</string>
     </dict>
 </dict>

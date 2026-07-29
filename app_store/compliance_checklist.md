@@ -20,7 +20,7 @@
 ### 🔧 Technical Checks
 - [ ] UIBackgroundModes includes "audio" in Info.plist
 - [ ] NSAppTransportSecurity allows arbitrary loads (for multi-platform WebView)
-- [ ] Bundle identifier matches App Store Connect: com.mrplay.mrplay
+- [ ] Bundle identifier matches App Store Connect: com.mrplay.app
 - [ ] Version and build number are correct
 - [ ] All dependencies are up to date
 - [ ] App builds successfully with `flutter build ios --release`
