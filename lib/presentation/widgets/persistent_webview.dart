@@ -135,10 +135,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
   }
 
   Widget _buildFullWebView() {
-    return Padding(
-      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
-      child: WebViewWidget(controller: controller),
-    );
+    return WebViewWidget(controller: controller);
   }
 
   @override
@@ -153,7 +150,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
           _buildFullWebView(),
           if (_isLoading)
             Positioned(
-              top: MediaQuery.of(context).padding.top + 60,
+              top: 60,
               right: 16,
               child: Container(
                 padding: const EdgeInsets.all(8),
@@ -172,7 +169,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
               ),
             ),
           Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
+            top: 10,
             left: 10,
             child: GestureDetector(
               onTap: () {

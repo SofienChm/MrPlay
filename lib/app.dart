@@ -38,27 +38,29 @@ class _MrPlayAppState extends State<MrPlayApp> {
           darkTheme: AppTheme.darkTheme,
           themeMode: themeMode,
           home: Scaffold(
-            body: Stack(
-              children: [
-                IndexedStack(
-                  index: _currentTab,
-                  children: [
-                    HubPage(
-                      onNavigateToFavorites: () => setState(() => _currentTab = 1),
-                      onNavigateToSettings: () => setState(() => _currentTab = 2),
-                    ),
-                    const FavoritesPage(),
-                    const SettingsPage(),
-                  ],
-                ),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: PersistentWebView(key: MrPlayApp.webViewKey),
-                ),
-                const PersistentPlayerShell(),
-              ],
+            body: SafeArea(
+              child: Stack(
+                children: [
+                  IndexedStack(
+                    index: _currentTab,
+                    children: [
+                      HubPage(
+                        onNavigateToFavorites: () => setState(() => _currentTab = 1),
+                        onNavigateToSettings: () => setState(() => _currentTab = 2),
+                      ),
+                      const FavoritesPage(),
+                      const SettingsPage(),
+                    ],
+                  ),
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: PersistentWebView(key: MrPlayApp.webViewKey),
+                  ),
+                  const PersistentPlayerShell(),
+                ],
+              ),
             ),
             bottomNavigationBar: BottomNavigationBar(
               currentIndex: _currentTab,
