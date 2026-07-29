@@ -1,5 +1,6 @@
 import UIKit
 import Flutter
+import AVFoundation
 import WebKit
 
 @UIApplicationMain
@@ -8,6 +9,12 @@ import WebKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    do {
+      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
+      try AVAudioSession.sharedInstance().setActive(true)
+    } catch {
+      print("MrPlay: AVAudioSession error: \(error)")
+    }
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
