@@ -1,0 +1,42 @@
+workflows:
+  ios-release:
+    name: iOS Release
+    instance_type: mac_mini_m1
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+    cache:
+      cache_paths:
+        - ~/.pub-cache
+        - ~/Library/Caches/CocoaPods
+    scripts:
+      - name: Flutter doctor
+        script: flutter doctor
+      - name: Get dependencies
+        script: flutter pub get
+      - name: Pod install
+        script: cd ios && pod install
+      - name: Build iOS
+        script: flutter build ios --release --no-codesign
+      - name: Build archive
+        script: |
+          cd ios
+          xcodebuild archive \
+            -workspace Runner.xcworkspace \
+            -scheme Runner \
+            -archivePath build/Runner.xcarchive
+      - name: Export IPA
+        script: |
+          cd ios
+          xcodebuild -exportArchive \
+            -archivePath build/Runner.xcarchive \
+            -exportPath build/Runner.ipa \
+            -exportOptionsPlist ExportOptions.plist
+    artifacts:
+      - build/Runner.ipa
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_KEY
+        key_id: $APP_STORE_CONNECT_KEY_ID
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
