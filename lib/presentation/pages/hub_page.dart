@@ -8,14 +8,7 @@ import '../pages/search_page.dart';
 import '../../app.dart';
 
 class HubPage extends StatefulWidget {
-  final VoidCallback? onNavigateToFavorites;
-  final VoidCallback? onNavigateToSettings;
-
-  const HubPage({
-    super.key,
-    this.onNavigateToFavorites,
-    this.onNavigateToSettings,
-  });
+  const HubPage({super.key});
 
   @override
   State<HubPage> createState() => _HubPageState();
@@ -106,11 +99,11 @@ class _HubPageState extends State<HubPage> {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.favorite, color: Colors.white),
-                          onPressed: widget.onNavigateToFavorites,
+                          onPressed: null,
                         ),
                         IconButton(
                           icon: const Icon(Icons.settings, color: Colors.white),
-                          onPressed: widget.onNavigateToSettings,
+                          onPressed: null,
                         ),
                       ],
                     ),
