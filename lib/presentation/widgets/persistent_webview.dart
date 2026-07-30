@@ -163,93 +163,83 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: isReady ? MediaQuery.of(context).size.height : 0,
-      width: double.infinity,
-      child: Stack(
-        children: [
-          Opacity(
-            opacity: isReady ? 1.0 : 0.0,
-            child: IgnorePointer(
-              ignoring: !isReady,
-              child: InAppWebView(
-                initialSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  allowsInlineMediaPlayback: true,
-                  mediaPlaybackRequiresUserGesture: false,
-                  allowBackgroundAudioPlaying: true,
-                  allowsPictureInPictureMediaPlayback: true,
-                  allowsAirPlayForMediaPlayback: true,
-                  isFraudulentWebsiteWarningEnabled: false,
+    if (!isReady) return const SizedBox.shrink();
+
+    return Stack(
+      children: [
+        InAppWebView(
+          initialSettings: InAppWebViewSettings(
+            javaScriptEnabled: true,
+            allowsInlineMediaPlayback: true,
+            mediaPlaybackRequiresUserGesture: false,
+            allowBackgroundAudioPlaying: true,
+            allowsPictureInPictureMediaPlayback: true,
+            allowsAirPlayForMediaPlayback: true,
+            isFraudulentWebsiteWarningEnabled: false,
+          ),
+          onWebViewCreated: _onWebViewCreated,
+          onLoadStart: _onLoadStart,
+          onLoadStop: _onLoadStop,
+        ),
+        if (_isLoading)
+          Positioned(
+            top: 60,
+            right: 16,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
                 ),
-                onWebViewCreated: _onWebViewCreated,
-                onLoadStart: _onLoadStart,
-                onLoadStop: _onLoadStop,
               ),
             ),
           ),
-          if (_isLoading && isReady)
-            Positioned(
-              top: 60,
-              right: 16,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
-                  ),
-                ),
+        Positioned(
+          top: 10,
+          left: 10,
+          child: GestureDetector(
+            onTap: () {
+              _webViewController?.loadUrl(
+                urlRequest: URLRequest(url: WebUri('about:blank')),
+              );
+              setState(() {
+                isReady = false;
+                _isLoading = false;
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
               ),
+              child: const Icon(Icons.close, color: Colors.white, size: 24),
             ),
-          if (isReady)
-            Positioned(
-              top: 10,
-              left: 10,
-              child: GestureDetector(
-                onTap: () {
-                  _webViewController?.loadUrl(
-                    urlRequest: URLRequest(url: WebUri('about:blank')),
-                  );
-                  setState(() {
-                    isReady = false;
-                    _isLoading = false;
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(Icons.close, color: Colors.white, size: 24),
-                ),
+          ),
+        ),
+        Positioned(
+          bottom: 80,
+          right: 16,
+          child: GestureDetector(
+            onTap: _togglePiP,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
               ),
+              child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
             ),
-          if (isReady)
-            Positioned(
-              bottom: 80,
-              right: 16,
-              child: GestureDetector(
-                onTap: _togglePiP,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
-                ),
-              ),
-            ),
-        ],
-      ),
+          ),
+        ),
+      ],
     );
   }
 }

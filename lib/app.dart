@@ -37,10 +37,7 @@ class _MrPlayAppState extends State<MrPlayApp> {
             body: Stack(
               children: [
                 const HubPage(),
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
+                Positioned.fill(
                   child: PersistentWebView(key: MrPlayApp.webViewKey),
                 ),
                 const PersistentPlayerShell(),
