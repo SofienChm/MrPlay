@@ -34,19 +34,17 @@ class _MrPlayAppState extends State<MrPlayApp> {
           darkTheme: AppTheme.darkTheme,
           themeMode: themeMode,
           home: Scaffold(
-            body: SafeArea(
-              child: Stack(
-                children: [
-                  const HubPage(),
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: PersistentWebView(key: MrPlayApp.webViewKey),
-                  ),
-                  const PersistentPlayerShell(),
-                ],
-              ),
+            body: Stack(
+              children: [
+                const HubPage(),
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: PersistentWebView(key: MrPlayApp.webViewKey),
+                ),
+                const PersistentPlayerShell(),
+              ],
             ),
           ),
         );
