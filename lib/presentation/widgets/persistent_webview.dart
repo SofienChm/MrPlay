@@ -13,16 +13,47 @@ class PersistentWebView extends ConsumerStatefulWidget {
   ConsumerState<PersistentWebView> createState() => PersistentWebViewState();
 }
 
-class PersistentWebViewState extends ConsumerState<PersistentWebView> {
+class PersistentWebViewState extends ConsumerState<PersistentWebView>
+    with WidgetsBindingObserver {
   InAppWebViewController? _webViewController;
   bool isReady = false;
   bool _isLoading = false;
   Timer? _loadingTimer;
 
+  static const String _prepareVideoScript = '''
+(function() {
+  var videos = document.querySelectorAll('video');
+  videos.forEach(function(v) {
+    v.setAttribute('playsinline', 'true');
+    v.setAttribute('webkit-playsinline', 'true');
+    v.setAttribute('pip', 'true');
+    v.style.objectFit = 'contain';
+  });
+})();
+''';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _prepareVideo();
+    }
+  }
+
+  Future<void> _prepareVideo() async {
+    await _webViewController?.evaluateJavascript(source: _prepareVideoScript);
   }
 
   void _onWebViewCreated(InAppWebViewController controller) {
@@ -52,6 +83,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
     final urlStr = url.toString();
     if (urlStr.contains('youtube.com')) {
       await controller.evaluateJavascript(source: YouTubeJS.adBlockScript);
+      await _prepareVideo();
 
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {

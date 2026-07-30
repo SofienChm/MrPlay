@@ -9,7 +9,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final session = await AudioSession.instance;
-  await session.configure(const AudioSessionConfiguration.music());
+  await session.configure(const AudioSessionConfiguration(
+    avAudioSessionCategory: AVAudioSessionCategory.playback,
+    avAudioSessionMode: AVAudioSessionMode.moviePlayback,
+    avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
+  ));
 
   await Hive.initFlutter();
   Hive.registerAdapter(FavoriteVideoAdapter());
