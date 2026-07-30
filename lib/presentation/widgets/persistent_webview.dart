@@ -1,8 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../core/constants/youtube_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
@@ -15,16 +14,10 @@ class PersistentWebView extends ConsumerStatefulWidget {
 }
 
 class PersistentWebViewState extends ConsumerState<PersistentWebView> {
-  late final WebViewController controller;
+  InAppWebViewController? _webViewController;
   bool isReady = false;
   bool _isLoading = false;
   Timer? _loadingTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _initWebView();
-  }
 
   @override
   void dispose() {
@@ -32,65 +25,49 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
     super.dispose();
   }
 
-  void _initWebView() {
-    controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0x00000000))
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (_) {
-            if (mounted) {
-              setState(() => _isLoading = true);
-            }
-            _loadingTimer?.cancel();
-            _loadingTimer = Timer(const Duration(seconds: 3), () {
-              if (mounted) {
-                setState(() => _isLoading = false);
-              }
-            });
-          },
-          onPageFinished: (String url) {
-            _loadingTimer?.cancel();
-            if (mounted) {
-              setState(() => _isLoading = false);
-            }
-            _onPageLoaded(url);
-          },
-        ),
-      )
-      ..addJavaScriptChannel('playerInfo', onMessageReceived: _onPlayerInfo);
+  void _onWebViewCreated(InAppWebViewController controller) {
+    _webViewController = controller;
+    controller.addJavaScriptHandler(
+      handlerName: 'playerInfo',
+      callback: (args) {
+        if (args.isNotEmpty && args.first is Map) {
+          _onPlayerInfo(args.first as Map<String, dynamic>);
+        }
+      },
+    );
   }
 
-  void _onPageLoaded(String url) {
-    if (url.contains('youtube.com')) {
-      controller.runJavaScript(YouTubeJS.adBlockScript);
+  void _onLoadStart(InAppWebViewController controller, WebUri? url) {
+    if (mounted) setState(() => _isLoading = true);
+    _loadingTimer?.cancel();
+    _loadingTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _isLoading = false);
+    });
+  }
 
-      if (url.contains('/watch')) {
-        Future.delayed(const Duration(milliseconds: 1500), () {
-          controller.runJavaScript('''
+  Future<void> _onLoadStop(InAppWebViewController controller, WebUri? url) async {
+    _loadingTimer?.cancel();
+    if (mounted) setState(() => _isLoading = false);
+
+    final urlStr = url.toString();
+    if (urlStr.contains('youtube.com')) {
+      await controller.evaluateJavascript(source: YouTubeJS.adBlockScript);
+
+      if (urlStr.contains('/watch')) {
+        Future.delayed(const Duration(milliseconds: 1500), () async {
+          await controller.evaluateJavascript(source: '''
             (function() {
               var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
-              var thumbEl = document.querySelector('.ytp-cued-thumbnail-overlay-image, .html5-main-video');
               var videoId = window.location.search.match(/[?&]v=([^&]+)/);
-              var thumbUrl = '';
-              if (videoId) {
-                thumbUrl = 'https://i.ytimg.com/vi/' + videoId[1] + '/hqdefault.jpg';
-              } else if (thumbEl) {
-                var bg = thumbEl.style.backgroundImage;
-                if (bg) {
-                  var match = bg.match(/url\\("?(.+?)"?\\)/);
-                  if (match) thumbUrl = match[1];
-                }
-              }
               var title = titleEl ? titleEl.textContent.trim().substring(0, 200) : '';
-              if (title && window.playerInfo && window.playerInfo.postMessage) {
-                window.playerInfo.postMessage(JSON.stringify({
+              if (title && window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+                window.flutter_inappwebview.callHandler('playerInfo', {
                   id: videoId ? videoId[1] : '',
                   title: title,
-                  thumbnailUrl: thumbUrl,
+                  thumbnailUrl: videoId ? 'https://i.ytimg.com/vi/' + videoId[1] + '/hqdefault.jpg' : '',
                   videoUrl: window.location.href,
                   platform: 'YouTube'
-                }));
+                });
               }
             })();
           ''');
@@ -99,9 +76,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
     }
   }
 
-  void _onPlayerInfo(JavaScriptMessage message) {
+  void _onPlayerInfo(Map<String, dynamic> data) {
     try {
-      final data = jsonDecode(message.message) as Map<String, dynamic>;
       final title = data['title'] as String? ?? '';
       if (title.isNotEmpty) {
         final video = Video(
@@ -111,7 +87,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
           videoUrl: data['videoUrl'] ?? '',
           platform: data['platform'] ?? 'YouTube',
         );
-        // TODO: Replace WebView playback with native video_player in Phase 2
         final currentId = ref.read(playerProvider).currentVideo?.id;
         if (currentId != video.id) {
           ref.read(playerProvider.notifier).play(video);
@@ -122,33 +97,66 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
 
   void loadUrl(String url) {
     _loadingTimer?.cancel();
-    controller.loadRequest(Uri.parse(url));
+    _webViewController?.loadUrl(
+      urlRequest: URLRequest(url: WebUri(url)),
+    );
     setState(() {
       isReady = true;
       _isLoading = true;
     });
     _loadingTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      if (mounted) setState(() => _isLoading = false);
     });
   }
 
-  Widget _buildFullWebView() {
-    return WebViewWidget(controller: controller);
+  void _togglePiP() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = document.querySelector('video');
+        if (!video) return;
+        if (video.requestPictureInPicture) {
+          if (document.pictureInPictureElement) {
+            document.exitPictureInPicture().catch(function(){});
+          } else {
+            video.requestPictureInPicture().catch(function(){});
+          }
+        } else if (video.webkitSetPresentationMode) {
+          video.webkitSetPresentationMode(
+            video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
+          );
+        }
+      })();
+    ''');
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!isReady) return const SizedBox.shrink();
-
     return SizedBox(
-      height: MediaQuery.of(context).size.height,
+      height: isReady ? MediaQuery.of(context).size.height : 0,
       width: double.infinity,
       child: Stack(
         children: [
-          _buildFullWebView(),
-          if (_isLoading)
+          Opacity(
+            opacity: isReady ? 1.0 : 0.0,
+            child: IgnorePointer(
+              ignoring: !isReady,
+              child: InAppWebView(
+                initialSettings: InAppWebViewSettings(
+                  javaScriptEnabled: true,
+                  allowsInlineMediaPlayback: true,
+                  mediaPlaybackRequiresUserGesture: false,
+                  allowBackgroundAudioPlaying: true,
+                  allowsPictureInPictureMediaPlayback: true,
+                  allowsAirPlayForMediaPlayback: true,
+                  isFraudulentWebsiteWarningEnabled: false,
+                ),
+                onWebViewCreated: _onWebViewCreated,
+                onLoadStart: _onLoadStart,
+                onLoadStop: _onLoadStop,
+              ),
+            ),
+          ),
+          if (_isLoading && isReady)
             Positioned(
               top: 60,
               right: 16,
@@ -168,27 +176,46 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView> {
                 ),
               ),
             ),
-          Positioned(
-            top: 10,
-            left: 10,
-            child: GestureDetector(
-              onTap: () {
-                controller.loadRequest(Uri.parse('about:blank'));
-                setState(() {
-                  isReady = false;
-                  _isLoading = false;
-                });
-              },
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.black54,
-                  borderRadius: BorderRadius.circular(20),
+          if (isReady)
+            Positioned(
+              top: 10,
+              left: 10,
+              child: GestureDetector(
+                onTap: () {
+                  _webViewController?.loadUrl(
+                    urlRequest: URLRequest(url: WebUri('about:blank')),
+                  );
+                  setState(() {
+                    isReady = false;
+                    _isLoading = false;
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white, size: 24),
                 ),
-                child: const Icon(Icons.close, color: Colors.white, size: 24),
               ),
             ),
-          ),
+          if (isReady)
+            Positioned(
+              bottom: 80,
+              right: 16,
+              child: GestureDetector(
+                onTap: _togglePiP,
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
+                ),
+              ),
+            ),
         ],
       ),
     );
