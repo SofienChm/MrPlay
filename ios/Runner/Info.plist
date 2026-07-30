@@ -56,5 +56,7 @@
 		</dict>
 		<key>UIStatusBarHidden</key>
 		<false/>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>MrPlay uses microphone access only for in-app video features. Your microphone is never used without your interaction.</string>
 	</dict>
 </plist>
