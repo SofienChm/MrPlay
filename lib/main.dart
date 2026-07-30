@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'app.dart';
 import 'data/models/favorite_video.dart';
 
@@ -14,6 +15,8 @@ void main() async {
     avAudioSessionMode: AVAudioSessionMode.moviePlayback,
     avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
   ));
+
+  await MobileAds.instance.initialize();
 
   await Hive.initFlutter();
   Hive.registerAdapter(FavoriteVideoAdapter());

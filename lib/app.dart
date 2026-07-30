@@ -4,6 +4,7 @@ import 'core/theme/app_theme.dart';
 import 'presentation/pages/hub_page.dart';
 import 'presentation/widgets/persistent_webview.dart';
 import 'widgets/persistent_player_shell.dart';
+import 'widgets/unified_banner_ad_slot.dart';
 
 class MrPlayApp extends StatefulWidget {
   const MrPlayApp({super.key});
@@ -41,6 +42,12 @@ class _MrPlayAppState extends State<MrPlayApp> {
                   child: PersistentWebView(key: MrPlayApp.webViewKey),
                 ),
                 const PersistentPlayerShell(),
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: UnifiedBannerAdSlot(),
+                ),
               ],
             ),
           ),
