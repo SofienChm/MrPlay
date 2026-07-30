@@ -18,6 +18,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   InAppWebViewController? _webViewController;
   bool isReady = false;
   bool _isLoading = false;
+  String? _pendingUrl;
   Timer? _loadingTimer;
 
   static const String _prepareVideoScript = '''
@@ -66,6 +67,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       },
     );
+    if (_pendingUrl != null) {
+      controller.loadUrl(
+        urlRequest: URLRequest(url: WebUri(_pendingUrl!)),
+      );
+      _pendingUrl = null;
+    }
   }
 
   void _onLoadStart(InAppWebViewController controller, WebUri? url) {
@@ -129,9 +136,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void loadUrl(String url) {
     _loadingTimer?.cancel();
-    _webViewController?.loadUrl(
-      urlRequest: URLRequest(url: WebUri(url)),
-    );
+    _pendingUrl = url;
+    if (_webViewController != null) {
+      _webViewController!.loadUrl(
+        urlRequest: URLRequest(url: WebUri(url)),
+      );
+    }
     setState(() {
       isReady = true;
       _isLoading = true;
