@@ -25,6 +25,10 @@ class AudioService {
     await _channel.invokeMethod('setPlaybackState', isPlaying);
   }
 
+  static Future<void> togglePiP() async {
+    await _channel.invokeMethod('togglePiP');
+  }
+
   static void setRemoteControlHandler(Function(String) handler) {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'remoteControlEvent') {

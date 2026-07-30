@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../../core/constants/youtube_js.dart';
+import '../../core/constants/app_constants.dart' show PiPState;
 import '../../data/models/video_model.dart';
 
 class MiniPlayerWidget extends StatelessWidget {
@@ -10,6 +11,8 @@ class MiniPlayerWidget extends StatelessWidget {
   final WebViewController controller;
   final bool isFavorite;
   final VoidCallback? onToggleFavorite;
+  final PiPState pipState;
+  final VoidCallback? onPiPToggle;
 
   const MiniPlayerWidget({
     super.key,
@@ -19,10 +22,14 @@ class MiniPlayerWidget extends StatelessWidget {
     required this.controller,
     this.isFavorite = false,
     this.onToggleFavorite,
+    this.pipState = PiPState.none,
+    this.onPiPToggle,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isInPiP = pipState == PiPState.active;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -31,13 +38,25 @@ class MiniPlayerWidget extends StatelessWidget {
           color: Colors.black87,
           border: Border(
             top: BorderSide(
-              color: Colors.grey.shade800,
-              width: 0.5,
+              color: isInPiP ? const Color(0xFF00C853) : Colors.grey.shade800,
+              width: isInPiP ? 1.5 : 0.5,
             ),
           ),
         ),
         child: Row(
           children: [
+            // PiP indicator when in PiP mode
+            if (isInPiP)
+              Container(
+                width: 36,
+                height: 70,
+                color: const Color(0xFF00C853).withValues(alpha: 0.1),
+                child: const Icon(
+                  Icons.picture_in_picture_alt,
+                  color: Color(0xFF00C853),
+                  size: 20,
+                ),
+              ),
             // Thumbnail
             Container(
               width: 120,
@@ -73,15 +92,21 @@ class MiniPlayerWidget extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    video.channel.isNotEmpty ? video.channel : 'Unknown',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
+                  if (isInPiP)
+                    const Text(
+                      'PiP mode • Tap to expand',
+                      style: TextStyle(color: Color(0xFF00C853), fontSize: 11),
+                    )
+                  else
+                    Text(
+                      video.channel.isNotEmpty ? video.channel : 'Unknown',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.grey,
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 4),
                   // Seek bar
                   if (video.duration > 0)
@@ -101,6 +126,17 @@ class MiniPlayerWidget extends StatelessWidget {
                 ],
               ),
             ),
+            // PiP toggle (exit PiP when in PiP mode)
+            if (onPiPToggle != null)
+              IconButton(
+                icon: const Icon(
+                  Icons.fullscreen,
+                  color: Color(0xFF00C853),
+                  size: 20,
+                ),
+                onPressed: onPiPToggle,
+                tooltip: 'Exit PiP',
+              ),
             // Favorite toggle
             if (video.title.isNotEmpty)
               IconButton(
@@ -110,7 +146,9 @@ class MiniPlayerWidget extends StatelessWidget {
                   size: 20,
                 ),
                 onPressed: onToggleFavorite,
-                tooltip: isFavorite ? 'Remove from favorites' : 'Add to favorites',
+                tooltip: isFavorite
+                    ? 'Remove from favorites'
+                    : 'Add to favorites',
               ),
             // Play/Pause
             IconButton(

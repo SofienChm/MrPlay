@@ -40,6 +40,9 @@ import MediaPlayer
           self?.setPlaybackState(isPlaying: isPlaying)
         }
         result(nil)
+      case "togglePiP":
+        self?.togglePiP()
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -124,6 +127,14 @@ import MediaPlayer
 
     commandCenter.nextTrackCommand.isEnabled = false
     commandCenter.previousTrackCommand.isEnabled = false
+  }
+
+  func togglePiP() {
+    // WKWebView handles PiP natively when allowsPictureInPictureMediaPlayback is true.
+    // This method is reserved for future native PiP integration.
+    // On iOS 14+, WKWebView automatically allows PiP for HTML5 video.
+    // The JS-side PiP invocation is handled via enterMiniPlayerScript.
+    print("PiP toggled from Flutter")
   }
 
   func sendCommandToFlutter(_ command: String) {

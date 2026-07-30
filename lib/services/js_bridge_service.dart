@@ -29,7 +29,7 @@ class JsBridgeService {
   }
 
   Future<void> injectYouTubeAdBlock() async {
-    await controller.runJavaScript(YouTubeJS.adBlockScript);
+    await controller.runJavaScript(YouTubeJS.videoControlScript);
   }
 
   Future<void> pause() async {

@@ -1,3 +1,5 @@
+enum PiPState { none, entering, active }
+
 class AppConstants {
   static const String appName = 'MrPlay';
   static const String appVersion = '1.0.0';
