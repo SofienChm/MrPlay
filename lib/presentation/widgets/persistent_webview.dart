@@ -177,7 +177,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
     return Stack(
       children: [
-        InAppWebView(
+        Positioned.fill(
+          child: InAppWebView(
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
             allowsInlineMediaPlayback: true,
@@ -190,6 +191,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           onWebViewCreated: _onWebViewCreated,
           onLoadStart: _onLoadStart,
           onLoadStop: _onLoadStop,
+          ),
         ),
         if (_isLoading)
           Positioned(
