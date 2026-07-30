@@ -39,13 +39,15 @@ class _MrPlayAppState extends State<MrPlayApp> {
               children: [
                 const HubPage(),
                 Positioned.fill(
-                  child: PersistentWebView(key: MrPlayApp.webViewKey),
+                  child: SafeArea(
+                    child: PersistentWebView(key: MrPlayApp.webViewKey),
+                  ),
                 ),
                 const PersistentPlayerShell(),
                 const Positioned(
                   left: 0,
                   right: 0,
-                  bottom: 0,
+                  bottom: 80,
                   child: UnifiedBannerAdSlot(),
                 ),
               ],
