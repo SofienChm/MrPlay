@@ -230,8 +230,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          top: 10,
-          left: 10,
+          bottom: 100,
+          right: 16,
+          child: GestureDetector(
+            onTap: _togglePiP,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: 80,
+          right: 16,
           child: GestureDetector(
             onTap: () {
               _webViewController?.loadUrl(
@@ -249,21 +264,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Icon(Icons.close, color: Colors.white, size: 24),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 80,
-          right: 16,
-          child: GestureDetector(
-            onTap: _togglePiP,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.black54,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
             ),
           ),
         ),
