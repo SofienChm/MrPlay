@@ -45,7 +45,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   void _loadBannerAd() {
     _bannerAd = BannerAd(
       adUnitId: AdConfig.bannerAdUnitId,
-      size: AdSize.banner,
+      size: AdSize.largeBanner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -88,13 +88,14 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       return const SizedBox.shrink();
     }
 
-    return Center(
+    return Padding(
+      padding: const EdgeInsets.only(left: 10),
       child: SizedBox(
-        width: MediaQuery.of(context).size.width * 0.8,
+        width: 320,
+        height: 100,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: Container(
-            height: 70,
             decoration: BoxDecoration(
               color: widget.backgroundColor,
               border: Border.all(color: Colors.white.withAlpha(15), width: 1),
