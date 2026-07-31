@@ -1,4 +1,40 @@
 class YouTubeJS {
+  static const String visibilityKeepAliveScript = '''
+    (function() {
+      try {
+        Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: false });
+        Object.defineProperty(document, 'webkitHidden', { get: function() { return false; }, configurable: false });
+        Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: false });
+        Object.defineProperty(document, 'webkitVisibilityState', { get: function() { return 'visible'; }, configurable: false });
+
+        document.hasFocus = function() { return true; };
+
+        var origAdd = EventTarget.prototype.addEventListener;
+        EventTarget.prototype.addEventListener = function(type, fn, opts) {
+          if (['visibilitychange', 'webkitvisibilitychange', 'pagehide', 'beforeunload', 'blur'].indexOf(type) >= 0) {
+            return;
+          }
+          return origAdd.call(this, type, fn, opts);
+        };
+
+        function prepareVideo(v) {
+          v.setAttribute('playsinline', 'true');
+          v.setAttribute('webkit-playsinline', 'true');
+          v.setAttribute('pip', 'true');
+          v.style.objectFit = 'contain';
+        }
+        document.querySelectorAll('video').forEach(prepareVideo);
+        new MutationObserver(function(mutations) {
+          mutations.forEach(function(m) {
+            m.addedNodes.forEach(function(n) {
+              if (n.nodeName === 'VIDEO') prepareVideo(n);
+            });
+          });
+        }).observe(document.documentElement, { childList: true, subtree: true });
+      } catch (e) {}
+    })();
+  ''';
+
   static const String adBlockScript = '''
     (function() {
       var adSelectors = [

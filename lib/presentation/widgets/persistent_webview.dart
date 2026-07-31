@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -195,6 +196,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       children: [
         Positioned.fill(
           child: InAppWebView(
+          initialUserScripts: UnmodifiableListView([
+            UserScript(
+              source: YouTubeJS.visibilityKeepAliveScript,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
+          ]),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
             allowsInlineMediaPlayback: true,
@@ -230,7 +237,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          bottom: 100,
+          bottom: 140,
           right: 16,
           child: GestureDetector(
             onTap: _togglePiP,
