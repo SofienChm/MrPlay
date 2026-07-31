@@ -48,6 +48,19 @@ class PlayerNotifier extends Notifier<PlayerState> {
     );
   }
 
+  void syncState({
+    bool? isPlaying,
+    Duration? position,
+    Duration? duration,
+    bool ended = false,
+  }) {
+    state = state.copyWith(
+      isPlaying: ended ? false : (isPlaying ?? state.isPlaying),
+      position: position ?? state.position,
+      duration: duration ?? state.duration,
+    );
+  }
+
   void pause() => state = state.copyWith(isPlaying: false);
 
   void resume() => state = state.copyWith(isPlaying: true);

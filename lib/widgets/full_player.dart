@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/player_provider.dart';
+import '../app.dart';
 
 class FullPlayerWidget extends ConsumerStatefulWidget {
   const FullPlayerWidget({super.key});
@@ -168,6 +169,8 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                   milliseconds: (value * state.duration.inMilliseconds).round(),
                                 );
                                 ref.read(playerProvider.notifier).seekTo(pos);
+                                MrPlayApp.webViewKey.currentState
+                                    ?.controlVideo('seek', position: pos.inMilliseconds / 1000.0);
                               },
                             ),
                           ),
@@ -201,21 +204,19 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                 ),
                                 onPressed: () {
                                   final notifier = ref.read(playerProvider.notifier);
+                                  final webView = MrPlayApp.webViewKey.currentState;
                                   if (state.isPlaying) {
                                     notifier.pause();
+                                    webView?.controlVideo('pause');
                                   } else {
                                     notifier.resume();
+                                    webView?.controlVideo('play');
                                   }
                                 },
                               ),
                             ],
                           ),
                           const Spacer(),
-                          // TODO: Replace placeholder with native video_player plugin
-                          Text(
-                            'Native video playback coming soon',
-                            style: TextStyle(color: Colors.grey[700], fontSize: 11),
-                          ),
                           const SizedBox(height: 8),
                         ],
                       ),

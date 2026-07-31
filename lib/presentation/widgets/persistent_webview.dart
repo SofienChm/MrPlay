@@ -3,9 +3,11 @@ import 'dart:collection';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:audio_session/audio_session.dart';
 import '../../core/constants/youtube_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
+import '../../services/background_audio_keep_alive.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
   const PersistentWebView({super.key});
@@ -22,18 +24,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   String? _pendingUrl;
   Timer? _loadingTimer;
 
-  static const String _prepareVideoScript = '''
-(function() {
-  var videos = document.querySelectorAll('video');
-  videos.forEach(function(v) {
-    v.setAttribute('playsinline', 'true');
-    v.setAttribute('webkit-playsinline', 'true');
-    v.setAttribute('pip', 'true');
-    v.style.objectFit = 'contain';
-  });
-})();
-''';
-
   @override
   void initState() {
     super.initState();
@@ -44,34 +34,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
+    BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      _prepareVideo();
-      _enterPiP();
+      _reassertAudioSession();
     }
   }
 
-  Future<void> _enterPiP() async {
-    await _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        var video = document.querySelector('video');
-        if (!video) return;
-        if (document.pictureInPictureElement) return;
-        if (video.requestPictureInPicture) {
-          video.requestPictureInPicture().catch(function(){});
-        } else if (video.webkitSetPresentationMode) {
-          video.webkitSetPresentationMode('picture-in-picture');
-        }
-      })();
-    ''');
-  }
-
-  Future<void> _prepareVideo() async {
-    await _webViewController?.evaluateJavascript(source: _prepareVideoScript);
+  Future<void> _reassertAudioSession() async {
+    try {
+      final session = await AudioSession.instance;
+      await session.setActive(true);
+    } catch (_) {}
   }
 
   void _onWebViewCreated(InAppWebViewController controller) {
@@ -81,6 +59,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       callback: (args) {
         if (args.isNotEmpty && args.first is Map) {
           _onPlayerInfo(args.first as Map<String, dynamic>);
+        }
+      },
+    );
+    controller.addJavaScriptHandler(
+      handlerName: 'videoState',
+      callback: (args) {
+        if (args.isNotEmpty && args.first is Map) {
+          _onVideoState(args.first as Map<String, dynamic>);
         }
       },
     );
@@ -107,7 +93,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final urlStr = url.toString();
     if (urlStr.contains('youtube.com')) {
       await controller.evaluateJavascript(source: YouTubeJS.adBlockScript);
-      await _prepareVideo();
 
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {
@@ -149,6 +134,61 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       }
     } catch (_) {}
+  }
+
+  void _onVideoState(Map<String, dynamic> data) {
+    try {
+      final playing = data['playing'] == true;
+      final ended = data['ended'] == true;
+      final positionMs = ((data['position'] as num?)?.toDouble() ?? 0) * 1000;
+      final durationMs = ((data['duration'] as num?)?.toDouble() ?? 0) * 1000;
+      if (ref.read(playerProvider).currentVideo != null) {
+        ref.read(playerProvider.notifier).syncState(
+              isPlaying: playing,
+              position: Duration(milliseconds: positionMs.round()),
+              duration: Duration(milliseconds: durationMs.round()),
+              ended: ended,
+            );
+      }
+      if (playing && !ended) {
+        BackgroundAudioKeepAlive.instance.start();
+      } else {
+        BackgroundAudioKeepAlive.instance.stop();
+      }
+    } catch (_) {}
+  }
+
+  void controlVideo(String action, {double? position}) {
+    final controller = _webViewController;
+    if (controller == null) return;
+    switch (action) {
+      case 'play':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var v = document.querySelector('video');
+            if (v) v.play().catch(function(){});
+          })();
+        ''');
+        break;
+      case 'pause':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var v = document.querySelector('video');
+            if (v) v.pause();
+          })();
+        ''');
+        break;
+      case 'seek':
+        if (position != null) {
+          controller.evaluateJavascript(source: '''
+            (function() {
+              var v = document.querySelector('video');
+              if (v) v.currentTime = $position;
+            })();
+          ''');
+        }
+        break;
+    }
   }
 
   void loadUrl(String url) {
@@ -205,6 +245,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               source: YouTubeJS.searchSpaScript,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             ),
+            UserScript(
+              source: YouTubeJS.appBannerRemoverScript,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
           ]),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
@@ -218,6 +262,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           onWebViewCreated: _onWebViewCreated,
           onLoadStart: _onLoadStart,
           onLoadStop: _onLoadStop,
+          shouldOverrideUrlLoading: (controller, navigationAction) async {
+            final url = navigationAction.request.url;
+            if (url != null) {
+              final scheme = url.scheme.toLowerCase();
+              if (scheme != 'http' && scheme != 'https' && scheme != 'about' && scheme != 'file') {
+                return NavigationActionPolicy.CANCEL;
+              }
+            }
+            return NavigationActionPolicy.ALLOW;
+          },
+          onCreateWindow: (controller, createWindowAction) async => false,
           ),
         ),
         if (_isLoading)
@@ -263,6 +318,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               _webViewController?.loadUrl(
                 urlRequest: URLRequest(url: WebUri('about:blank')),
               );
+              _webViewController = null;
+              BackgroundAudioKeepAlive.instance.stop();
+              ref.read(playerProvider.notifier).dismiss();
               setState(() {
                 isReady = false;
                 _isLoading = false;

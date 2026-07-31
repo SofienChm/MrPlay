@@ -1,4 +1,3 @@
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 
 class AdConfig {
@@ -10,6 +9,6 @@ class AdConfig {
       'ca-app-pub-2351054385499645/9979835900';
 
   static String get bannerAdUnitId {
-    return _testBannerAdUnitId;
+    return kDebugMode ? _testBannerAdUnitId : _prodBannerAdUnitId;
   }
 }

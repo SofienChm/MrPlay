@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/player_provider.dart';
+import '../app.dart';
 
 class MiniPlayerWidget extends ConsumerWidget {
   const MiniPlayerWidget({super.key});
@@ -84,10 +85,13 @@ class MiniPlayerWidget extends ConsumerWidget {
                       ),
                       onPressed: () {
                         final notifier = ref.read(playerProvider.notifier);
+                        final webView = MrPlayApp.webViewKey.currentState;
                         if (state.isPlaying) {
                           notifier.pause();
+                          webView?.controlVideo('pause');
                         } else {
                           notifier.resume();
+                          webView?.controlVideo('play');
                         }
                       },
                     ),
