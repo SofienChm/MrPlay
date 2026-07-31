@@ -50,7 +50,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       _prepareVideo();
+      _enterPiP();
     }
+  }
+
+  Future<void> _enterPiP() async {
+    await _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = document.querySelector('video');
+        if (!video) return;
+        if (document.pictureInPictureElement) return;
+        if (video.requestPictureInPicture) {
+          video.requestPictureInPicture().catch(function(){});
+        } else if (video.webkitSetPresentationMode) {
+          video.webkitSetPresentationMode('picture-in-picture');
+        }
+      })();
+    ''');
   }
 
   Future<void> _prepareVideo() async {
