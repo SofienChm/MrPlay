@@ -22,6 +22,22 @@ class YouTubeJS {
           v.setAttribute('webkit-playsinline', 'true');
           v.setAttribute('pip', 'true');
           v.style.objectFit = 'contain';
+          if (!v.getAttribute('data-mrplay-guard')) {
+            v.setAttribute('data-mrplay-guard', '1');
+            var lastResume = 0;
+            v.addEventListener('pause', function() {
+              var now = Date.now();
+              if (now - lastResume < 3000) return;
+              var pipActive = (typeof v.webkitPresentationMode !== 'undefined' && v.webkitPresentationMode === 'picture-in-picture');
+              if (!pipActive && typeof document.pictureInPictureElement !== 'undefined') {
+                pipActive = document.pictureInPictureElement === v;
+              }
+              if (pipActive && !v.ended && v.readyState >= 2) {
+                lastResume = now;
+                v.play().catch(function(){});
+              }
+            });
+          }
         }
         document.querySelectorAll('video').forEach(prepareVideo);
         new MutationObserver(function(mutations) {
@@ -32,6 +48,35 @@ class YouTubeJS {
           });
         }).observe(document.documentElement, { childList: true, subtree: true });
       } catch (e) {}
+    })();
+  ''';
+
+  static const String searchSpaScript = '''
+    (function() {
+      function inPip() {
+        var v = document.querySelector('video');
+        if (v && typeof v.webkitPresentationMode !== 'undefined' && v.webkitPresentationMode === 'picture-in-picture') return true;
+        if (typeof document.pictureInPictureElement !== 'undefined' && document.pictureInPictureElement) return true;
+        return false;
+      }
+      document.addEventListener('submit', function(e) {
+        var form = e.target;
+        if (!form || !form.action) return;
+        if (String(form.action).indexOf('/results') === -1) return;
+        if (!inPip()) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var input = form.querySelector('input[name="search_query"]');
+        var q = input ? input.value.trim() : '';
+        if (!q) return;
+        var url = '/results?search_query=' + encodeURIComponent(q);
+        try {
+          window.history.pushState(window.history.state, '', url);
+          window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
+        } catch (err) {
+          window.location.href = url;
+        }
+      }, true);
     })();
   ''';
 

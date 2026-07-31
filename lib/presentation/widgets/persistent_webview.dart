@@ -201,6 +201,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               source: YouTubeJS.visibilityKeepAliveScript,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             ),
+            UserScript(
+              source: YouTubeJS.searchSpaScript,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
           ]),
           initialSettings: InAppWebViewSettings(
             javaScriptEnabled: true,
