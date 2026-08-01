@@ -55,6 +55,8 @@
 	<string>ca-app-pub-3940256099942544~1458002511</string>
 	<key>AppGroupId</key>
 	<string>group.com.mrplay.shared</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is used by web content you open in MrPlay for audio recording and voice features.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
