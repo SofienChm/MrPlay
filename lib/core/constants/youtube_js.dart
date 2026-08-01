@@ -87,11 +87,14 @@ class YouTubeJS {
         return false;
       }
 
+      function isActive(v) {
+        return !!v && ((!v.paused && !v.ended) || inPip(v));
+      }
+
       function shelterPlayingVideo() {
         var v = document.querySelector('video');
         if (!v || v === sheltered) return;
-        var isPlaying = !v.paused && !v.ended;
-        if (!isPlaying && !inPip(v)) return;
+        if (!isActive(v)) return;
         if (sheltered) {
           try { sheltered.remove(); } catch (e) {}
         }
@@ -102,33 +105,26 @@ class YouTubeJS {
       window.__mrplayReleaseSheltered = function(newVideo) {
         if (!sheltered) return;
         if (newVideo && newVideo === sheltered) return;
+        // Only release the sheltered video when a real watch-page player starts
+        // playing a new video (search hover previews must not close PiP).
+        if (newVideo && !newVideo.closest('ytd-watch-flexy, ytd-watch, ytm-watch, #movie_player')) return;
         try { sheltered.remove(); } catch (e) {}
         sheltered = null;
       };
 
+      // Search: keep the playing/PiP video alive while navigating to results.
+      // Do NOT preventDefault - let YouTube's own router drive the navigation.
       document.addEventListener('submit', function(e) {
         var form = e.target;
         if (!form || !form.action) return;
         if (String(form.action).indexOf('/results') === -1) return;
         shelterPlayingVideo();
-        if (!sheltered) return;
-        e.preventDefault();
-        e.stopPropagation();
-        var input = form.querySelector('input[name="search_query"]');
-        var q = input ? input.value.trim() : '';
-        if (!q) return;
-        var url = '/results?search_query=' + encodeURIComponent(q);
-        try {
-          window.history.pushState(window.history.state, '', url);
-          window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
-          setTimeout(function() {
-            if (document.querySelector('ytd-watch-flexy, ytm-watch, ytd-watch, ytd-watch-flexy')) {
-              window.location.href = url;
-            }
-          }, 1500);
-        } catch (err) {
-          window.location.href = url;
-        }
+      }, true);
+
+      // Back/forward navigation: shelter the video before YouTube tears down
+      // the watch page, so PiP / background audio survives.
+      window.addEventListener('popstate', function() {
+        shelterPlayingVideo();
       }, true);
     })();
   ''';

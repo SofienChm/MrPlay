@@ -117,7 +117,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.star_outline,
             title: 'Rate App',
             subtitle: 'Rate us on the App Store',
-            onTap: () => _openUrl('https://apps.apple.com/app/id000000000'),
+            onTap: () => _openUrl(AppConstants.appStoreUrl),
           ),
           _SettingsTile(
             icon: Icons.share,
@@ -131,7 +131,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _shareApp() async {
-    final uri = Uri.parse('https://apps.apple.com/app/id000000000');
+    final uri = Uri.parse(AppConstants.appStoreUrl);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }

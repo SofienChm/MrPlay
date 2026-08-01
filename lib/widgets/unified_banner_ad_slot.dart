@@ -22,16 +22,26 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     with WidgetsBindingObserver {
   BannerAd? _bannerAd;
   Widget? _adWidget;
+  AdSize? _adSize;
   bool _adLoaded = false;
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
   Timer? _reappearTimer;
+  bool _adsInitiated = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadBannerAd();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_adsInitiated) {
+      _adsInitiated = true;
+      _loadBannerAd();
+    }
   }
 
   @override
@@ -42,10 +52,15 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     }
   }
 
-  void _loadBannerAd() {
+  Future<void> _loadBannerAd() async {
+    final size = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
+      MediaQuery.of(context).size.width.round(),
+    );
+    if (!mounted) return;
+    _adSize = size;
     _bannerAd = BannerAd(
       adUnitId: AdConfig.bannerAdUnitId,
-      size: AdSize.largeBanner,
+      size: size ?? AdSize.largeBanner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -88,11 +103,15 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       return const SizedBox.shrink();
     }
 
+    final size = _adSize;
+    final bannerWidth = size == null ? 320.0 : size.width.toDouble();
+    final bannerHeight = size == null ? 100.0 : size.height.toDouble();
+
     return Padding(
       padding: const EdgeInsets.only(left: 10),
       child: SizedBox(
-        width: 320,
-        height: 100,
+        width: bannerWidth,
+        height: bannerHeight,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: Container(

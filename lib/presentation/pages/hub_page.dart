@@ -5,6 +5,8 @@ import '../../core/theme/app_colors.dart';
 import '../../data/models/platform_model.dart';
 import '../widgets/platform_card.dart';
 import '../pages/search_page.dart';
+import 'favorites_page.dart';
+import 'settings_page.dart';
 import '../../app.dart';
 
 class HubPage extends StatefulWidget {
@@ -99,11 +101,21 @@ class _HubPageState extends State<HubPage> {
                       children: [
                         IconButton(
                           icon: const Icon(Icons.favorite, color: Colors.white),
-                          onPressed: null,
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const FavoritesPage()),
+                            );
+                          },
                         ),
                         IconButton(
                           icon: const Icon(Icons.settings, color: Colors.white),
-                          onPressed: null,
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const SettingsPage()),
+                            );
+                          },
                         ),
                       ],
                     ),

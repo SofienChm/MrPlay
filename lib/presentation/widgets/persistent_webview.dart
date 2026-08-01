@@ -9,6 +9,7 @@ import '../../core/constants/content_blocker_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/background_audio_keep_alive.dart';
+import 'error_widget.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
   const PersistentWebView({super.key});
@@ -23,7 +24,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool isReady = false;
   bool _isLoading = false;
   String? _pendingUrl;
+  String? _loadError;
   Timer? _loadingTimer;
+  Timer? _pipOnBackgroundTimer;
 
   @override
   void initState() {
@@ -35,15 +38,31 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
+    _pipOnBackgroundTimer?.cancel();
     BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
+    if (state == AppLifecycleState.inactive) {
+      // App is leaving the foreground (home button, app switcher). iOS pauses
+      // video-track media as soon as the app backgrounds, so request PiP before
+      // that happens, but only if we keep going to background (control-center /
+      // incoming-call transients stay in `inactive`).
+      _pipOnBackgroundTimer?.cancel();
+      _pipOnBackgroundTimer = Timer(const Duration(milliseconds: 400), () {
+        if (mounted &&
+            WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
+          _reassertAudioSession();
+          enterPiP(resumePlayback: true);
+        }
+      });
+    } else if (state == AppLifecycleState.paused) {
       _reassertAudioSession();
-      enterPiP();
+      enterPiP(resumePlayback: true);
+    } else if (state == AppLifecycleState.resumed) {
+      _pipOnBackgroundTimer?.cancel();
     }
   }
 
@@ -82,6 +101,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _onLoadStart(InAppWebViewController controller, WebUri? url) {
     if (mounted) setState(() => _isLoading = true);
+    if (_loadError != null && mounted) setState(() => _loadError = null);
     _loadingTimer?.cancel();
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
@@ -208,7 +228,39 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
   }
 
-  void enterPiP() {
+  void _onReceivedError(
+    InAppWebViewController controller,
+    WebResourceRequest request,
+    WebResourceError error,
+  ) {
+    if (request.isForMainFrame != false) {
+      if (mounted) {
+        setState(() => _loadError = 'Could not load the page: ${error.description}');
+      }
+    }
+  }
+
+  void _onReceivedHttpError(
+    InAppWebViewController controller,
+    WebResourceRequest request,
+    WebResourceResponse response,
+  ) {
+    if (request.isForMainFrame != false) {
+      if (mounted) {
+        setState(() {
+          _loadError = 'Server error ${response.statusCode ?? 'unknown'}';
+        });
+      }
+    }
+  }
+
+  void _retryLoad() {
+    if (!mounted) return;
+    setState(() => _loadError = null);
+    _webViewController?.reload();
+  }
+
+  void enterPiP({bool resumePlayback = false}) {
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -219,6 +271,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         } else if (video.webkitSetPresentationMode) {
           if (video.webkitPresentationMode !== 'picture-in-picture') {
             video.webkitSetPresentationMode('picture-in-picture');
+          }
+        }
+        if ($resumePlayback) {
+          if (video.paused) {
+            video.play().catch(function() {
+              var btn = document.querySelector('.ytp-play-button');
+              if (btn) btn.click();
+            });
           }
         }
       })();
@@ -279,10 +339,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             allowsPictureInPictureMediaPlayback: true,
             allowsAirPlayForMediaPlayback: true,
             isFraudulentWebsiteWarningEnabled: false,
+            userAgent:
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
           ),
           onWebViewCreated: _onWebViewCreated,
           onLoadStart: _onLoadStart,
           onLoadStop: _onLoadStop,
+          onReceivedError: _onReceivedError,
+          onReceivedHttpError: _onReceivedHttpError,
           shouldOverrideUrlLoading: (controller, navigationAction) async {
             final url = navigationAction.request.url;
             if (url != null) {
@@ -293,9 +357,27 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             }
             return NavigationActionPolicy.ALLOW;
           },
-          onCreateWindow: (controller, createWindowAction) async => false,
+          onCreateWindow: (controller, createWindowAction) async {
+            // Open popup/new-window targets (e.g. OAuth "Continue with ...")
+            // inside the main WebView instead of dropping them.
+            final url = createWindowAction.request.url;
+            if (url != null) {
+              controller.loadUrl(urlRequest: URLRequest(url: url));
+            }
+            return false;
+          },
           ),
         ),
+        if (_loadError != null && !_isLoading)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black,
+              child: CustomErrorWidget(
+                message: _loadError!,
+                onRetry: _retryLoad,
+              ),
+            ),
+          ),
         if (_isLoading)
           Positioned(
             top: 60,

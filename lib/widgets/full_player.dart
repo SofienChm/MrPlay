@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/player_provider.dart';
+import '../models/video.dart';
+import '../data/models/favorite_video.dart';
+import '../data/repositories/favorites_repository.dart';
 import '../app.dart';
 
 class FullPlayerWidget extends ConsumerStatefulWidget {
@@ -229,9 +232,17 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
               Positioned(
                 top: topPadding + 4,
                 right: 16,
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white54),
-                  onPressed: () => ref.read(playerProvider.notifier).dismiss(),
+                child: Row(
+                  children: [
+                    _FavoriteButton(
+                      key: ValueKey(video.id),
+                      video: video,
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white54),
+                      onPressed: () => ref.read(playerProvider.notifier).dismiss(),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -245,5 +256,60 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '${d.inHours > 0 ? '${d.inHours}:' : ''}$minutes:$seconds';
+  }
+}
+
+class _FavoriteButton extends StatefulWidget {
+  final Video video;
+
+  const _FavoriteButton({super.key, required this.video});
+
+  @override
+  State<_FavoriteButton> createState() => _FavoriteButtonState();
+}
+
+class _FavoriteButtonState extends State<_FavoriteButton> {
+  bool? _isFavorite;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final isFavorite = await FavoritesRepository.isFavorite(widget.video.id);
+    if (mounted) setState(() => _isFavorite = isFavorite);
+  }
+
+  Future<void> _toggle() async {
+    final video = widget.video;
+    if (_isFavorite == true) {
+      await FavoritesRepository.remove(video.id);
+    } else {
+      await FavoritesRepository.add(
+        FavoriteVideo(
+          id: video.id,
+          title: video.title,
+          channel: video.platform.isEmpty ? 'YouTube' : video.platform,
+          thumbnailUrl: video.thumbnailUrl,
+          platformUrl: video.videoUrl,
+          addedAt: DateTime.now(),
+        ),
+      );
+    }
+    if (mounted) setState(() => _isFavorite = _isFavorite != true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isFavorite = _isFavorite == true;
+    return IconButton(
+      icon: Icon(
+        isFavorite ? Icons.favorite : Icons.favorite_border,
+        color: isFavorite ? Colors.red : Colors.white54,
+      ),
+      onPressed: _isFavorite == null ? null : _toggle,
+    );
   }
 }
