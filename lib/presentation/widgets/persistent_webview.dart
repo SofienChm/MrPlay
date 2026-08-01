@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:audio_session/audio_session.dart';
 import '../../core/constants/youtube_js.dart';
+import '../../core/constants/content_blocker_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/background_audio_keep_alive.dart';
@@ -42,6 +43,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
       _reassertAudioSession();
+      enterPiP();
     }
   }
 
@@ -92,8 +94,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
     final urlStr = url.toString();
     if (urlStr.contains('youtube.com')) {
-      await controller.evaluateJavascript(source: YouTubeJS.adBlockScript);
-
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {
           await controller.evaluateJavascript(source: '''
@@ -254,6 +254,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         Positioned.fill(
           child: InAppWebView(
           initialUserScripts: UnmodifiableListView([
+            UserScript(
+              source: ContentBlockerJS.genericAdBlockerScript,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
             UserScript(
               source: YouTubeJS.visibilityKeepAliveScript,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,

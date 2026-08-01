@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:home_widget/home_widget.dart';
 import 'core/theme/app_theme.dart';
 import 'presentation/pages/hub_page.dart';
 import 'presentation/widgets/persistent_webview.dart';
+import 'services/share_link_handler.dart';
+import 'services/spotlight_service.dart';
 import 'widgets/persistent_player_shell.dart';
 import 'widgets/unified_banner_ad_slot.dart';
 
@@ -17,6 +20,31 @@ class MrPlayApp extends StatefulWidget {
 }
 
 class _MrPlayAppState extends State<MrPlayApp> {
+  @override
+  void initState() {
+    super.initState();
+    _initNativeIntegrations();
+  }
+
+  void _initNativeIntegrations() {
+    SpotlightService.setOpenHandler(_openExternalUrl);
+    ShareLinkHandler.instance.init(_openExternalUrl);
+    HomeWidget.widgetClicked.listen(_openFromWidget);
+    HomeWidget.initiallyLaunchedFromHomeWidget().then(_openFromWidget);
+  }
+
+  void _openExternalUrl(String url) {
+    MrPlayApp.webViewKey.currentState?.loadUrl(url);
+  }
+
+  void _openFromWidget(Uri? uri) {
+    if (uri == null) return;
+    final url = uri.queryParameters['url'];
+    if (url != null && url.isNotEmpty) {
+      MrPlayApp.webViewKey.currentState?.loadUrl(url);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(

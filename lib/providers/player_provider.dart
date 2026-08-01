@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/video.dart';
+import '../services/recent_activity_service.dart';
+import '../services/spotlight_service.dart';
 
 class PlayerState {
   final Video? currentVideo;
@@ -45,6 +47,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       isMinimized: true,
       position: Duration.zero,
       duration: Duration.zero,
+    );
+    RecentActivityService.instance.recordVideo(video);
+    SpotlightService.index(
+      title: video.title,
+      subtitle: video.platform.isEmpty ? 'MrPlay' : video.platform,
+      url: video.videoUrl,
     );
   }
 

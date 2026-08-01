@@ -51,9 +51,30 @@
 		</array>
 		<key>UIStatusBarHidden</key>
 		<false/>
-		<key>NSMicrophoneUsageDescription</key>
-		<string>MrPlay uses microphone access only for in-app video features. Your microphone is never used without your interaction.</string>
-		<key>GADApplicationIdentifier</key>
-		<string>ca-app-pub-3940256099942544~1458002511</string>
-	</dict>
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~1458002511</string>
+	<key>AppGroupId</key>
+	<string>group.com.mrplay.shared</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.mrplay.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mrplay</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>ShareMedia-$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			</array>
+		</dict>
+	</array>
+</dict>
 </plist>
