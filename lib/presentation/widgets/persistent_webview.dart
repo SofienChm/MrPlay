@@ -208,6 +208,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
   }
 
+  void enterPiP() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = document.querySelector('video');
+        if (!video) return;
+        if (video.requestPictureInPicture) {
+          if (document.pictureInPictureElement) return;
+          video.requestPictureInPicture().catch(function(){});
+        } else if (video.webkitSetPresentationMode) {
+          if (video.webkitPresentationMode !== 'picture-in-picture') {
+            video.webkitSetPresentationMode('picture-in-picture');
+          }
+        }
+      })();
+    ''');
+  }
+
   void _togglePiP() {
     _webViewController?.evaluateJavascript(source: '''
       (function() {

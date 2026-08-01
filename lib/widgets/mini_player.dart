@@ -4,17 +4,43 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/player_provider.dart';
 import '../app.dart';
 
-class MiniPlayerWidget extends ConsumerWidget {
+class MiniPlayerWidget extends ConsumerStatefulWidget {
   const MiniPlayerWidget({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MiniPlayerWidget> createState() => _MiniPlayerWidgetState();
+}
+
+class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
+  double _dragOffset = 0;
+
+  void _onVerticalDragUpdate(DragUpdateDetails details) {
+    setState(() {
+      _dragOffset += details.delta.dy;
+      if (_dragOffset < 0) _dragOffset = 0;
+    });
+  }
+
+  void _onVerticalDragEnd(DragEndDetails details) {
+    final shouldEnterPiP =
+        (details.primaryVelocity != null && details.primaryVelocity! > 400) ||
+            _dragOffset > 150;
+    if (shouldEnterPiP) {
+      MrPlayApp.webViewKey.currentState?.enterPiP();
+    }
+    setState(() => _dragOffset = 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(playerProvider);
     final video = state.currentVideo;
     if (video == null || !state.isMinimized) return const SizedBox.shrink();
 
     return GestureDetector(
       onTap: () => ref.read(playerProvider.notifier).expand(),
+      onVerticalDragUpdate: _onVerticalDragUpdate,
+      onVerticalDragEnd: _onVerticalDragEnd,
       child: Container(
         height: 64,
         color: const Color(0xFF1C1C1E),
