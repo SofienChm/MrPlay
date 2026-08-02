@@ -6,6 +6,7 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'app.dart';
 import 'data/models/favorite_video.dart';
 import 'data/models/custom_bookmark.dart';
+import 'data/models/queue_item.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,5 +23,6 @@ void main() async {
   await Hive.initFlutter();
   Hive.registerAdapter(FavoriteVideoAdapter());
   Hive.registerAdapter(CustomBookmarkAdapter());
+  Hive.registerAdapter(QueueItemAdapter());
   runApp(const ProviderScope(child: MrPlayApp()));
 }

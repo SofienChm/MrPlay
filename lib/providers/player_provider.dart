@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/video.dart';
 import '../services/recent_activity_service.dart';
 import '../services/spotlight_service.dart';
+import '../services/playback_stats_service.dart';
 
 class PlayerState {
   final Video? currentVideo;
@@ -62,8 +63,15 @@ class PlayerNotifier extends Notifier<PlayerState> {
     Duration? duration,
     bool ended = false,
   }) {
+    final playing = ended ? false : (isPlaying ?? state.isPlaying);
+    if (playing && position != null) {
+      final platform = state.currentVideo?.platform ?? 'YouTube';
+      PlaybackStatsService.instance.recordTick(platform, position);
+    } else if (ended) {
+      PlaybackStatsService.instance.resetTrack();
+    }
     state = state.copyWith(
-      isPlaying: ended ? false : (isPlaying ?? state.isPlaying),
+      isPlaying: playing,
       position: position ?? state.position,
       duration: duration ?? state.duration,
     );

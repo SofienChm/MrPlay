@@ -4,6 +4,7 @@ import '../../app.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/constants/app_constants.dart';
 import '../../data/repositories/settings_repository.dart';
+import 'stats_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -94,6 +95,14 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: () => _showPlatformPicker(),
           ),
           const _SectionHeader(title: 'Data'),
+          _SettingsTile(
+            icon: Icons.bar_chart,
+            title: 'Watch Stats',
+            subtitle: 'Your watch time and usage',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const StatsPage()),
+            ),
+          ),
           _SettingsTile(
             icon: Icons.delete_outline,
             title: 'Clear Cache',

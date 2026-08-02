@@ -4,9 +4,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/player_provider.dart';
 import '../models/video.dart';
 import '../data/models/favorite_video.dart';
+import '../data/models/queue_item.dart';
 import '../data/repositories/favorites_repository.dart';
 import '../data/repositories/watch_later_repository.dart';
+import '../data/repositories/queue_repository.dart';
 import '../services/sleep_timer_service.dart';
+import '../presentation/pages/queue_page.dart';
 import '../app.dart';
 
 class FullPlayerWidget extends ConsumerStatefulWidget {
@@ -68,6 +71,42 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
       _dragOffset += details.delta.dy;
       if (_dragOffset < 0) _dragOffset = 0;
     });
+  }
+
+  QueueItem _queueItemOf(Video video) => QueueItem(
+        id: video.id,
+        title: video.title,
+        thumbnailUrl: video.thumbnailUrl,
+        platformUrl: video.videoUrl,
+        platformName: video.platform.isEmpty ? 'YouTube' : video.platform,
+      );
+
+  Future<void> _addToQueue() async {
+    final video = ref.read(playerProvider).currentVideo;
+    if (video == null) return;
+    await QueueRepository.add(_queueItemOf(video));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Added to queue'), duration: Duration(seconds: 1)),
+      );
+    }
+  }
+
+  Future<void> _playNext() async {
+    final video = ref.read(playerProvider).currentVideo;
+    if (video == null) return;
+    await QueueRepository.addNext(_queueItemOf(video));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Will play next'), duration: Duration(seconds: 1)),
+      );
+    }
+  }
+
+  void _openQueue() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const QueuePage()),
+    );
   }
 
   @override
@@ -221,6 +260,26 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                     webView?.controlVideo('play');
                                   }
                                 },
+                              ),
+                            ],
+                          ),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.playlist_play, color: Colors.white70),
+                                tooltip: 'Play next',
+                                onPressed: _playNext,
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.playlist_add, color: Colors.white70),
+                                tooltip: 'Add to queue',
+                                onPressed: _addToQueue,
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.queue_music, color: Colors.white70),
+                                tooltip: 'Open queue',
+                                onPressed: _openQueue,
                               ),
                             ],
                           ),

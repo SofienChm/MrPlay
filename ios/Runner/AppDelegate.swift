@@ -4,10 +4,12 @@ import AVFoundation
 import WebKit
 import CoreSpotlight
 import UniformTypeIdentifiers
+import MediaPlayer
 
 @UIApplicationMain
 @objc class AppDelegate: FlutterAppDelegate {
   private var spotlightChannel: FlutterMethodChannel?
+  private var mediaChannel: FlutterMethodChannel?
 
   override func application(
     _ application: UIApplication,
@@ -21,6 +23,7 @@ import UniformTypeIdentifiers
     }
 
     setupSpotlightChannel()
+    setupMediaChannel()
 
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -94,5 +97,121 @@ import UniformTypeIdentifiers
 
   private func clearSpotlight() {
     CSSearchableIndex.default().deleteAllSearchableItems { _ in }
+  }
+
+  // MARK: - Media controls (Control Center / Lock Screen)
+
+  private func setupMediaChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else { return }
+    let channel = FlutterMethodChannel(name: "com.mrplay/media", binaryMessenger: controller.binaryMessenger)
+    mediaChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(nil)
+        return
+      }
+      switch call.method {
+      case "setNowPlaying":
+        if let args = call.arguments as? [String: Any] {
+          self.setNowPlaying(args)
+        }
+        result(nil)
+      case "setPlaying":
+        if let playing = (call.arguments as? [String: Any])?["isPlaying"] as? Bool {
+          self.setPlaying(playing)
+        }
+        result(nil)
+      case "clearNowPlaying":
+        MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    setupRemoteCommands()
+  }
+
+  private func setNowPlaying(_ info: [String: Any]) {
+    var now = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+
+    if let title = info["title"] as? String {
+      now[MPMediaItemPropertyTitle] = title
+    }
+    if let artist = info["artist"] as? String {
+      now[MPMediaItemPropertyArtist] = artist
+    }
+    if let durationMs = (info["durationMs"] as? NSNumber)?.doubleValue {
+      now[MPMediaItemPropertyPlaybackDuration] = durationMs / 1000.0
+    }
+    if let positionMs = (info["positionMs"] as? NSNumber)?.doubleValue {
+      now[MPNowPlayingInfoPropertyElapsedPlaybackTime] = positionMs / 1000.0
+    }
+    now[MPNowPlayingInfoPropertyPlaybackRate] = ((info["isPlaying"] as? Bool) ?? false) ? 1.0 : 0.0
+    if let base64 = info["artwork"] as? String,
+       let data = Data(base64Encoded: base64),
+       let image = UIImage(data: data) {
+      now[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+    }
+
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = now
+  }
+
+  private func setPlaying(_ playing: Bool) {
+    guard var now = MPNowPlayingInfoCenter.default().nowPlayingInfo else { return }
+    now[MPNowPlayingInfoPropertyPlaybackRate] = playing ? 1.0 : 0.0
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = now
+  }
+
+  private func setupRemoteCommands() {
+    let center = MPRemoteCommandCenter.shared()
+
+    center.playCommand.isEnabled = true
+    center.playCommand.addTarget { [weak self] _ in
+      self?.sendRemoteCommand("play")
+      return .success
+    }
+
+    center.pauseCommand.isEnabled = true
+    center.pauseCommand.addTarget { [weak self] _ in
+      self?.sendRemoteCommand("pause")
+      return .success
+    }
+
+    center.togglePlayPauseCommand.isEnabled = true
+    center.togglePlayPauseCommand.addTarget { [weak self] _ in
+      self?.sendRemoteCommand("toggle")
+      return .success
+    }
+
+    center.skipForwardCommand.isEnabled = true
+    center.skipForwardCommand.preferredIntervals = [15]
+    center.skipForwardCommand.addTarget { [weak self] _ in
+      self?.sendRemoteCommand("skipForward")
+      return .success
+    }
+
+    center.skipBackwardCommand.isEnabled = true
+    center.skipBackwardCommand.preferredIntervals = [15]
+    center.skipBackwardCommand.addTarget { [weak self] _ in
+      self?.sendRemoteCommand("skipBackward")
+      return .success
+    }
+
+    center.changePlaybackPositionCommand.isEnabled = true
+    center.changePlaybackPositionCommand.addTarget { [weak self] event in
+      guard let commandEvent = event as? MPChangePlaybackPositionCommandEvent else {
+        return .commandFailed
+      }
+      self?.sendRemoteCommand("seek", positionMs: commandEvent.positionTime * 1000.0)
+      return .success
+    }
+  }
+
+  private func sendRemoteCommand(_ command: String, positionMs: Double? = nil) {
+    var arguments: [Any] = [command]
+    if let positionMs {
+      arguments.append(positionMs)
+    }
+    mediaChannel?.invokeMethod("remoteCommand", arguments: arguments)
   }
 }

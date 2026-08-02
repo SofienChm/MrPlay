@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:mrplay/data/models/custom_bookmark.dart';
 import 'package:mrplay/data/models/favorite_video.dart';
+import 'package:mrplay/data/models/queue_item.dart';
 import 'package:mrplay/data/repositories/custom_bookmarks_repository.dart';
+import 'package:mrplay/data/repositories/queue_repository.dart';
 import 'package:mrplay/data/repositories/watch_later_repository.dart';
 
 void main() {
@@ -15,6 +17,7 @@ void main() {
     Hive.init(hiveDir.path);
     Hive.registerAdapter(FavoriteVideoAdapter());
     Hive.registerAdapter(CustomBookmarkAdapter());
+    Hive.registerAdapter(QueueItemAdapter());
   });
 
   tearDownAll(() async {
@@ -79,5 +82,39 @@ void main() {
     expect(favoritesBox.containsKey('shared-id'), isFalse);
 
     await WatchLaterRepository.remove('shared-id');
+  });
+
+  test('QueueRepository add / addNext / reorder round-trip', () async {
+    QueueItem item(String id, String title, int sort) => QueueItem(
+          id: id,
+          title: title,
+          thumbnailUrl: '',
+          platformUrl: 'https://m.youtube.com/watch?v=$id',
+          platformName: 'YouTube',
+          sortIndex: sort,
+        );
+
+    await QueueRepository.add(item('a', 'A', 0));
+    await QueueRepository.add(item('b', 'B', 0));
+    expect((await QueueRepository.getAll()).length, 2);
+
+    await QueueRepository.addNext(item('c', 'C', 0));
+    final afterNext = await QueueRepository.getAll();
+    expect(afterNext.first.id, 'c');
+
+    await QueueRepository.reorder([
+      afterNext[1],
+      afterNext[2],
+      afterNext[0],
+    ]);
+    final reordered = await QueueRepository.getAll();
+    expect(reordered.map((e) => e.id).toList(), ['a', 'b', 'c']);
+
+    await QueueRepository.remove('a');
+    final remaining = await QueueRepository.getAll();
+    expect(remaining.map((e) => e.id).toList(), ['b', 'c']);
+
+    await QueueRepository.clear();
+    expect(await QueueRepository.getAll(), isEmpty);
   });
 }

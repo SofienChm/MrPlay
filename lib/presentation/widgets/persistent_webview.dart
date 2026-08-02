@@ -9,6 +9,9 @@ import '../../core/constants/content_blocker_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/background_audio_keep_alive.dart';
+import '../../services/media_controls_service.dart';
+import '../../services/playback_stats_service.dart';
+import '../../data/repositories/queue_repository.dart';
 import 'error_widget.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
@@ -27,11 +30,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   String? _loadError;
   Timer? _loadingTimer;
   Timer? _pipOnBackgroundTimer;
+  Timer? _nowPlayingThrottle;
+  bool _endedHandled = false;
+  bool _resumeSeekDone = false;
+  int _lastNowPlayingMs = 0;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
   }
 
   @override
@@ -39,6 +47,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
     _pipOnBackgroundTimer?.cancel();
+    _nowPlayingThrottle?.cancel();
+    PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
@@ -133,6 +143,28 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             })();
           ''');
         });
+
+        // Resume where you left off: if we have stored progress for this video,
+        // seek once the player is actually ready (skip for live streams).
+        final videoIdMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(urlStr);
+        final videoId = videoIdMatch?.group(1) ?? '';
+        if (videoId.isNotEmpty) {
+          final resumeMs = await PlaybackStatsService.instance.resumePosition(videoId);
+          if (resumeMs > 0) {
+            Future.delayed(const Duration(milliseconds: 3500), () async {
+              if (_resumeSeekDone) return;
+              _resumeSeekDone = true;
+              await controller.evaluateJavascript(source: '''
+                (function() {
+                  var v = document.querySelector('video');
+                  if (v && v.duration > 10 && isFinite(v.duration)) {
+                    v.currentTime = $resumeMs;
+                  }
+                })();
+              ''');
+            });
+          }
+        }
       }
     }
   }
@@ -150,7 +182,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         );
         final currentId = ref.read(playerProvider).currentVideo?.id;
         if (currentId != video.id) {
+          _endedHandled = false;
+          _resumeSeekDone = false;
           ref.read(playerProvider.notifier).play(video);
+          MediaControlsService.instance.updateNowPlaying(
+            title: video.title,
+            artist: video.platform.isEmpty ? 'YouTube' : video.platform,
+            position: Duration.zero,
+            duration: Duration.zero,
+            isPlaying: true,
+            artworkUrl: video.thumbnailUrl,
+          );
+          _lastNowPlayingMs = 0;
         }
       }
     } catch (_) {}
@@ -166,20 +209,105 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final durSec = (data['duration'] as num?)?.toDouble() ?? 0;
       final positionMs = posSec.isFinite ? posSec * 1000 : 0.0;
       final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
-      if (ref.read(playerProvider).currentVideo != null) {
+      final video = ref.read(playerProvider).currentVideo;
+      if (video != null) {
         ref.read(playerProvider.notifier).syncState(
               isPlaying: playing,
               position: Duration(milliseconds: positionMs.round()),
               duration: Duration(milliseconds: durationMs.round()),
               ended: ended,
             );
+        _updateNowPlayingThrottled(
+          positionMs: positionMs.round(),
+          durationMs: durationMs.round(),
+          playing: playing,
+        );
+        if (playing && !ended) {
+          PlaybackStatsService.instance.saveProgress(
+            video.id,
+            Duration(milliseconds: positionMs.round()),
+          );
+        }
       }
       if (playing && !ended) {
         BackgroundAudioKeepAlive.instance.start();
       } else {
         BackgroundAudioKeepAlive.instance.stop();
+        if (ended) {
+          PlaybackStatsService.instance.flush();
+          final id = video?.id ?? '';
+          if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+          _handleEnded();
+        }
       }
     } catch (_) {}
+  }
+
+  void _updateNowPlayingThrottled({
+    required int positionMs,
+    required int durationMs,
+    required bool playing,
+  }) {
+    if (positionMs - _lastNowPlayingMs < 1000) return;
+    _lastNowPlayingMs = positionMs;
+    MediaControlsService.instance.updateProgress(
+      position: Duration(milliseconds: positionMs),
+      duration: Duration(milliseconds: durationMs),
+      isPlaying: playing,
+    );
+  }
+
+  Future<void> _handleEnded() async {
+    if (_endedHandled) return;
+    _endedHandled = true;
+    final items = await QueueRepository.getAll();
+    if (items.isEmpty) return;
+    final next = items.first;
+    await QueueRepository.remove(next.id);
+    if (mounted) loadUrl(next.platformUrl);
+  }
+
+  void _onRemoteCommand(String command, {Duration? position}) {
+    final state = ref.read(playerProvider);
+    final notifier = ref.read(playerProvider.notifier);
+    final positionMs = position?.inMilliseconds ?? 0;
+    switch (command) {
+      case 'play':
+        notifier.resume();
+        controlVideo('play');
+        break;
+      case 'pause':
+        notifier.pause();
+        controlVideo('pause');
+        break;
+      case 'toggle':
+        if (state.isPlaying) {
+          notifier.pause();
+          controlVideo('pause');
+        } else {
+          notifier.resume();
+          controlVideo('play');
+        }
+        break;
+      case 'skipForward':
+        final next = state.position + const Duration(seconds: 15);
+        notifier.seekTo(next);
+        controlVideo('seek', position: next.inMilliseconds / 1000.0);
+        break;
+      case 'skipBackward':
+        final prev = state.position - const Duration(seconds: 15);
+        final clamped = prev.isNegative ? Duration.zero : prev;
+        notifier.seekTo(clamped);
+        controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
+        break;
+      case 'seek':
+        if (positionMs > 0) {
+          final target = Duration(milliseconds: positionMs);
+          notifier.seekTo(target);
+          controlVideo('seek', position: target.inMilliseconds / 1000.0);
+        }
+        break;
+    }
   }
 
   void controlVideo(String action, {double? position}) {
@@ -427,6 +555,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               );
               _webViewController = null;
               BackgroundAudioKeepAlive.instance.stop();
+              PlaybackStatsService.instance.flush();
+              MediaControlsService.instance.clearNowPlaying();
               ref.read(playerProvider.notifier).dismiss();
               setState(() {
                 isReady = false;

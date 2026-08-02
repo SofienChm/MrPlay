@@ -3,6 +3,7 @@ import '../../data/models/favorite_video.dart';
 import '../../data/repositories/favorites_repository.dart';
 import '../../data/repositories/watch_later_repository.dart';
 import '../../app.dart';
+import 'queue_page.dart';
 
 class FavoritesPage extends StatelessWidget {
   const FavoritesPage({super.key});
@@ -10,7 +11,7 @@ class FavoritesPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Library'),
@@ -18,6 +19,7 @@ class FavoritesPage extends StatelessWidget {
             tabs: [
               Tab(icon: Icon(Icons.favorite), text: 'Favorites'),
               Tab(icon: Icon(Icons.bookmark), text: 'Watch Later'),
+              Tab(icon: Icon(Icons.queue_music), text: 'Queue'),
             ],
           ),
         ),
@@ -41,6 +43,7 @@ class FavoritesPage extends StatelessWidget {
               trailingIcon: Icons.bookmark,
               trailingColor: Colors.amber,
             ),
+            QueueListView(),
           ],
         ),
       ),
