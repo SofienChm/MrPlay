@@ -375,20 +375,30 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
               Positioned(
                 top: topPadding + 4,
                 right: 16,
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const _SleepTimerButton(),
-                    _WatchLaterButton(
-                      key: ValueKey('wl_${video.id}'),
-                      video: video,
-                    ),
-                    _FavoriteButton(
-                      key: ValueKey(video.id),
-                      video: video,
+                    Row(
+                      children: [
+                        const _SleepTimerButton(),
+                        _WatchLaterButton(
+                          key: ValueKey('wl_${video.id}'),
+                          video: video,
+                        ),
+                        _FavoriteButton(
+                          key: ValueKey(video.id),
+                          video: video,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white54),
+                          onPressed: () => ref.read(playerProvider.notifier).dismiss(),
+                        ),
+                      ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, color: Colors.white54),
-                      onPressed: () => ref.read(playerProvider.notifier).dismiss(),
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
+                      tooltip: 'Minimize to mini player',
+                      onPressed: () => ref.read(playerProvider.notifier).minimize(),
                     ),
                   ],
                 ),
