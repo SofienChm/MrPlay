@@ -101,6 +101,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       },
     );
+    controller.addJavaScriptHandler(
+      handlerName: 'playerControl',
+      callback: (args) {
+        if (args.isEmpty || args.first is! Map) return;
+        final action = (args.first as Map<String, dynamic>)['action'] as String?;
+        switch (action) {
+          case 'toggleCaptions':
+            controlVideo('toggleCaptions');
+            break;
+          case 'pip':
+            togglePictureInPicture();
+            break;
+          case 'fullscreen':
+            controlVideo('fullscreen');
+            break;
+        }
+      },
+    );
     if (_pendingUrl != null) {
       controller.loadUrl(
         urlRequest: URLRequest(url: WebUri(_pendingUrl!)),
@@ -492,6 +510,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
             UserScript(
               source: YouTubeJS.appBannerRemoverScript,
+              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            ),
+            UserScript(
+              source: YouTubeJS.playerControlsScript,
               injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
             ),
           ]),
