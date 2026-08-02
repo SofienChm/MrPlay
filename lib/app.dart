@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:home_widget/home_widget.dart';
@@ -20,16 +22,24 @@ class MrPlayApp extends StatefulWidget {
 }
 
 class _MrPlayAppState extends State<MrPlayApp> {
+  StreamSubscription<Uri?>? _widgetClickedSub;
+
   @override
   void initState() {
     super.initState();
     _initNativeIntegrations();
   }
 
+  @override
+  void dispose() {
+    _widgetClickedSub?.cancel();
+    super.dispose();
+  }
+
   void _initNativeIntegrations() {
     SpotlightService.setOpenHandler(_openExternalUrl);
     ShareLinkHandler.instance.init(_openExternalUrl);
-    HomeWidget.widgetClicked.listen(_openFromWidget);
+    _widgetClickedSub = HomeWidget.widgetClicked.listen(_openFromWidget);
     HomeWidget.initiallyLaunchedFromHomeWidget().then(_openFromWidget);
   }
 

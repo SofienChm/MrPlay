@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Aggregates watch time (per platform + per day) and tracks per-video
@@ -23,6 +24,7 @@ class PlaybackStatsService {
   Timer? _flushTimer;
   String? _currentPlatform;
   Duration? _lastPosition;
+  int _pendingMs = 0;
   bool _loaded = false;
 
   Future<void> _ensureLoaded() async {
@@ -57,6 +59,7 @@ class PlaybackStatsService {
     if (_currentPlatform != platform) {
       _currentPlatform = platform;
       _lastPosition = null;
+      _pendingMs = 0;
     }
     final last = _lastPosition;
     _lastPosition = position;
@@ -65,10 +68,16 @@ class PlaybackStatsService {
     // Ignore seeks / clock resets / gaps > 1 minute.
     if (delta <= Duration.zero || delta > const Duration(minutes: 1)) return;
 
-    final seconds = delta.inSeconds;
-    _platformSeconds[platform] = (_platformSeconds[platform] ?? 0) + seconds;
+    // videoState ticks arrive every ~250 ms, so individual deltas are
+    // sub-second. Carry the fractional milliseconds and only bank whole
+    // seconds into the maps once the accumulator crosses a full second.
+    _pendingMs += delta.inMilliseconds;
+    final wholeSeconds = _pendingMs ~/ 1000;
+    if (wholeSeconds <= 0) return;
+    _pendingMs -= wholeSeconds * 1000;
+    _platformSeconds[platform] = (_platformSeconds[platform] ?? 0) + wholeSeconds;
     final day = _todayKey();
-    _dailySeconds[day] = (_dailySeconds[day] ?? 0) + seconds;
+    _dailySeconds[day] = (_dailySeconds[day] ?? 0) + wholeSeconds;
     _scheduleFlush();
   }
 
@@ -88,6 +97,20 @@ class PlaybackStatsService {
   /// Stops the delta tracker (call on pause / ended / new video).
   void resetTrack() {
     _lastPosition = null;
+    _pendingMs = 0;
+  }
+
+  @visibleForTesting
+  void reset() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    _dailySeconds.clear();
+    _platformSeconds.clear();
+    _progress.clear();
+    _currentPlatform = null;
+    _lastPosition = null;
+    _pendingMs = 0;
+    _loaded = false;
   }
 
   Future<void> saveProgress(String id, Duration position) async {

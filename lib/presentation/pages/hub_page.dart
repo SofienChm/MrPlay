@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/custom_bookmark.dart';
@@ -40,6 +39,7 @@ class _HubPageState extends State<HubPage> {
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(_syncSearchFromController);
     _loadCustomBookmarks();
   }
 
@@ -55,11 +55,13 @@ class _HubPageState extends State<HubPage> {
 
   @override
   void dispose() {
+    _searchController.removeListener(_syncSearchFromController);
     _searchController.dispose();
     super.dispose();
   }
 
-  void _onSearchChanged(String query) {
+  void _syncSearchFromController() {
+    final query = _searchController.text;
     setState(() {
       if (query.isEmpty) {
         _filteredPlatforms = _allPlatforms;
@@ -74,62 +76,9 @@ class _HubPageState extends State<HubPage> {
   }
 
   Future<void> _showAddBookmarkDialog() async {
-    final nameController = TextEditingController();
-    final urlController = TextEditingController();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Add shortcut'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameController,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Name',
-                hintText: 'My Site',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: urlController,
-              keyboardType: TextInputType.url,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'URL',
-                hintText: 'example.com',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              var url = urlController.text.trim();
-              if (name.isEmpty || url.isEmpty) return;
-              if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                url = 'https://$url';
-              }
-              await CustomBookmarksRepository.add(
-                CustomBookmark(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  name: name,
-                  url: url,
-                  addedAt: DateTime.now(),
-                ),
-              );
-              if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-            },
-          child: const Text('Add'),
-          ),
-        ],
-      ),
+      builder: (_) => const _AddBookmarkDialog(),
     );
     if (saved == true) _loadCustomBookmarks();
   }
@@ -176,14 +125,13 @@ class _HubPageState extends State<HubPage> {
       _launchGoogleSearch(query);
     }
     _searchController.clear();
-    setState(() => _showResults = false);
   }
 
-  Future<void> _launchGoogleSearch(String query) async {
-    final url = Uri.parse('https://www.google.com/search?q=${Uri.encodeComponent(query)}');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    }
+  void _launchGoogleSearch(String query) {
+    final url = Uri.parse(
+      'https://www.google.com/search?q=${Uri.encodeComponent(query)}',
+    );
+    MrPlayApp.webViewKey.currentState?.loadUrl(url.toString());
   }
 
   void _onPlatformTap(PlatformModel platform) {
@@ -265,7 +213,6 @@ class _HubPageState extends State<HubPage> {
                   ),
                   child: TextField(
                     controller: _searchController,
-                    onChanged: _onSearchChanged,
                     onSubmitted: _onSearchSubmitted,
                     decoration: InputDecoration(
                       hintText: 'Search platforms or Google...',
@@ -273,10 +220,7 @@ class _HubPageState extends State<HubPage> {
                       suffixIcon: _searchController.text.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear, color: Colors.grey),
-                              onPressed: () {
-                                _searchController.clear();
-                                _onSearchChanged('');
-                              },
+                              onPressed: _searchController.clear,
                             )
                           : null,
                       border: InputBorder.none,
@@ -335,6 +279,83 @@ class _HubPageState extends State<HubPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AddBookmarkDialog extends StatefulWidget {
+  const _AddBookmarkDialog();
+
+  @override
+  State<_AddBookmarkDialog> createState() => _AddBookmarkDialogState();
+}
+
+class _AddBookmarkDialogState extends State<_AddBookmarkDialog> {
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _urlController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _urlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    var url = _urlController.text.trim();
+    if (name.isEmpty || url.isEmpty) return;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://$url';
+    }
+    await CustomBookmarksRepository.add(
+      CustomBookmark(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: name,
+        url: url,
+        addedAt: DateTime.now(),
+      ),
+    );
+    if (mounted) Navigator.pop(context, true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Add shortcut'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _nameController,
+            textCapitalization: TextCapitalization.words,
+            decoration: const InputDecoration(
+              labelText: 'Name',
+              hintText: 'My Site',
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _urlController,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            decoration: const InputDecoration(
+              labelText: 'URL',
+              hintText: 'example.com',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: _save,
+          child: const Text('Add'),
+        ),
+      ],
     );
   }
 }

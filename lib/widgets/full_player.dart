@@ -24,6 +24,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
   late AnimationController _slideController;
   late Animation<Offset> _slideAnimation;
   double _dragOffset = 0;
+  bool _captionsEnabled = false;
 
   @override
   void initState() {
@@ -109,6 +110,40 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     );
   }
 
+  void _togglePlayPause() {
+    final notifier = ref.read(playerProvider.notifier);
+    final webView = MrPlayApp.webViewKey.currentState;
+    final current = ref.read(playerProvider);
+    if (current.isPlaying) {
+      notifier.pause();
+      webView?.controlVideo('pause');
+    } else {
+      notifier.resume();
+      webView?.controlVideo('play');
+    }
+  }
+
+  void _seekBy(double seconds) {
+    final current = ref.read(playerProvider);
+    final target =
+        current.position + Duration(milliseconds: (seconds * 1000).round());
+    final clamped = target.isNegative
+        ? Duration.zero
+        : (current.duration > Duration.zero && target > current.duration
+            ? current.duration
+            : target);
+    ref.read(playerProvider.notifier).seekTo(clamped);
+    MrPlayApp.webViewKey.currentState?.controlVideo(
+      'seek',
+      position: clamped.inMilliseconds / 1000.0,
+    );
+  }
+
+  void _toggleCaptions() {
+    setState(() => _captionsEnabled = !_captionsEnabled);
+    MrPlayApp.webViewKey.currentState?.controlVideo('toggleCaptions');
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(playerProvider);
@@ -153,8 +188,11 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                             borderRadius: BorderRadius.circular(12),
                             child: AspectRatio(
                               aspectRatio: 16 / 9,
-                              child: video.thumbnailUrl.isNotEmpty
-                                  ? CachedNetworkImage(
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  if (video.thumbnailUrl.isNotEmpty)
+                                    CachedNetworkImage(
                                       imageUrl: video.thumbnailUrl,
                                       fit: BoxFit.contain,
                                       placeholder: (_, __) => Container(
@@ -166,12 +204,80 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                         ),
                                       ),
                                     )
-                                  : Container(
+                                  else
+                                    Container(
                                       color: Colors.grey[900],
                                       child: const Center(
                                         child: Icon(Icons.play_circle, color: Colors.white38, size: 64),
                                       ),
                                     ),
+                                  Container(
+                                    color: Colors.black.withValues(alpha: 0.25),
+                                  ),
+                                  Center(
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          iconSize: 40,
+                                          icon: const Icon(Icons.replay_10, color: Colors.white),
+                                          tooltip: 'Back 10 seconds',
+                                          onPressed: () => _seekBy(-10),
+                                        ),
+                                        IconButton(
+                                          iconSize: 56,
+                                          icon: Icon(
+                                            state.isPlaying
+                                                ? Icons.pause_circle_filled
+                                                : Icons.play_circle_filled,
+                                            color: Colors.white,
+                                          ),
+                                          tooltip: state.isPlaying ? 'Pause' : 'Play',
+                                          onPressed: _togglePlayPause,
+                                        ),
+                                        IconButton(
+                                          iconSize: 40,
+                                          icon: const Icon(Icons.forward_10, color: Colors.white),
+                                          tooltip: 'Forward 10 seconds',
+                                          onPressed: () => _seekBy(10),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _OverlayButton(
+                                          icon: Icons.subtitles,
+                                          active: _captionsEnabled,
+                                          tooltip: 'Captions',
+                                          onTap: _toggleCaptions,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        _OverlayButton(
+                                          icon: Icons.picture_in_picture_alt,
+                                          tooltip: 'Picture in picture',
+                                          onTap: () => MrPlayApp.webViewKey.currentState
+                                              ?.togglePictureInPicture(),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Positioned(
+                                    bottom: 8,
+                                    right: 8,
+                                    child: _OverlayButton(
+                                      icon: Icons.fullscreen,
+                                      tooltip: 'Fullscreen',
+                                      onTap: () => MrPlayApp.webViewKey.currentState
+                                          ?.controlVideo('fullscreen'),
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -238,31 +344,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                             ),
                           ),
                           const SizedBox(height: 32),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                iconSize: 48,
-                                icon: Icon(
-                                  state.isPlaying
-                                      ? Icons.pause_circle_filled
-                                      : Icons.play_circle_filled,
-                                  color: Colors.white,
-                                ),
-                                onPressed: () {
-                                  final notifier = ref.read(playerProvider.notifier);
-                                  final webView = MrPlayApp.webViewKey.currentState;
-                                  if (state.isPlaying) {
-                                    notifier.pause();
-                                    webView?.controlVideo('pause');
-                                  } else {
-                                    notifier.resume();
-                                    webView?.controlVideo('play');
-                                  }
-                                },
-                              ),
-                            ],
-                          ),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -346,6 +427,7 @@ class _WatchLaterButton extends StatefulWidget {
 
 class _WatchLaterButtonState extends State<_WatchLaterButton> {
   bool? _isQueued;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -359,22 +441,29 @@ class _WatchLaterButtonState extends State<_WatchLaterButton> {
   }
 
   Future<void> _toggle() async {
-    final video = widget.video;
-    if (_isQueued == true) {
-      await WatchLaterRepository.remove(video.id);
-    } else {
-      await WatchLaterRepository.add(
-        FavoriteVideo(
-          id: video.id,
-          title: video.title,
-          channel: video.platform.isEmpty ? 'YouTube' : video.platform,
-          thumbnailUrl: video.thumbnailUrl,
-          platformUrl: video.videoUrl,
-          addedAt: DateTime.now(),
-        ),
-      );
+    if (_busy || _isQueued == null) return;
+    _busy = true;
+    final target = _isQueued != true;
+    try {
+      final video = widget.video;
+      if (target) {
+        await WatchLaterRepository.add(
+          FavoriteVideo(
+            id: video.id,
+            title: video.title,
+            channel: video.platform.isEmpty ? 'YouTube' : video.platform,
+            thumbnailUrl: video.thumbnailUrl,
+            platformUrl: video.videoUrl,
+            addedAt: DateTime.now(),
+          ),
+        );
+      } else {
+        await WatchLaterRepository.remove(video.id);
+      }
+      if (mounted) setState(() => _isQueued = target);
+    } finally {
+      _busy = false;
     }
-    if (mounted) setState(() => _isQueued = _isQueued != true);
   }
 
   @override
@@ -482,6 +571,7 @@ class _SleepTimerButton extends StatelessWidget {
 
 class _FavoriteButtonState extends State<_FavoriteButton> {
   bool? _isFavorite;
+  bool _busy = false;
 
   @override
   void initState() {
@@ -495,22 +585,29 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
   }
 
   Future<void> _toggle() async {
-    final video = widget.video;
-    if (_isFavorite == true) {
-      await FavoritesRepository.remove(video.id);
-    } else {
-      await FavoritesRepository.add(
-        FavoriteVideo(
-          id: video.id,
-          title: video.title,
-          channel: video.platform.isEmpty ? 'YouTube' : video.platform,
-          thumbnailUrl: video.thumbnailUrl,
-          platformUrl: video.videoUrl,
-          addedAt: DateTime.now(),
-        ),
-      );
+    if (_busy || _isFavorite == null) return;
+    _busy = true;
+    final target = _isFavorite != true;
+    try {
+      final video = widget.video;
+      if (target) {
+        await FavoritesRepository.add(
+          FavoriteVideo(
+            id: video.id,
+            title: video.title,
+            channel: video.platform.isEmpty ? 'YouTube' : video.platform,
+            thumbnailUrl: video.thumbnailUrl,
+            platformUrl: video.videoUrl,
+            addedAt: DateTime.now(),
+          ),
+        );
+      } else {
+        await FavoritesRepository.remove(video.id);
+      }
+      if (mounted) setState(() => _isFavorite = target);
+    } finally {
+      _busy = false;
     }
-    if (mounted) setState(() => _isFavorite = _isFavorite != true);
   }
 
   @override
@@ -522,6 +619,40 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
         color: isFavorite ? Colors.red : Colors.white54,
       ),
       onPressed: _isFavorite == null ? null : _toggle,
+    );
+  }
+}
+
+class _OverlayButton extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _OverlayButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: active
+                ? Colors.red.withValues(alpha: 0.9)
+                : Colors.black.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Icon(icon, color: Colors.white, size: 20),
+        ),
+      ),
     );
   }
 }

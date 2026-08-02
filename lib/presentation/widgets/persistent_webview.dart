@@ -340,6 +340,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ''');
         }
         break;
+      case 'toggleCaptions':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var v = document.querySelector('video');
+            if (!v || !v.textTracks || v.textTracks.length === 0) return;
+            var anyShown = false;
+            for (var i = 0; i < v.textTracks.length; i++) {
+              if (v.textTracks[i].mode === 'showing') { anyShown = true; break; }
+            }
+            for (var j = 0; j < v.textTracks.length; j++) {
+              v.textTracks[j].mode = anyShown ? 'hidden' : 'showing';
+            }
+          })();
+        ''');
+        break;
+      case 'fullscreen':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var v = document.querySelector('video');
+            if (!v) return;
+            if (v.requestFullscreen) {
+              if (document.fullscreenElement) {
+                document.exitFullscreen().catch(function(){});
+              } else {
+                v.requestFullscreen().catch(function(){});
+              }
+            } else if (v.webkitEnterFullscreen) {
+              v.webkitEnterFullscreen();
+            }
+          })();
+        ''');
+        break;
     }
   }
 
@@ -417,7 +449,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
-  void _togglePiP() {
+  void togglePictureInPicture() {
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -534,7 +566,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           bottom: 140,
           right: 16,
           child: GestureDetector(
-            onTap: _togglePiP,
+            onTap: togglePictureInPicture,
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
