@@ -27,6 +27,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
   Timer? _reappearTimer;
+  Timer? _retryTimer;
   bool _adsInitiated = false;
 
   @override
@@ -70,8 +71,16 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
+          // Logged so Xcode/Console shows WHY the banner is missing
+          // (no-fill, wrong app id, offline...). Retry every 30s.
+          debugPrint('MrPlay banner failed to load: '
+              'code=${error.code} domain=${error.domain} message=${error.message}');
           if (!mounted) return;
           setState(() => _bannerAd = null);
+          _retryTimer?.cancel();
+          _retryTimer = Timer(const Duration(seconds: 30), () {
+            if (mounted && !_adLoaded) _loadBannerAd();
+          });
         },
       ),
     )..load();
@@ -93,6 +102,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _reappearTimer?.cancel();
+    _retryTimer?.cancel();
     _bannerAd?.dispose();
     super.dispose();
   }

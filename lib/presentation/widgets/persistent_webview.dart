@@ -54,23 +54,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _pipOnBackgroundTimer = Timer(const Duration(milliseconds: 400), () {
         if (mounted &&
             WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
-          _keepAudioAliveInBackground();
+          _reassertAudioSession();
+          enterPiP(resumePlayback: true);
         }
       });
     } else if (state == AppLifecycleState.paused) {
-      _keepAudioAliveInBackground();
+      _reassertAudioSession();
+      enterPiP(resumePlayback: true);
     } else if (state == AppLifecycleState.resumed) {
       _pipOnBackgroundTimer?.cancel();
     }
-  }
-
-  /// PiP + force-resume keeps audio alive through the iOS background pause,
-  /// but only when the video was actually playing. If the user paused it,
-  /// backgrounding or locking the screen must NOT start playback again.
-  void _keepAudioAliveInBackground() {
-    if (!ref.read(playerProvider).isPlaying) return;
-    _reassertAudioSession();
-    enterPiP(resumePlayback: true);
   }
 
   Future<void> _reassertAudioSession() async {
