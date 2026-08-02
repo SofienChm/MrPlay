@@ -4,11 +4,13 @@ import '../../data/models/platform_model.dart';
 class PlatformCard extends StatefulWidget {
   final PlatformModel platform;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const PlatformCard({
     super.key,
     required this.platform,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -60,6 +62,7 @@ class _PlatformCardState extends State<PlatformCard>
       case 'quora': return Icons.help_outline;
       case '9gag': return Icons.emoji_emotions;
       case 'ifunny': return Icons.sentiment_very_satisfied;
+      case 'custom': return Icons.public;
       default: return Icons.open_in_browser;
     }
   }
@@ -73,6 +76,7 @@ class _PlatformCardState extends State<PlatformCard>
         widget.onTap();
       },
       onTapCancel: () => _controller.reverse(),
+      onLongPress: widget.onLongPress,
       child: AnimatedBuilder(
         animation: _scaleAnimation,
         builder: (context, child) {

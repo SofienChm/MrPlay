@@ -160,8 +160,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final playing = data['playing'] == true;
       final ended = data['ended'] == true;
-      final positionMs = ((data['position'] as num?)?.toDouble() ?? 0) * 1000;
-      final durationMs = ((data['duration'] as num?)?.toDouble() ?? 0) * 1000;
+      // Live streams can report non-finite position/duration - clamp to 0 so
+      // Duration(milliseconds:) never receives Infinity/NaN (which throws).
+      final posSec = (data['position'] as num?)?.toDouble() ?? 0;
+      final durSec = (data['duration'] as num?)?.toDouble() ?? 0;
+      final positionMs = posSec.isFinite ? posSec * 1000 : 0.0;
+      final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
       if (ref.read(playerProvider).currentVideo != null) {
         ref.read(playerProvider.notifier).syncState(
               isPlaying: playing,

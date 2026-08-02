@@ -1,4 +1,23 @@
 MrPlay - Project Map
+
+> **Implementation Status (2026-08-02)** — the sections below describe the original plan.
+> Actual stack: **Riverpod** (not bloc), **flutter_inappwebview** (not webview_flutter),
+> iOS-only (no android/ folder). Implemented on top of the plan:
+> - Auto-PiP on app background + swipe-down-to-PiP from full/mini player
+> - PiP search-shelter: video survives YouTube SPA navigation via `history.pushState`/
+>   `replaceState` wrappers + `yt-navigate-start`/`ytm-navigate-start` hooks (fixed 2026-08-02)
+> - Generic content blocker (`content_blocker_js.dart`) + YouTube UI cleanup scripts
+> - Silent-audio background keep-alive (only while media is playing)
+> - AdMob adaptive banner (test IDs while in development)
+> - Spotlight indexing, home widget, share extension
+> - **Watch Later queue** (Hive box `watch_later`, bookmark button in full player, Library tabs)
+> - **Sleep timer** (`sleep_timer_service.dart`, bedtime button in full player, 5–60 min)
+> - **Custom bookmarks** (Hive box `custom_bookmarks`, "+" card in hub grid, long-press to delete)
+> - Fixes 2026-08-02: live-stream `Infinity` duration crash (JS + Dart guards),
+>   Slider/progress clamping, mini-player drag visual feedback
+> - Known pending: AdMob `GADApplicationIdentifier` in Info.plist is the TEST app id —
+>   replace with the real one before release; dependencies outdated (riverpod 3.x, admob 9.x)
+
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.
 Architecture

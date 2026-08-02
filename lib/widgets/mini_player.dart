@@ -37,7 +37,15 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
     final video = state.currentVideo;
     if (video == null || !state.isMinimized) return const SizedBox.shrink();
 
-    return GestureDetector(
+    // Visual feedback while dragging down towards PiP: follow the finger and
+    // fade out so the gesture doesn't feel dead.
+    final dragProgress = (_dragOffset / 200).clamp(0.0, 1.0);
+
+    return Transform.translate(
+      offset: Offset(0, _dragOffset * 0.6),
+      child: Opacity(
+        opacity: 1 - dragProgress * 0.7,
+        child: GestureDetector(
       onTap: () => ref.read(playerProvider.notifier).expand(),
       onVerticalDragUpdate: _onVerticalDragUpdate,
       onVerticalDragEnd: _onVerticalDragEnd,
@@ -48,7 +56,9 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
           children: [
             LinearProgressIndicator(
               value: state.duration.inMilliseconds > 0
-                  ? state.position.inMilliseconds / state.duration.inMilliseconds
+                  ? (state.position.inMilliseconds /
+                          state.duration.inMilliseconds)
+                      .clamp(0.0, 1.0)
                   : 0,
               backgroundColor: Colors.white10,
               color: Colors.red,
@@ -130,6 +140,8 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
               ),
             ),
           ],
+        ),
+      ),
         ),
       ),
     );

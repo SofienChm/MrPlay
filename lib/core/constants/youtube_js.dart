@@ -45,8 +45,9 @@ class YouTubeJS {
           if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
             window.flutter_inappwebview.callHandler('videoState', {
               playing: !this.paused && !this.ended,
-              position: this.currentTime || 0,
-              duration: this.duration || 0,
+              position: isFinite(this.currentTime) ? this.currentTime : 0,
+              // Live streams report duration = Infinity; Dart cannot convert that.
+              duration: isFinite(this.duration) ? this.duration : 0,
               ended: !!this.ended
             });
           }
@@ -126,6 +127,28 @@ class YouTubeJS {
       window.addEventListener('popstate', function() {
         shelterPlayingVideo();
       }, true);
+
+      // SPA navigation: YouTube's router uses history.pushState/replaceState,
+      // which fire NEITHER submit NOR popstate. Without these hooks the watch
+      // page is torn down, the <video> is destroyed and iOS kills PiP.
+      var origPushState = history.pushState;
+      history.pushState = function() {
+        shelterPlayingVideo();
+        return origPushState.apply(this, arguments);
+      };
+      var origReplaceState = history.replaceState;
+      history.replaceState = function() {
+        shelterPlayingVideo();
+        return origReplaceState.apply(this, arguments);
+      };
+
+      // YouTube also emits custom navigation lifecycle events on both desktop
+      // and mobile web - shelter before the router swaps the page content.
+      ['yt-navigate-start', 'ytm-navigate-start', 'yt-page-data-will-update'].forEach(function(evt) {
+        window.addEventListener(evt, function() {
+          shelterPlayingVideo();
+        }, true);
+      });
     })();
   ''';
 

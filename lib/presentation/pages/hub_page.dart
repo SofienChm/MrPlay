@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
+import '../../data/models/custom_bookmark.dart';
 import '../../data/models/platform_model.dart';
+import '../../data/repositories/custom_bookmarks_repository.dart';
 import '../widgets/platform_card.dart';
 import '../pages/search_page.dart';
 import 'favorites_page.dart';
@@ -18,8 +20,38 @@ class HubPage extends StatefulWidget {
 
 class _HubPageState extends State<HubPage> {
   final TextEditingController _searchController = TextEditingController();
+  List<CustomBookmark> _customBookmarks = [];
   List<PlatformModel> _filteredPlatforms = PlatformConstants.platforms;
   bool _showResults = false;
+
+  List<PlatformModel> get _allPlatforms => [
+        ...PlatformConstants.platforms,
+        ..._customBookmarks.map(
+          (b) => PlatformModel(
+            name: b.name,
+            url: b.url,
+            icon: 'custom',
+            category: 'custom',
+            color: AppColors.border,
+          ),
+        ),
+      ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCustomBookmarks();
+  }
+
+  Future<void> _loadCustomBookmarks() async {
+    final bookmarks = await CustomBookmarksRepository.getAll();
+    if (mounted) {
+      setState(() {
+        _customBookmarks = bookmarks;
+        if (!_showResults) _filteredPlatforms = _allPlatforms;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -30,15 +62,105 @@ class _HubPageState extends State<HubPage> {
   void _onSearchChanged(String query) {
     setState(() {
       if (query.isEmpty) {
-        _filteredPlatforms = PlatformConstants.platforms;
+        _filteredPlatforms = _allPlatforms;
         _showResults = false;
       } else {
-        _filteredPlatforms = PlatformConstants.platforms
+        _filteredPlatforms = _allPlatforms
             .where((p) => p.name.toLowerCase().contains(query.toLowerCase()))
             .toList();
         _showResults = true;
       }
     });
+  }
+
+  Future<void> _showAddBookmarkDialog() async {
+    final nameController = TextEditingController();
+    final urlController = TextEditingController();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Add shortcut'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Name',
+                hintText: 'My Site',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: urlController,
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'URL',
+                hintText: 'example.com',
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              var url = urlController.text.trim();
+              if (name.isEmpty || url.isEmpty) return;
+              if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'https://$url';
+              }
+              await CustomBookmarksRepository.add(
+                CustomBookmark(
+                  id: DateTime.now().millisecondsSinceEpoch.toString(),
+                  name: name,
+                  url: url,
+                  addedAt: DateTime.now(),
+                ),
+              );
+              if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+            },
+          child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true) _loadCustomBookmarks();
+  }
+
+  Future<void> _confirmDeleteBookmark(PlatformModel platform) async {
+    final bookmark = _customBookmarks.cast<CustomBookmark?>().firstWhere(
+          (b) => b!.url == platform.url,
+          orElse: () => null,
+        );
+    if (bookmark == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Remove ${platform.name}?'),
+        content: const Text('This shortcut will be removed from the hub.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Remove', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await CustomBookmarksRepository.remove(bookmark.id);
+      _loadCustomBookmarks();
+    }
   }
 
   void _onSearchSubmitted(String query) {
@@ -192,12 +314,18 @@ class _HubPageState extends State<HubPage> {
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
                           ),
-                          itemCount: _filteredPlatforms.length,
+                          itemCount: _filteredPlatforms.length + (_showResults ? 0 : 1),
                           itemBuilder: (context, index) {
+                            if (index >= _filteredPlatforms.length) {
+                              return _AddCard(onTap: _showAddBookmarkDialog);
+                            }
                             final platform = _filteredPlatforms[index];
                             return PlatformCard(
                               platform: platform,
                               onTap: () => _onPlatformTap(platform),
+                              onLongPress: platform.category == 'custom'
+                                  ? () => _confirmDeleteBookmark(platform)
+                                  : null,
                             );
                           },
                         ),
@@ -205,6 +333,40 @@ class _HubPageState extends State<HubPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AddCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _AddCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white30, width: 1.5),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add, size: 36, color: Colors.white70),
+            SizedBox(height: 8),
+            Text(
+              'Add',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );

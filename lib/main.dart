@@ -5,6 +5,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'app.dart';
 import 'data/models/favorite_video.dart';
+import 'data/models/custom_bookmark.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,5 +21,6 @@ void main() async {
 
   await Hive.initFlutter();
   Hive.registerAdapter(FavoriteVideoAdapter());
+  Hive.registerAdapter(CustomBookmarkAdapter());
   runApp(const ProviderScope(child: MrPlayApp()));
 }
