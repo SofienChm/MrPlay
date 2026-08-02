@@ -65,12 +65,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (mounted &&
             WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
           _reassertAudioSession();
-          enterPiP(resumePlayback: true);
+          enterPiP(resumePlayback: ref.read(playerProvider).isPlaying);
         }
       });
     } else if (state == AppLifecycleState.paused) {
       _reassertAudioSession();
-      enterPiP(resumePlayback: true);
+      enterPiP(resumePlayback: ref.read(playerProvider).isPlaying);
     } else if (state == AppLifecycleState.resumed) {
       _pipOnBackgroundTimer?.cancel();
     }
