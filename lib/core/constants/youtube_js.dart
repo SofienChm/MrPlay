@@ -131,22 +131,51 @@ class YouTubeJS {
       // SPA navigation: YouTube's router uses history.pushState/replaceState,
       // which fire NEITHER submit NOR popstate. Without these hooks the watch
       // page is torn down, the <video> is destroyed and iOS kills PiP.
+      // IMPORTANT: shelter only when navigating AWAY from the watch page to a
+      // DIFFERENT page. YouTube also calls replaceState/pushState during normal
+      // watch-page playback (tracking params, page-data updates) - sheltering
+      // then rips the <video> out of the player and leaves a black box.
+      function shouldShelterForUrl(url) {
+        if (!url) return false;
+        var s = String(url);
+        // Navigating to (or staying on) a watch page never needs sheltering.
+        if (s.indexOf('/watch') !== -1) return false;
+        try {
+          var target = new URL(s, location.href);
+          // Same path+search = in-place state update, not a real navigation.
+          if (target.pathname === location.pathname && target.search === location.search) return false;
+        } catch (e) {}
+        return true;
+      }
+
       var origPushState = history.pushState;
-      history.pushState = function() {
-        shelterPlayingVideo();
+      history.pushState = function(state, title, url) {
+        if (shouldShelterForUrl(url)) shelterPlayingVideo();
         return origPushState.apply(this, arguments);
       };
       var origReplaceState = history.replaceState;
-      history.replaceState = function() {
-        shelterPlayingVideo();
+      history.replaceState = function(state, title, url) {
+        if (shouldShelterForUrl(url)) shelterPlayingVideo();
         return origReplaceState.apply(this, arguments);
       };
 
-      // YouTube also emits custom navigation lifecycle events on both desktop
-      // and mobile web - shelter before the router swaps the page content.
-      ['yt-navigate-start', 'ytm-navigate-start', 'yt-page-data-will-update'].forEach(function(evt) {
-        window.addEventListener(evt, function() {
-          shelterPlayingVideo();
+      // YouTube also emits custom navigation lifecycle events. They carry the
+      // destination in event.detail - shelter only when a real non-watch URL
+      // can be read from it, otherwise the history wrappers above are enough.
+      function navEventUrl(e) {
+        try {
+          var d = e && e.detail;
+          if (!d) return null;
+          if (d.url) return d.url;
+          if (d.endpoint && d.endpoint.url) return d.endpoint.url;
+          if (d.response && d.response.url) return d.response.url;
+        } catch (err) {}
+        return null;
+      }
+
+      ['yt-navigate-start', 'ytm-navigate-start'].forEach(function(evt) {
+        window.addEventListener(evt, function(e) {
+          if (shouldShelterForUrl(navEventUrl(e))) shelterPlayingVideo();
         }, true);
       });
     })();
