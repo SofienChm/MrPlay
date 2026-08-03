@@ -77,6 +77,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
     );
   }
 
+  void updateMetadata(Video video) =>
+      state = state.copyWith(currentVideo: video);
+
   void pause() => state = state.copyWith(isPlaying: false);
 
   void resume() => state = state.copyWith(isPlaying: true);

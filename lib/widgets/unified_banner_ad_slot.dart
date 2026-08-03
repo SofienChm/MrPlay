@@ -22,27 +22,17 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     with WidgetsBindingObserver {
   BannerAd? _bannerAd;
   Widget? _adWidget;
-  AdSize? _adSize;
   bool _adLoaded = false;
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
   Timer? _reappearTimer;
   Timer? _retryTimer;
-  bool _adsInitiated = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (!_adsInitiated) {
-      _adsInitiated = true;
-      _loadBannerAd();
-    }
+    _loadBannerAd();
   }
 
   @override
@@ -53,15 +43,10 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     }
   }
 
-  Future<void> _loadBannerAd() async {
-    final size = await AdSize.getCurrentOrientationAnchoredAdaptiveBannerAdSize(
-      MediaQuery.of(context).size.width.round(),
-    );
-    if (!mounted) return;
-    _adSize = size;
+  void _loadBannerAd() {
     _bannerAd = BannerAd(
       adUnitId: AdConfig.bannerAdUnitId,
-      size: size ?? AdSize.largeBanner,
+      size: AdSize.banner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -113,50 +98,41 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       return const SizedBox.shrink();
     }
 
-    final size = _adSize;
-    final bannerWidth = size == null ? 320.0 : size.width.toDouble();
-    final bannerHeight = size == null ? 100.0 : size.height.toDouble();
-
-    return Padding(
-      padding: const EdgeInsets.only(left: 10),
-      child: SizedBox(
-        width: bannerWidth,
-        height: bannerHeight,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: Container(
-            decoration: BoxDecoration(
-              color: widget.backgroundColor,
-              border: Border.all(color: Colors.white.withAlpha(15), width: 1),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        height: 60,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: widget.backgroundColor,
+          border: Border.all(color: Colors.white.withAlpha(15), width: 1),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Center(child: _adWidget!),
             ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Center(child: _adWidget!),
-                ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    onTap: _handleDismiss,
-                    child: Container(
-                      width: 22,
-                      height: 22,
-                      decoration: const BoxDecoration(
-                        color: AppColors.border,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.close,
-                        size: 13,
-                        color: Colors.white60,
-                      ),
-                    ),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: GestureDetector(
+                onTap: _handleDismiss,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: const BoxDecoration(
+                    color: AppColors.border,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    size: 13,
+                    color: Colors.white60,
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );

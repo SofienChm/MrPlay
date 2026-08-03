@@ -27,12 +27,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool isReady = false;
   bool _isLoading = false;
   String? _pendingUrl;
+  String? _currentUrl;
   String? _loadError;
   Timer? _loadingTimer;
   Timer? _pipOnBackgroundTimer;
   Timer? _nowPlayingThrottle;
   bool _endedHandled = false;
   bool _resumeSeekDone = false;
+  bool _appIsBackgrounded = false;
   int _lastNowPlayingMs = 0;
 
   @override
@@ -64,16 +66,27 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _pipOnBackgroundTimer = Timer(const Duration(milliseconds: 400), () {
         if (mounted &&
             WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
-          _reassertAudioSession();
-          enterPiP(resumePlayback: ref.read(playerProvider).isPlaying);
+          _enterBackground();
         }
       });
     } else if (state == AppLifecycleState.paused) {
-      _reassertAudioSession();
-      enterPiP(resumePlayback: ref.read(playerProvider).isPlaying);
+      _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _pipOnBackgroundTimer?.cancel();
+      _appIsBackgrounded = false;
     }
+  }
+
+  void _enterBackground() {
+    _appIsBackgrounded = true;
+    _reassertAudioSession();
+    // Keep the audio session alive while the webview is suspended so iOS
+    // doesn't tear down background audio before PiP has a chance to take over
+    // the video track.
+    if (ref.read(playerProvider).isPlaying) {
+      BackgroundAudioKeepAlive.instance.start();
+    }
+    enterPiP(resumePlayback: ref.read(playerProvider).isPlaying);
   }
 
   Future<void> _reassertAudioSession() async {
@@ -128,6 +141,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void _onLoadStart(InAppWebViewController controller, WebUri? url) {
+    _currentUrl = url?.toString();
     if (mounted) setState(() => _isLoading = true);
     if (_loadError != null && mounted) setState(() => _loadError = null);
     _loadingTimer?.cancel();
@@ -212,6 +226,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             artworkUrl: video.thumbnailUrl,
           );
           _lastNowPlayingMs = 0;
+        } else {
+          // Same video already tracked (fallback placeholder created it):
+          // upgrade its metadata to the real title/thumbnail.
+          final current = ref.read(playerProvider).currentVideo;
+          if (current != null && current.title == 'YouTube video') {
+            ref.read(playerProvider.notifier).updateMetadata(video);
+          }
         }
       }
     } catch (_) {}
@@ -227,7 +248,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final durSec = (data['duration'] as num?)?.toDouble() ?? 0;
       final positionMs = posSec.isFinite ? posSec * 1000 : 0.0;
       final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
-      final video = ref.read(playerProvider).currentVideo;
+      var video = ref.read(playerProvider).currentVideo;
+      // Fallback: if the video is actually playing but the `playerInfo` JS
+      // (title extraction) never reported in, build the Video from the current
+      // URL so the mini player / stats / media controls still appear.
+      if (video == null && playing && !ended) {
+        final url = _currentUrl ?? '';
+        final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
+        if (idMatch != null) {
+          final videoId = idMatch.group(1)!;
+          video = Video(
+            id: videoId,
+            title: 'YouTube video',
+            thumbnailUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+            videoUrl: url,
+            platform: 'YouTube',
+          );
+          ref.read(playerProvider.notifier).play(video);
+        }
+      }
       if (video != null) {
         ref.read(playerProvider.notifier).syncState(
               isPlaying: playing,
@@ -249,7 +288,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       }
       if (playing && !ended) {
         BackgroundAudioKeepAlive.instance.start();
-      } else {
+      } else if (!_appIsBackgrounded) {
+        // While the app is backgrounded, iOS may pause the webview video
+        // momentarily (before/around PiP takeover). Don't kill the keep-alive
+        // loop then, or the app gets suspended and audio stops.
         BackgroundAudioKeepAlive.instance.stop();
         if (ended) {
           PlaybackStatsService.instance.flush();
@@ -462,6 +504,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               if (btn) btn.click();
             });
           }
+        }
+      })();
+    ''');
+  }
+
+  /// Brings the playing <video> back into the visible viewport. Used when the
+  /// full player is expanded so the live video (rendered by the webview) lines
+  /// up with the transparent video area of the full player.
+  void scrollVideoIntoView() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var v = document.querySelector('video');
+        if (!v) return;
+        var player = v.closest('#movie_player') || v.parentElement;
+        if (!player) return;
+        var r = player.getBoundingClientRect();
+        if (r.top < 0 || r.bottom > window.innerHeight) {
+          player.scrollIntoView({block: 'start', behavior: 'smooth'});
         }
       })();
     ''');

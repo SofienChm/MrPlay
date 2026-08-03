@@ -46,7 +46,10 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
       child: Opacity(
         opacity: 1 - dragProgress * 0.7,
         child: GestureDetector(
-      onTap: () => ref.read(playerProvider.notifier).expand(),
+      onTap: () {
+        ref.read(playerProvider.notifier).expand();
+        MrPlayApp.webViewKey.currentState?.scrollVideoIntoView();
+      },
       onVerticalDragUpdate: _onVerticalDragUpdate,
       onVerticalDragEnd: _onVerticalDragEnd,
       child: Container(

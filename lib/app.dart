@@ -2,10 +2,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_widget/home_widget.dart';
 import 'core/theme/app_theme.dart';
 import 'presentation/pages/hub_page.dart';
 import 'presentation/widgets/persistent_webview.dart';
+import 'providers/player_provider.dart';
 import 'services/share_link_handler.dart';
 import 'services/spotlight_service.dart';
 import 'widgets/persistent_player_shell.dart';
@@ -82,11 +84,19 @@ class _MrPlayAppState extends State<MrPlayApp> {
                   ),
                 ),
                 const PersistentPlayerShell(),
-                const Positioned(
+                Positioned(
                   left: 0,
                   right: 0,
                   bottom: 80,
-                  child: UnifiedBannerAdSlot(),
+                  child: Consumer(
+                    builder: (context, ref, _) {
+                      final state = ref.watch(playerProvider);
+                      // Don't float the banner over the fullscreen player.
+                      final hide =
+                          state.currentVideo != null && !state.isMinimized;
+                      return UnifiedBannerAdSlot(isVisible: !hide);
+                    },
+                  ),
                 ),
               ],
             ),
