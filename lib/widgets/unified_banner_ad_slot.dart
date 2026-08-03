@@ -46,7 +46,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   void _loadBannerAd() {
     _bannerAd = BannerAd(
       adUnitId: AdConfig.bannerAdUnitId,
-      size: AdSize.banner,
+      size: AdSize.largeBanner,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -101,7 +101,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     return ClipRRect(
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        height: 60,
+        height: 100,
         width: double.infinity,
         decoration: BoxDecoration(
           color: widget.backgroundColor,

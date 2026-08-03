@@ -395,7 +395,11 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white70),
+                      iconSize: 30,
+                      style: IconButton.styleFrom(
+                        backgroundColor: Colors.black.withValues(alpha: 0.55),
+                      ),
+                      icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
                       tooltip: 'Minimize to mini player',
                       onPressed: () => ref.read(playerProvider.notifier).minimize(),
                     ),

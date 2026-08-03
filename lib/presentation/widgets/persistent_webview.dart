@@ -30,7 +30,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   String? _currentUrl;
   String? _loadError;
   Timer? _loadingTimer;
-  Timer? _pipOnBackgroundTimer;
   Timer? _nowPlayingThrottle;
   bool _endedHandled = false;
   bool _resumeSeekDone = false;
@@ -48,7 +47,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
-    _pipOnBackgroundTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
@@ -58,21 +56,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive) {
-      // App is leaving the foreground (home button, app switcher). iOS pauses
-      // video-track media as soon as the app backgrounds, so request PiP before
-      // that happens, but only if we keep going to background (control-center /
-      // incoming-call transients stay in `inactive`).
-      _pipOnBackgroundTimer?.cancel();
-      _pipOnBackgroundTimer = Timer(const Duration(milliseconds: 400), () {
-        if (mounted &&
-            WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
-          _enterBackground();
-        }
-      });
+      // Enter PiP as early as possible (the `inactive` frame). iOS pauses the
+      // webview's video track right around `paused`, and once that happens
+      // requestPictureInPicture can refuse, killing background audio.
+      _enterBackground();
     } else if (state == AppLifecycleState.paused) {
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
-      _pipOnBackgroundTimer?.cancel();
       _appIsBackgrounded = false;
     }
   }
