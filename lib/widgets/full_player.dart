@@ -273,7 +273,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                               margin: const EdgeInsets.symmetric(horizontal: 12),
                               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.55),
+                                color: Colors.black.withValues(alpha: 0.90),
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Column(
