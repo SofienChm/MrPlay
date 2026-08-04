@@ -23,7 +23,6 @@ class YouTubeJS {
           v.setAttribute('playsinline', 'true');
           v.setAttribute('webkit-playsinline', 'true');
           v.setAttribute('pip', 'true');
-          v.style.objectFit = 'contain';
 
           v.addEventListener('play', reportState);
           v.addEventListener('pause', reportState);

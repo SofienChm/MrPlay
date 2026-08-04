@@ -165,7 +165,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         // so the full player must let it show through (previously this was an
         // opaque black sheet with a static thumbnail -> "black video").
         child: Container(
-          color: Colors.transparent,
+          color: Colors.black,
           child: Stack(
             children: [
               Transform.translate(

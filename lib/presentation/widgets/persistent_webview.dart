@@ -39,6 +39,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // playing. User-initiated pauses (lock screen, Control Center, sleep timer)
   // clear this so they are not fought.
   bool _backgroundResumeAllowed = false;
+  bool _userPausedInBackground = false;
   int _lastNowPlayingMs = 0;
 
   @override
@@ -69,22 +70,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
+      _userPausedInBackground = false;
       // Bring the video back inline. PiP may have been entered while
       // backgrounded (or by a transient `inactive` such as Control Center);
       // leaving it on makes the in-page player a black "playing in PiP"
       // placeholder that survives across videos (the SPA reuses the element).
-      // Retry once: the PiP presentation-mode transition is async and can
-      // swallow an exit requested while it is still being established.
+      // Retry multiple times: the PiP presentation-mode transition is async
+      // and can swallow an exit requested while it is still being established.
       exitPiP();
       Future.delayed(const Duration(milliseconds: 600), exitPiP);
+      Future.delayed(const Duration(milliseconds: 1500), exitPiP);
+      Future.delayed(const Duration(milliseconds: 3000), _ensureVideoVisible);
     }
   }
 
   void _enterBackground() {
     _appIsBackgrounded = true;
-    // Only auto-resume if the video was playing when the app went away; a
-    // video the user already paused must stay paused.
-    _backgroundResumeAllowed = ref.read(playerProvider).isPlaying;
+    // Only auto-resume if the video was playing when the app went away and
+    // the user hasn't explicitly paused from the background/lock screen.
+    _backgroundResumeAllowed = ref.read(playerProvider).isPlaying && !_userPausedInBackground;
     _reassertAudioSession();
     // Keep the audio session alive while the webview is suspended so iOS
     // doesn't tear down background audio before PiP has a chance to take over
@@ -92,7 +96,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (ref.read(playerProvider).isPlaying) {
       BackgroundAudioKeepAlive.instance.start();
     }
-    enterPiP(resumePlayback: ref.read(playerProvider).isPlaying);
+    enterPiP(resumePlayback: ref.read(playerProvider).isPlaying && !_userPausedInBackground);
   }
 
   Future<void> _reassertAudioSession() async {
@@ -244,6 +248,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (currentId != video.id) {
           _endedHandled = false;
           _resumeSeekDone = false;
+          _userPausedInBackground = false;
           ref.read(playerProvider.notifier).play(video);
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
@@ -304,6 +309,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       }
       if (playing && !ended) {
         BackgroundAudioKeepAlive.instance.start();
+        _userPausedInBackground = false;
       } else if (!_appIsBackgrounded) {
         // While the app is backgrounded, iOS may pause the webview video
         // momentarily (before/around PiP takeover). Don't kill the keep-alive
@@ -346,6 +352,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       platform: 'YouTube',
     );
     ref.read(playerProvider.notifier).play(video);
+    _userPausedInBackground = false;
     return video;
   }
 
@@ -380,6 +387,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     switch (command) {
       case 'play':
         _backgroundResumeAllowed = true;
+        _userPausedInBackground = false;
         notifier.resume();
         controlVideo('play');
         break;
@@ -391,6 +399,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           userInitiatedPause();
         } else {
           _backgroundResumeAllowed = true;
+          _userPausedInBackground = false;
           notifier.resume();
           controlVideo('play');
         }
@@ -421,6 +430,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// to keep audio playing; user pauses must not be fought.
   void userInitiatedPause() {
     _backgroundResumeAllowed = false;
+    if (_appIsBackgrounded) _userPausedInBackground = true;
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
   }
@@ -429,6 +439,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// there is something to display) and collapses the full player. Bound to
   /// the mini-player overlay button in the webview.
   void showMiniPlayer() {
+    _userPausedInBackground = false;
     _trackVideoFromUrl();
     if (ref.read(playerProvider).currentVideo != null) {
       ref.read(playerProvider.notifier).minimize();
@@ -610,6 +621,32 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
+  /// Last-resort fallback: if exitPiP failed to bring the video back inline,
+  /// force the video element to be visible so the user doesn't see a black
+  /// screen. Also tries one final PiP exit in case the timing was just off.
+  void _ensureVideoVisible() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = document.querySelector('video');
+        if (!video) return;
+        try {
+          if (video.webkitSetPresentationMode &&
+              video.webkitPresentationMode === 'picture-in-picture') {
+            video.webkitSetPresentationMode('inline');
+          }
+        } catch (e) {}
+        video.style.visibility = 'visible';
+        video.style.opacity = '1';
+        video.style.display = '';
+        var player = document.querySelector('#movie_player');
+        if (player) {
+          var pipPlaceholder = player.querySelector('.ytp-pip-container, [class*="pip"]');
+          if (pipPlaceholder) pipPlaceholder.remove();
+        }
+      })();
+    ''');
+  }
+
   void togglePictureInPicture() {
     _webViewController?.evaluateJavascript(source: '''
       (function() {
@@ -729,14 +766,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          bottom: 140,
+          bottom: 170,
           right: 16,
           child: GestureDetector(
             onTap: showMiniPlayer,
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Icon(Icons.play_circle_outline, color: Colors.white, size: 24),
@@ -744,14 +781,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 110,
+          bottom: 130,
           right: 16,
           child: GestureDetector(
             onTap: togglePictureInPicture,
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
@@ -759,7 +796,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 80,
+          bottom: 90,
           right: 16,
           child: GestureDetector(
             onTap: () {
@@ -779,7 +816,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.black54,
+                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Icon(Icons.close, color: Colors.white, size: 24),
