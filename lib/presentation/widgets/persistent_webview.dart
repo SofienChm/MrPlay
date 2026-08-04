@@ -34,6 +34,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _endedHandled = false;
   bool _resumeSeekDone = false;
   bool _appIsBackgrounded = false;
+  // Whether a system-forced pause (iOS suspends the webview's video when the
+  // app backgrounds / the screen locks) may be auto-resumed to keep audio
+  // playing. User-initiated pauses (lock screen, Control Center, sleep timer)
+  // clear this so they are not fought.
+  bool _backgroundResumeAllowed = false;
   int _lastNowPlayingMs = 0;
 
   @override
@@ -64,11 +69,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
+      // Bring the video back inline. PiP may have been entered while
+      // backgrounded (or by a transient `inactive` such as Control Center);
+      // leaving it on makes the in-page player a black "playing in PiP"
+      // placeholder that survives across videos (the SPA reuses the element).
+      // Retry once: the PiP presentation-mode transition is async and can
+      // swallow an exit requested while it is still being established.
+      exitPiP();
+      Future.delayed(const Duration(milliseconds: 600), exitPiP);
     }
   }
 
   void _enterBackground() {
     _appIsBackgrounded = true;
+    // Only auto-resume if the video was playing when the app went away; a
+    // video the user already paused must stay paused.
+    _backgroundResumeAllowed = ref.read(playerProvider).isPlaying;
     _reassertAudioSession();
     // Keep the audio session alive while the webview is suspended so iOS
     // doesn't tear down background audio before PiP has a chance to take over
@@ -143,8 +159,29 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   Future<void> _onLoadStop(InAppWebViewController controller, WebUri? url) async {
     _loadingTimer?.cancel();
     if (mounted) setState(() => _isLoading = false);
+    _handleWatchPage(controller, url.toString());
+  }
 
-    final urlStr = url.toString();
+  /// YouTube mobile is a single-page app: tapping a video navigates to /watch
+  /// via the history API, so neither onLoadStart nor onLoadStop fires. iOS
+  /// reports those URL changes through onUpdateVisitedHistory (KVO on
+  /// WKWebView.url) - without this the current URL stays stale and the mini
+  /// player never appears for SPA-opened videos.
+  void _onUpdateVisitedHistory(
+    InAppWebViewController controller,
+    WebUri? url,
+    bool? isReload,
+  ) {
+    final urlStr = url?.toString();
+    if (urlStr == null) return;
+    _currentUrl = urlStr;
+    _handleWatchPage(controller, urlStr);
+  }
+
+  /// Runs the watch-page tasks (title extraction for the mini player and
+  /// resume-seek). Safe to call repeatedly for the same page: playerInfo is
+  /// deduped by video id and the seek is guarded by [_resumeSeekDone].
+  void _handleWatchPage(InAppWebViewController controller, String urlStr) {
     if (urlStr.contains('youtube.com')) {
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {
@@ -171,21 +208,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         final videoIdMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(urlStr);
         final videoId = videoIdMatch?.group(1) ?? '';
         if (videoId.isNotEmpty) {
-          final resumeMs = await PlaybackStatsService.instance.resumePosition(videoId);
-          if (resumeMs > 0) {
-            Future.delayed(const Duration(milliseconds: 3500), () async {
-              if (_resumeSeekDone) return;
-              _resumeSeekDone = true;
-              await controller.evaluateJavascript(source: '''
-                (function() {
-                  var v = document.querySelector('video');
-                  if (v && v.duration > 10 && isFinite(v.duration)) {
-                    v.currentTime = $resumeMs;
-                  }
-                })();
-              ''');
-            });
-          }
+          PlaybackStatsService.instance.resumePosition(videoId).then((resumeMs) {
+            if (resumeMs > 0) {
+              Future.delayed(const Duration(milliseconds: 3500), () async {
+                if (_resumeSeekDone) return;
+                _resumeSeekDone = true;
+                await controller.evaluateJavascript(source: '''
+                  (function() {
+                    var v = document.querySelector('video');
+                    if (v && v.duration > 10 && isFinite(v.duration)) {
+                      v.currentTime = $resumeMs;
+                    }
+                  })();
+                ''');
+              });
+            }
+          });
         }
       }
     }
@@ -243,19 +281,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // (title extraction) never reported in, build the Video from the current
       // URL so the mini player / stats / media controls still appear.
       if (video == null && playing && !ended) {
-        final url = _currentUrl ?? '';
-        final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
-        if (idMatch != null) {
-          final videoId = idMatch.group(1)!;
-          video = Video(
-            id: videoId,
-            title: 'YouTube video',
-            thumbnailUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
-            videoUrl: url,
-            platform: 'YouTube',
-          );
-          ref.read(playerProvider.notifier).play(video);
-        }
+        video = _trackVideoFromUrl();
       }
       if (video != null) {
         ref.read(playerProvider.notifier).syncState(
@@ -289,8 +315,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
           _handleEnded();
         }
+      } else if (!ended && _backgroundResumeAllowed && data['pip'] != true) {
+        // Backgrounded / screen locked and iOS force-paused the webview video
+        // (PiP could not take over, e.g. on the lock screen). Resume it so the
+        // audio keeps playing; the keep-alive loop holds the process alive and
+        // the .playback audio session carries the sound. A pause reported
+        // while in PiP is the user pressing the PiP window's pause button -
+        // that one must not be resumed.
+        controlVideo('play');
       }
     } catch (_) {}
+  }
+
+  /// Builds and tracks a [Video] from the current watch URL when the
+  /// `playerInfo` JS title extraction never reported in, so the mini player /
+  /// stats / media controls still appear. Returns the tracked video (or the
+  /// already-tracked one, or null when the URL has no video id).
+  Video? _trackVideoFromUrl() {
+    final existing = ref.read(playerProvider).currentVideo;
+    if (existing != null) return existing;
+    final url = _currentUrl ?? '';
+    final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
+    if (idMatch == null) return null;
+    final videoId = idMatch.group(1)!;
+    final video = Video(
+      id: videoId,
+      title: 'YouTube video',
+      thumbnailUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+      videoUrl: url,
+      platform: 'YouTube',
+    );
+    ref.read(playerProvider.notifier).play(video);
+    return video;
   }
 
   void _updateNowPlayingThrottled({
@@ -323,18 +379,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final positionMs = position?.inMilliseconds ?? 0;
     switch (command) {
       case 'play':
+        _backgroundResumeAllowed = true;
         notifier.resume();
         controlVideo('play');
         break;
       case 'pause':
-        notifier.pause();
-        controlVideo('pause');
+        userInitiatedPause();
         break;
       case 'toggle':
         if (state.isPlaying) {
-          notifier.pause();
-          controlVideo('pause');
+          userInitiatedPause();
         } else {
+          _backgroundResumeAllowed = true;
           notifier.resume();
           controlVideo('play');
         }
@@ -357,6 +413,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           controlVideo('seek', position: target.inMilliseconds / 1000.0);
         }
         break;
+    }
+  }
+
+  /// Pauses playback as an explicit user action (lock screen / Control Center
+  /// / sleep timer). While backgrounded, system-forced pauses are auto-resumed
+  /// to keep audio playing; user pauses must not be fought.
+  void userInitiatedPause() {
+    _backgroundResumeAllowed = false;
+    ref.read(playerProvider.notifier).pause();
+    controlVideo('pause');
+  }
+
+  /// Shows the mini player: tracks the currently-playing video if needed (so
+  /// there is something to display) and collapses the full player. Bound to
+  /// the mini-player overlay button in the webview.
+  void showMiniPlayer() {
+    _trackVideoFromUrl();
+    if (ref.read(playerProvider).currentVideo != null) {
+      ref.read(playerProvider.notifier).minimize();
     }
   }
 
@@ -517,6 +592,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
+  /// Brings the playing <video> back inline after auto-PiP on backgrounding.
+  /// Without this, returning to the app leaves the in-page player black while
+  /// the video keeps floating in the PiP window.
+  void exitPiP() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = document.querySelector('video');
+        if (!video) return;
+        if (document.exitPictureInPicture && document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(function(){});
+        } else if (video.webkitSetPresentationMode &&
+                   video.webkitPresentationMode === 'picture-in-picture') {
+          video.webkitSetPresentationMode('inline');
+        }
+      })();
+    ''');
+  }
+
   void togglePictureInPicture() {
     _webViewController?.evaluateJavascript(source: '''
       (function() {
@@ -581,6 +674,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           onWebViewCreated: _onWebViewCreated,
           onLoadStart: _onLoadStart,
           onLoadStop: _onLoadStop,
+          onUpdateVisitedHistory: _onUpdateVisitedHistory,
           onReceivedError: _onReceivedError,
           onReceivedHttpError: _onReceivedHttpError,
           shouldOverrideUrlLoading: (controller, navigationAction) async {
@@ -636,6 +730,21 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         Positioned(
           bottom: 140,
+          right: 16,
+          child: GestureDetector(
+            onTap: showMiniPlayer,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.play_circle_outline, color: Colors.white, size: 24),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: 110,
           right: 16,
           child: GestureDetector(
             onTap: togglePictureInPicture,

@@ -514,7 +514,7 @@ class _SleepTimerButton extends StatelessWidget {
       SleepTimerService.instance.cancel();
     } else {
       SleepTimerService.instance.start(duration, () {
-        MrPlayApp.webViewKey.currentState?.controlVideo('pause');
+        MrPlayApp.webViewKey.currentState?.userInitiatedPause();
       });
     }
   }

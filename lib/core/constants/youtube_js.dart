@@ -43,12 +43,18 @@ class YouTubeJS {
 
         function reportState() {
           if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+            var pip = false;
+            try {
+              pip = (typeof this.webkitPresentationMode !== 'undefined' && this.webkitPresentationMode === 'picture-in-picture') ||
+                    (typeof document.pictureInPictureElement !== 'undefined' && !!document.pictureInPictureElement);
+            } catch (e) {}
             window.flutter_inappwebview.callHandler('videoState', {
               playing: !this.paused && !this.ended,
               position: isFinite(this.currentTime) ? this.currentTime : 0,
               // Live streams report duration = Infinity; Dart cannot convert that.
               duration: isFinite(this.duration) ? this.duration : 0,
-              ended: !!this.ended
+              ended: !!this.ended,
+              pip: pip
             });
           }
         }

@@ -15,6 +15,15 @@ MrPlay - Project Map
 > - **Custom bookmarks** (Hive box `custom_bookmarks`, "+" card in hub grid, long-press to delete)
 > - Fixes 2026-08-02: live-stream `Infinity` duration crash (JS + Dart guards),
 >   Slider/progress clamping, mini-player drag visual feedback
+> - Fixes 2026-08-04: mini player now appears for YouTube SPA navigations
+>   (`onUpdateVisitedHistory` keeps the current URL fresh and runs the watch-page
+>   title extraction / resume-seek that `onLoadStop` misses); webview overlay gains
+>   a show-mini-player button (bottom: 140, PiP moved to 110); background/lock-screen
+>   audio hardened: system-forced webview pauses are auto-resumed while backgrounded
+>   unless the pause was user-initiated (lock screen / Control Center / sleep timer
+>   go through `userInitiatedPause()`); black in-page video fixed by exiting PiP
+>   when the app resumes (auto-PiP on background/transient-inactive was never
+>   undone, leaving the "playing in PiP" placeholder stuck on the reused element)
 > - Known pending: AdMob `GADApplicationIdentifier` in Info.plist is the TEST app id —
 >   replace with the real one before release; dependencies outdated (riverpod 3.x, admob 9.x)
 
