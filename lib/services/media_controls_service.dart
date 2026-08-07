@@ -88,7 +88,7 @@ class MediaControlsService {
   Future<String?> _fetchArtwork(String url) async {
     HttpClient? client;
     try {
-      client = HttpClient();
+      client = HttpClient()..connectionTimeout = const Duration(seconds: 15);
       final request = await client.getUrl(Uri.parse(url));
       final response = await request.close();
       if (response.statusCode != HttpStatus.ok) return null;

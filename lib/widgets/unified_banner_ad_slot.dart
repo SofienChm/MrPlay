@@ -117,20 +117,21 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
               ),
             ),
             Positioned(
-              top: -13,
-              right: -13,
+              top: -20,
+              right: -20,
               child: GestureDetector(
                 onTap: _handleDismiss,
+                hitTestBehavior: HitTestBehavior.opaque,
                 child: Container(
-                  width: 26,
-                  height: 26,
+                  width: 44,
+                  height: 44,
                   decoration: const BoxDecoration(
                     color: Colors.white24,
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
                     Icons.close,
-                    size: 16,
+                    size: 22,
                     color: Colors.white,
                   ),
                 ),

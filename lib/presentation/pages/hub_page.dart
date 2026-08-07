@@ -4,6 +4,7 @@ import '../../core/theme/app_colors.dart';
 import '../../data/models/custom_bookmark.dart';
 import '../../data/models/platform_model.dart';
 import '../../data/repositories/custom_bookmarks_repository.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../widgets/platform_card.dart';
 import '../pages/search_page.dart';
 import 'favorites_page.dart';
@@ -22,25 +23,35 @@ class _HubPageState extends State<HubPage> {
   List<CustomBookmark> _customBookmarks = [];
   List<PlatformModel> _filteredPlatforms = PlatformConstants.platforms;
   bool _showResults = false;
+  String _defaultPlatform = 'YouTube';
 
-  List<PlatformModel> get _allPlatforms => [
-        ...PlatformConstants.platforms,
-        ..._customBookmarks.map(
-          (b) => PlatformModel(
-            name: b.name,
-            url: b.url,
-            icon: 'custom',
-            category: 'custom',
-            color: AppColors.border,
-          ),
-        ),
-      ];
+  List<PlatformModel> get _allPlatforms {
+    final bookmarks = _customBookmarks.map(
+      (b) => PlatformModel(
+        name: b.name,
+        url: b.url,
+        icon: 'custom',
+        category: 'custom',
+        color: AppColors.border,
+      ),
+    ).toList();
+    var platforms = [...PlatformConstants.platforms, ...bookmarks];
+    if (_defaultPlatform != 'YouTube') {
+      final idx = platforms.indexWhere((p) => p.name == _defaultPlatform);
+      if (idx > 0) {
+        final def = platforms.removeAt(idx);
+        platforms.insert(0, def);
+      }
+    }
+    return platforms;
+  }
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_syncSearchFromController);
     _loadCustomBookmarks();
+    _loadDefaultPlatform();
   }
 
   Future<void> _loadCustomBookmarks() async {
@@ -48,6 +59,16 @@ class _HubPageState extends State<HubPage> {
     if (mounted) {
       setState(() {
         _customBookmarks = bookmarks;
+        if (!_showResults) _filteredPlatforms = _allPlatforms;
+      });
+    }
+  }
+
+  Future<void> _loadDefaultPlatform() async {
+    final platform = await SettingsRepository.getDefaultPlatform();
+    if (mounted) {
+      setState(() {
+        _defaultPlatform = platform;
         if (!_showResults) _filteredPlatforms = _allPlatforms;
       });
     }

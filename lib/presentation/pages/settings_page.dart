@@ -16,6 +16,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String _themeMode = 'system';
   String _defaultPlatform = 'YouTube';
+  bool _disposed = false;
 
   @override
   void initState() {
@@ -23,15 +24,20 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadSettings();
   }
 
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
   Future<void> _loadSettings() async {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
-    if (mounted) {
-      setState(() {
-        _themeMode = theme;
-        _defaultPlatform = platform;
-      });
-    }
+    if (_disposed || !mounted) return;
+    setState(() {
+      _themeMode = theme;
+      _defaultPlatform = platform;
+    });
   }
 
   ThemeMode get _currentThemeMode {
@@ -120,7 +126,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.privacy_tip_outlined,
             title: 'Privacy Policy',
             subtitle: 'How we handle your data',
-            onTap: () => _openUrl('https://mrplay.app/privacy'),
+            onTap: () => _openUrl('https://mrplay.app-miniminds.com/'),
           ),
           _SettingsTile(
             icon: Icons.star_outline,

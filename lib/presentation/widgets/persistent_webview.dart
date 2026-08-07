@@ -62,41 +62,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive) {
-      // Enter PiP as early as possible (the `inactive` frame). iOS pauses the
-      // webview's video track right around `paused`, and once that happens
-      // requestPictureInPicture can refuse, killing background audio.
       _enterBackground();
     } else if (state == AppLifecycleState.paused) {
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
-      // Bring the video back inline. PiP may have been entered while
-      // backgrounded (or by a transient `inactive` such as Control Center);
-      // leaving it on makes the in-page player a black "playing in PiP"
-      // placeholder that survives across videos (the SPA reuses the element).
-      // Retry multiple times: the PiP presentation-mode transition is async
-      // and can swallow an exit requested while it is still being established.
-      exitPiP();
-      Future.delayed(const Duration(milliseconds: 600), exitPiP);
-      Future.delayed(const Duration(milliseconds: 1500), exitPiP);
       Future.delayed(const Duration(milliseconds: 3000), _ensureVideoVisible);
     }
   }
 
   void _enterBackground() {
     _appIsBackgrounded = true;
-    // Only auto-resume if the video was playing when the app went away and
-    // the user hasn't explicitly paused from the background/lock screen.
     _backgroundResumeAllowed = ref.read(playerProvider).isPlaying && !_userPausedInBackground;
     _reassertAudioSession();
-    // Keep the audio session alive while the webview is suspended so iOS
-    // doesn't tear down background audio before PiP has a chance to take over
-    // the video track.
     if (ref.read(playerProvider).isPlaying) {
       BackgroundAudioKeepAlive.instance.start();
     }
-    enterPiP(resumePlayback: ref.read(playerProvider).isPlaying && !_userPausedInBackground);
   }
 
   Future<void> _reassertAudioSession() async {
@@ -718,7 +700,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             final url = navigationAction.request.url;
             if (url != null) {
               final scheme = url.scheme.toLowerCase();
-              if (scheme != 'http' && scheme != 'https' && scheme != 'about' && scheme != 'file') {
+              if (scheme == 'http' || scheme == 'https' || scheme == 'about' || scheme == 'file') {
+                return NavigationActionPolicy.ALLOW;
+              }
+              if (scheme == 'javascript' || scheme == 'data' || scheme == 'blob') {
                 return NavigationActionPolicy.CANCEL;
               }
             }

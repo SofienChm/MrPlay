@@ -447,6 +447,14 @@ class _WatchLaterButtonState extends State<_WatchLaterButton> {
     _load();
   }
 
+  @override
+  void didUpdateWidget(_WatchLaterButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.video.id != widget.video.id) {
+      _load();
+    }
+  }
+
   Future<void> _load() async {
     final queued = await WatchLaterRepository.isQueued(widget.video.id);
     if (mounted) setState(() => _isQueued = queued);
@@ -589,6 +597,14 @@ class _FavoriteButtonState extends State<_FavoriteButton> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(_FavoriteButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.video.id != widget.video.id) {
+      _load();
+    }
   }
 
   Future<void> _load() async {
