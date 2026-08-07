@@ -121,7 +121,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
               right: -20,
               child: GestureDetector(
                 onTap: _handleDismiss,
-                hitTestBehavior: HitTestBehavior.opaque,
+                behavior: HitTestBehavior.opaque,
                 child: Container(
                   width: 44,
                   height: 44,
