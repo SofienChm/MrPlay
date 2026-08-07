@@ -125,8 +125,8 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
                 child: Container(
                   width: 44,
                   height: 44,
-                  decoration: const BoxDecoration(
-                    color: Colors.white24,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
