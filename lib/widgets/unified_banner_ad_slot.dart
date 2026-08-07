@@ -102,40 +102,41 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       padding: const EdgeInsets.fromLTRB(8, 6, 0, 6),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: SizedBox(
-            width: 320,
-            height: 100,
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.8),
-              child: Stack(
-                children: [
-                  Center(child: _adWidget!),
-                  Positioned(
-                    top: 6,
-                    right: 6,
-                    child: GestureDetector(
-                      onTap: _handleDismiss,
-                      child: Container(
-                        width: 26,
-                        height: 26,
-                        decoration: const BoxDecoration(
-                          color: Colors.white24,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.close,
-                          size: 16,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: 320,
+                height: 100,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.8),
+                  child: Center(child: _adWidget!),
+                ),
               ),
             ),
-          ),
+            Positioned(
+              top: -13,
+              right: -13,
+              child: GestureDetector(
+                onTap: _handleDismiss,
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  decoration: const BoxDecoration(
+                    color: Colors.white24,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

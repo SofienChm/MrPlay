@@ -44,7 +44,7 @@ class YouTubeJS {
             var el = this;
             el.style.setProperty('visibility', 'visible', 'important');
             el.style.setProperty('opacity', '1', 'important');
-            el.style.setProperty('display', '', 'important');
+            el.style.removeProperty('display');
             var poster = el.parentElement && el.parentElement.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, [class*="thumbnail"][class*="overlay"]');
             if (poster) poster.style.display = 'none';
             var player = el.closest('#movie_player');
