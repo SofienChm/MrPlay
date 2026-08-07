@@ -161,20 +161,24 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
       child: GestureDetector(
         onVerticalDragUpdate: _onVerticalDragUpdate,
         onVerticalDragEnd: _onVerticalDragEnd,
-        // Transparent: the real video is rendered by the webview underneath,
-        // so the full player must let it show through (previously this was an
-        // opaque black sheet with a static thumbnail -> "black video").
-        child: Container(
-          color: Colors.black,
-          child: Stack(
-            children: [
-              Transform.translate(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: topPadding,
+              child: Container(color: Colors.black),
+            ),
+            Positioned.fill(
+              child: Transform.translate(
                 offset: Offset(0, translateY),
                 child: Transform.scale(
                   scale: scale,
                   child: SafeArea(
                     child: Padding(
-                      padding: EdgeInsets.only(top: topPadding + 20),
+                      padding: const EdgeInsets.only(top: 20),
                       child: Column(
                         children: [
                           Container(
@@ -192,10 +196,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                               borderRadius: BorderRadius.circular(12),
                               child: AspectRatio(
                                 aspectRatio: 16 / 9,
-                                // Transparent video area: the webview's live
-                                // video shows through underneath. Only the
-                                // control buttons hit-test here, so taps on
-                                // the video itself reach the webview player.
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
@@ -361,20 +361,19 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                               ),
                             ),
                           ),
-                          const Spacer(),
-                          const SizedBox(height: 8),
                         ],
                       ),
                     ),
                   ),
                 ),
               ),
-              Positioned(
-                top: topPadding + 4,
-                right: 16,
-                child: Opacity(
-                  opacity: opacity,
-                  child: Column(
+            ),
+            Positioned(
+              top: topPadding + 4,
+              right: 16,
+              child: Opacity(
+                opacity: opacity,
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Row(
@@ -405,10 +404,9 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                     ),
                   ],
                 ),
-                ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

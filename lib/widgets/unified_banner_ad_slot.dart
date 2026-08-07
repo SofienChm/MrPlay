@@ -98,41 +98,44 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       return const SizedBox.shrink();
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        height: 100,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: widget.backgroundColor,
-          border: Border.all(color: Colors.white.withAlpha(15), width: 1),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Center(child: _adWidget!),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: _handleDismiss,
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: const BoxDecoration(
-                    color: AppColors.border,
-                    shape: BoxShape.circle,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 6, 0, 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: 320,
+            height: 100,
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.8),
+              child: Stack(
+                children: [
+                  Center(child: _adWidget!),
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: GestureDetector(
+                      onTap: _handleDismiss,
+                      child: Container(
+                        width: 26,
+                        height: 26,
+                        decoration: const BoxDecoration(
+                          color: Colors.white24,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
                   ),
-                  child: const Icon(
-                    Icons.close,
-                    size: 13,
-                    color: Colors.white60,
-                  ),
-                ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );

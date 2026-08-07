@@ -596,9 +596,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         var player = v.closest('#movie_player') || v.parentElement;
         if (!player) return;
         var r = player.getBoundingClientRect();
-        if (r.top < 0 || r.bottom > window.innerHeight) {
-          player.scrollIntoView({block: 'start', behavior: 'smooth'});
-        }
+        var targetY = window.scrollY + r.top - 47;
+        if (targetY < 0) targetY = 0;
+        window.scrollTo({top: targetY, behavior: 'smooth'});
       })();
     ''');
   }

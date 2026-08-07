@@ -18,6 +18,7 @@ class PersistentPlayerShell extends ConsumerWidget {
       left: 0,
       right: 0,
       bottom: 0,
+      top: state.isMinimized ? null : 0,
       child: AnimatedSwitcher(
         duration: const Duration(milliseconds: 300),
         child: state.isMinimized

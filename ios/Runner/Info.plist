@@ -51,65 +51,65 @@
 		</array>
 		<key>UIStatusBarHidden</key>
 		<false/>
-	<key>GADApplicationIdentifier</key>
-	<string>ca-app-pub-3940256099942544~3347511713</string>
-	<key>AppGroupId</key>
-	<string>group.com.mrplay.shared</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoadsInWebContent</key>
-		<true/>
-		<key>NSExceptionDomains</key>
+		<key>GADApplicationIdentifier</key>
+		<string>ca-app-pub-3940256099942544~3347511713</string>
+		<key>AppGroupId</key>
+		<string>group.com.mrplay.shared</string>
+		<key>NSAppTransportSecurity</key>
 		<dict>
-			<key>m.youtube.com</key>
+			<key>NSAllowsArbitraryLoadsInWebContent</key>
+			<true/>
+			<key>NSExceptionDomains</key>
 			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<false/>
-			</dict>
-			<key>youtube.com</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<false/>
-			</dict>
-			<key>google.com</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<false/>
-			</dict>
-			<key>googlevideo.com</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<false/>
-			</dict>
-			<key>ytimg.com</key>
-			<dict>
-				<key>NSExceptionAllowsInsecureHTTPLoads</key>
-				<false/>
+				<key>m.youtube.com</key>
+				<dict>
+					<key>NSExceptionAllowsInsecureHTTPLoads</key>
+					<false/>
+				</dict>
+				<key>youtube.com</key>
+				<dict>
+					<key>NSExceptionAllowsInsecureHTTPLoads</key>
+					<false/>
+				</dict>
+				<key>google.com</key>
+				<dict>
+					<key>NSExceptionAllowsInsecureHTTPLoads</key>
+					<false/>
+				</dict>
+				<key>googlevideo.com</key>
+				<dict>
+					<key>NSExceptionAllowsInsecureHTTPLoads</key>
+					<false/>
+				</dict>
+				<key>ytimg.com</key>
+				<dict>
+					<key>NSExceptionAllowsInsecureHTTPLoads</key>
+					<false/>
+				</dict>
 			</dict>
 		</dict>
+		<key>NSMicrophoneUsageDescription</key>
+		<string>Microphone access is used by web content you open in MrPlay for audio recording and voice features.</string>
+		<key>CFBundleURLTypes</key>
+		<array>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLName</key>
+				<string>com.mrplay.app</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>mrplay</string>
+				</array>
+			</dict>
+			<dict>
+				<key>CFBundleTypeRole</key>
+				<string>Editor</string>
+				<key>CFBundleURLSchemes</key>
+				<array>
+					<string>ShareMedia-$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+				</array>
+			</dict>
+		</array>
 	</dict>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone access is used by web content you open in MrPlay for audio recording and voice features.</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>com.mrplay.app</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>mrplay</string>
-			</array>
-		</dict>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>ShareMedia-$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-			</array>
-		</dict>
-	</array>
-</dict>
 </plist>
