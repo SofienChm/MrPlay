@@ -26,6 +26,13 @@ MrPlay - Project Map
 >   undone, leaving the "playing in PiP" placeholder stuck on the reused element)
 > - Known pending: AdMob `GADApplicationIdentifier` in Info.plist is the TEST app id —
 >   replace with the real one before release; dependencies outdated (riverpod 3.x, admob 9.x)
+> - Fixes 2026-08-07: banner close button tappable again (it overflowed the
+>   Stack's bounds at top:-20/right:-20 and Flutter never hit-tests outside the
+>   Stack rect — space is now reserved via padding so the whole 44px circle is
+>   inside); black watch-page video fixed for good: `popstate` no longer
+>   shelters when LANDING on a /watch page, and `restoreShelteredIntoPlayer`
+>   (on `playing` + 800ms interval) puts YouTube's reused `<video>` element
+>   back into the visible player when a watch page claims the sheltered one
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.

@@ -105,20 +105,27 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                width: 320,
-                height: 100,
-                child: Container(
-                  color: Colors.black.withValues(alpha: 0.8),
-                  child: Center(child: _adWidget!),
+            // Reserve the strip the close button straddles, so the WHOLE
+            // button stays inside the Stack's own bounds. Flutter never
+            // hit-tests a child outside the Stack's rect: with the button at
+            // (-20, -20) everything except a small sliver was dead to taps.
+            Padding(
+              padding: const EdgeInsets.only(top: 22, right: 22),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: SizedBox(
+                  width: 320,
+                  height: 100,
+                  child: Container(
+                    color: Colors.black.withValues(alpha: 0.8),
+                    child: Center(child: _adWidget!),
+                  ),
                 ),
               ),
             ),
             Positioned(
-              top: -20,
-              right: -20,
+              top: 0,
+              right: 0,
               child: GestureDetector(
                 onTap: _handleDismiss,
                 behavior: HitTestBehavior.opaque,
