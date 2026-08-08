@@ -50,6 +50,7 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
         MrPlayApp.webViewKey.currentState?.exitPiP();
         ref.read(playerProvider.notifier).expand();
         MrPlayApp.webViewKey.currentState?.scrollVideoIntoView();
+        MrPlayApp.webViewKey.currentState?.ensureVideoVisible();
       },
       onVerticalDragUpdate: _onVerticalDragUpdate,
       onVerticalDragEnd: _onVerticalDragEnd,

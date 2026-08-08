@@ -172,104 +172,106 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
               child: Container(color: Colors.black),
             ),
             Positioned.fill(
-              child: Transform.translate(
-                offset: Offset(0, translateY),
-                child: Transform.scale(
-                  scale: scale,
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 20),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 40,
-                            height: 3,
-                            margin: const EdgeInsets.only(bottom: 24),
-                            decoration: BoxDecoration(
-                              color: Colors.grey[600],
-                              borderRadius: BorderRadius.circular(2),
-                            ),
+              child: Builder(builder: (ctx) {
+                Widget body = SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 20),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 3,
+                          margin: const EdgeInsets.only(bottom: 24),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[600],
+                            borderRadius: BorderRadius.circular(2),
                           ),
-                          Opacity(
-                            opacity: opacity,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: AspectRatio(
-                                aspectRatio: 16 / 9,
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Center(
-                                      child: Row(
-                                        mainAxisAlignment: MainAxisAlignment.center,
-                                        children: [
-                                          IconButton(
-                                            iconSize: 40,
-                                            icon: const Icon(Icons.replay_10, color: Colors.white),
-                                            tooltip: 'Back 10 seconds',
-                                            onPressed: () => _seekBy(-10),
+                        ),
+                        Builder(builder: (ctx) {
+                          Widget videoArea = ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: AspectRatio(
+                              aspectRatio: 16 / 9,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Center(
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        IconButton(
+                                          iconSize: 40,
+                                          icon: const Icon(Icons.replay_10, color: Colors.white),
+                                          tooltip: 'Back 10 seconds',
+                                          onPressed: () => _seekBy(-10),
+                                        ),
+                                        IconButton(
+                                          iconSize: 56,
+                                          icon: Icon(
+                                            state.isPlaying
+                                                ? Icons.pause_circle_filled
+                                                : Icons.play_circle_filled,
+                                            color: Colors.white,
                                           ),
-                                          IconButton(
-                                            iconSize: 56,
-                                            icon: Icon(
-                                              state.isPlaying
-                                                  ? Icons.pause_circle_filled
-                                                  : Icons.play_circle_filled,
-                                              color: Colors.white,
-                                            ),
-                                            tooltip: state.isPlaying ? 'Pause' : 'Play',
-                                            onPressed: _togglePlayPause,
-                                          ),
-                                          IconButton(
-                                            iconSize: 40,
-                                            icon: const Icon(Icons.forward_10, color: Colors.white),
-                                            tooltip: 'Forward 10 seconds',
-                                            onPressed: () => _seekBy(10),
-                                          ),
-                                        ],
-                                      ),
+                                          tooltip: state.isPlaying ? 'Pause' : 'Play',
+                                          onPressed: _togglePlayPause,
+                                        ),
+                                        IconButton(
+                                          iconSize: 40,
+                                          icon: const Icon(Icons.forward_10, color: Colors.white),
+                                          tooltip: 'Forward 10 seconds',
+                                          onPressed: () => _seekBy(10),
+                                        ),
+                                      ],
                                     ),
-                                    Positioned(
-                                      top: 8,
-                                      right: 8,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          _OverlayButton(
-                                            icon: Icons.subtitles,
-                                            active: _captionsEnabled,
-                                            tooltip: 'Captions',
-                                            onTap: _toggleCaptions,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          _OverlayButton(
-                                            icon: Icons.picture_in_picture_alt,
-                                            tooltip: 'Picture in picture',
-                                            onTap: () => MrPlayApp.webViewKey.currentState
-                                                ?.togglePictureInPicture(),
-                                          ),
-                                        ],
-                                      ),
+                                  ),
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        _OverlayButton(
+                                          icon: Icons.subtitles,
+                                          active: _captionsEnabled,
+                                          tooltip: 'Captions',
+                                          onTap: _toggleCaptions,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        _OverlayButton(
+                                          icon: Icons.picture_in_picture_alt,
+                                          tooltip: 'Picture in picture',
+                                          onTap: () => MrPlayApp.webViewKey.currentState
+                                              ?.togglePictureInPicture(),
+                                        ),
+                                      ],
                                     ),
-                                    Positioned(
-                                      bottom: 8,
-                                      right: 8,
-                                      child: _OverlayButton(
-                                        icon: Icons.fullscreen,
-                                        tooltip: 'Fullscreen',
-                                        onTap: () => MrPlayApp.webViewKey.currentState
-                                            ?.controlVideo('fullscreen'),
-                                      ),
+                                  ),
+                                  Positioned(
+                                    bottom: 8,
+                                    right: 8,
+                                    child: _OverlayButton(
+                                      icon: Icons.fullscreen,
+                                      tooltip: 'Fullscreen',
+                                      onTap: () => MrPlayApp.webViewKey.currentState
+                                          ?.controlVideo('fullscreen'),
                                     ),
-                                  ],
-                                ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          Opacity(
-                            opacity: opacity,
-                            child: Container(
+                          );
+                          if (_dragOffset > 0 && opacity < 1.0) {
+                            videoArea = Opacity(
+                              opacity: opacity,
+                              child: videoArea,
+                            );
+                          }
+                          return videoArea;
+                        }),
+                        const SizedBox(height: 16),
+                        Builder(builder: (ctx) {
+                          Widget infoCard = Container(
                               margin: const EdgeInsets.symmetric(horizontal: 12),
                               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                               decoration: BoxDecoration(
@@ -359,15 +361,31 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                   ),
                                 ],
                               ),
-                            ),
-                          ),
+                            );
+                            if (_dragOffset > 0 && opacity < 1.0) {
+                              infoCard = Opacity(
+                                opacity: opacity,
+                                child: infoCard,
+                              );
+                            }
+                            return infoCard;
+                          }),
                         ],
                       ),
                     ),
-                  ),
-                ),
+                  );
+                  if (_dragOffset > 0) {
+                    body = Transform.translate(
+                      offset: Offset(0, translateY),
+                      child: Transform.scale(
+                        scale: scale,
+                        child: body,
+                      ),
+                    );
+                  }
+                  return body;
+                }),
               ),
-            ),
             Positioned(
               top: topPadding + 4,
               right: 16,

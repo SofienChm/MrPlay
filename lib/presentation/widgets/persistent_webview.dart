@@ -68,7 +68,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
-      Future.delayed(const Duration(milliseconds: 3000), _ensureVideoVisible);
+      Future.delayed(const Duration(milliseconds: 3000), ensureVideoVisible);
     }
   }
 
@@ -606,7 +606,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Last-resort fallback: if exitPiP failed to bring the video back inline,
   /// force the video element to be visible so the user doesn't see a black
   /// screen. Also tries one final PiP exit in case the timing was just off.
-  void _ensureVideoVisible() {
+  void ensureVideoVisible() {
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -751,7 +751,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          bottom: 170,
+          bottom: 220,
           right: 16,
           child: GestureDetector(
             onTap: showMiniPlayer,
@@ -766,7 +766,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 130,
+          bottom: 150,
           right: 16,
           child: GestureDetector(
             onTap: togglePictureInPicture,
@@ -781,7 +781,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 90,
+          bottom: 80,
           right: 16,
           child: GestureDetector(
             onTap: () {
