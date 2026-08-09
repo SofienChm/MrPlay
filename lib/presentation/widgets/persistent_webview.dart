@@ -751,7 +751,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          bottom: 220,
+          bottom: 164,
           right: 16,
           child: GestureDetector(
             onTap: showMiniPlayer,
@@ -766,7 +766,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 150,
+          bottom: 122,
           right: 16,
           child: GestureDetector(
             onTap: togglePictureInPicture,
