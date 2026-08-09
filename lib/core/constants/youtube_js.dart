@@ -107,131 +107,26 @@ class YouTubeJS {
     })();
   ''';
 
+  /// PiP / background-audio shelter — DISABLED (see below).
+  ///
+  /// KEPT AS NO-OP: The shelter was the #1 cause of the persistent black-video
+  /// bug. It trapped the real playing <video> off-screen while YouTube created
+  /// a fresh empty one in the player. `restoreShelteredIntoPlayer` returned
+  /// early because the container already had ANY <video>, leaving the real one
+  /// in `#__mrplay_shelter`. The 1 s periodic check in
+  /// visibilityKeepAliveScript now keeps every <video> visible and inline.
+  /// We may re-add a safer shelter later.
+  ///
+  /// Current script only tears down any stale shelter state from a prior build
+  /// so nothing lingers in the DOM.
   static const String searchSpaScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
-
-      var sheltered = null;
-      var shelterEl = null;
-
-      function ensureShelter() {
-        if (!shelterEl) {
-          shelterEl = document.createElement('div');
-          shelterEl.id = '__mrplay_shelter';
-          shelterEl.style.cssText = 'position:fixed;left:-10000px;top:0;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;';
-          document.body.appendChild(shelterEl);
-        }
-        return shelterEl;
-      }
-
-      function inPip(v) {
-        if (v && typeof v.webkitPresentationMode !== 'undefined' && v.webkitPresentationMode === 'picture-in-picture') return true;
-        if (typeof document.pictureInPictureElement !== 'undefined' && document.pictureInPictureElement) return true;
-        return false;
-      }
-
-      function isActive(v) {
-        return !!v && ((!v.paused && !v.ended) || inPip(v));
-      }
-
-      function onWatchPage() {
-        return location.pathname.indexOf('/watch') !== -1;
-      }
-
-      function shelterPlayingVideo() {
-        var v = document.querySelector('video');
-        if (!v || v === sheltered) return;
-        if (!isActive(v)) return;
-        if (sheltered) {
-          try { sheltered.remove(); } catch (e) {}
-        }
-        ensureShelter().appendChild(v);
-        sheltered = v;
-      }
-
-      // Moves a sheltered <video> back into the visible watch-page player.
-      // YouTube mobile REUSES the same <video> element across SPA navigations:
-      // when the reused element is the one sitting in the off-screen shelter,
-      // the watch page plays it off-screen - black player box, audio only -
-      // and the old release guard (newVideo === sheltered -> return) never
-      // rescued it.
-      function restoreShelteredIntoPlayer() {
-        if (!sheltered) return;
-        if (shelterEl && sheltered.parentNode === shelterEl) {
-          // Still parked in our off-screen shelter.
-          if (!onWatchPage()) return;
-          var container = document.querySelector('#movie_player .html5-video-container') ||
-                          document.querySelector('.html5-video-container') ||
-                          document.querySelector('#movie_player') ||
-                          document.querySelector('#player');
-          if (!container) return;
-          // The watch page built a FRESH player with its own <video>: leave the
-          // sheltered one alone - __mrplayReleaseSheltered swaps it out as soon
-          // as the new video actually plays (keeps PiP audio alive meanwhile).
-          if (container.querySelector('video')) return;
-          try { container.appendChild(sheltered); } catch (e) { return; }
-          sheltered = null;
-          return;
-        }
-        // YouTube re-attached the element into a player on its own: drop our
-        // stale state so future navigations can shelter it again.
-        if (sheltered.closest('#movie_player, #player, ytm-watch, ytd-watch-flexy, ytd-watch')) {
-          sheltered = null;
-        }
-      }
-
-      window.__mrplayReleaseSheltered = function(newVideo) {
-        if (!sheltered) return;
-        if (newVideo && newVideo === sheltered) {
-          // The sheltered element itself (re)started playback. On a watch page
-          // that means YouTube reused it as the page player -> put it back into
-          // view. Off the watch page (e.g. search hover previews on /results)
-          // keep it sheltered so PiP / background audio survives.
-          restoreShelteredIntoPlayer();
-          return;
-        }
-        // Only release the sheltered video when a real watch-page player starts
-        // playing a new video (search hover previews must not close PiP).
-        if (newVideo && !newVideo.closest('ytd-watch-flexy, ytd-watch, ytm-watch, #movie_player, #player')) return;
-        try { sheltered.remove(); } catch (e) {}
-        sheltered = null;
-      };
-
-      // Safety net for races: the reused element can start playing before the
-      // destination player container exists, and YouTube sometimes re-attaches
-      // the element silently without any event we hook.
-      setInterval(restoreShelteredIntoPlayer, 800);
-
-      // Search: keep the playing/PiP video alive while navigating to results.
-      // Do NOT preventDefault - let YouTube's own router drive the navigation.
-      document.addEventListener('submit', function(e) {
-        var form = e.target;
-        if (!form || !form.action) return;
-        if (String(form.action).indexOf('/results') === -1) return;
-        shelterPlayingVideo();
-      }, true);
-
-      // Back/forward navigation: shelter the video before YouTube tears down
-      // the watch page, so PiP / background audio survives.
-      window.addEventListener('popstate', function() {
-        // popstate fires AFTER the URL has already changed. If the destination
-        // IS a watch page (back/forward between two videos, or forward back
-        // onto the watch page) sheltering would rip the <video> out of the
-        // player the user is looking at and leave a BLACK BOX - YouTube swaps
-        // /reuses the element itself on watch pages.
-        if (onWatchPage()) return;
-        shelterPlayingVideo();
-      }, true);
-
-      // NOTE: history.pushState/replaceState and yt-navigate-start are NOT
-      // hooked. YouTube fires them constantly during normal watch-page playback
-      // (tracking params, related-content prefetch, search suggestions) and
-      // their destination URLs frequently don't contain '/watch'. Sheltering
-      // then rips the <video> out of the player and leaves a BLACK BOX, which
-      // was the reported "black video in the YouTube player". Only real user
-      // navigations (search form submit, back/forward to a non-watch page)
-      // shelter the video, and restoreShelteredIntoPlayer puts the reused
-      // element back into view whenever a watch page claims it.
+      try {
+        var shelterEl = document.getElementById('__mrplay_shelter');
+        if (shelterEl) shelterEl.remove();
+        window.__mrplayReleaseSheltered = function(){};
+      } catch (e) {}
     })();
   ''';
 
