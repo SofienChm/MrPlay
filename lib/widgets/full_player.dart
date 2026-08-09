@@ -169,26 +169,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         fit: StackFit.expand,
         children: [
           Positioned.fill(
-            child: video.thumbnailUrl.isNotEmpty
-                ? CachedNetworkImage(
-                    imageUrl: video.thumbnailUrl,
-                    fit: BoxFit.cover,
-                    placeholder: (_, __) => Container(color: Colors.grey[900]),
-                    errorWidget: (_, __, ___) =>
-                        Container(color: Colors.grey[900]),
-                  )
-                : Container(color: Colors.grey[900]),
-          ),
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.3),
-            ),
-          ),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            height: topPadding,
             child: Container(color: Colors.black),
           ),
           Positioned.fill(

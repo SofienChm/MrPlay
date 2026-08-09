@@ -81,6 +81,28 @@ class YouTubeJS {
             });
           });
         }).observe(document.documentElement, { childList: true, subtree: true });
+
+        setInterval(function() {
+          document.querySelectorAll('video').forEach(function(v) {
+            v.style.setProperty('visibility', 'visible', 'important');
+            v.style.setProperty('opacity', '1', 'important');
+            v.style.removeProperty('display');
+            try {
+              if (v.webkitSetPresentationMode &&
+                  v.webkitPresentationMode === 'picture-in-picture') {
+                v.webkitSetPresentationMode('inline');
+              }
+            } catch (e) {}
+            var poster = v.parentElement && v.parentElement.querySelector(
+              '.ytp-cued-thumbnail-overlay, .ytp-poster, [class*="thumbnail"][class*="overlay"]');
+            if (poster) poster.style.display = 'none';
+            var player = v.closest('#movie_player');
+            if (player) {
+              var pipOverlay = player.querySelector('.ytp-pip-container');
+              if (pipOverlay) pipOverlay.style.display = 'none';
+            }
+          });
+        }, 1000);
       } catch (e) {}
     })();
   ''';
