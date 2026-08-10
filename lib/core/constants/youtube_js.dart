@@ -78,10 +78,15 @@ class YouTubeJS {
             el.style.setProperty('visibility', 'visible', 'important');
             el.style.setProperty('opacity', '1', 'important');
             el.style.removeProperty('display');
-            var poster = el.parentElement && el.parentElement.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, [class*="thumbnail"][class*="overlay"]');
-            if (poster) poster.style.display = 'none';
+            el.style.removeProperty('clip');
+            el.style.removeProperty('clip-path');
+            el.style.removeProperty('width');
+            el.style.removeProperty('height');
+            el.style.setProperty('object-fit', 'contain', 'important');
             var player = el.closest('#movie_player');
             if (player) {
+              var poster = player.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, .ytp-cued-thumbnail-overlay-image, [class*="thumbnail"][class*="overlay"]');
+              if (poster) poster.style.display = 'none';
               var pipOverlay = player.querySelector('.ytp-pip-container');
               if (pipOverlay) pipOverlay.style.display = 'none';
             }
@@ -146,11 +151,15 @@ class YouTubeJS {
             v.style.setProperty('visibility', 'visible', 'important');
             v.style.setProperty('opacity', '1', 'important');
             v.style.removeProperty('display');
-            var poster = v.parentElement && v.parentElement.querySelector(
-              '.ytp-cued-thumbnail-overlay, .ytp-poster, [class*="thumbnail"][class*="overlay"]');
-            if (poster) poster.style.display = 'none';
+            v.style.removeProperty('clip');
+            v.style.removeProperty('clip-path');
+            v.style.removeProperty('width');
+            v.style.removeProperty('height');
+            v.style.setProperty('object-fit', 'contain', 'important');
             var player = v.closest('#movie_player');
             if (player) {
+              var poster = player.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, .ytp-cued-thumbnail-overlay-image, [class*="thumbnail"][class*="overlay"]');
+              if (poster) poster.style.display = 'none';
               var pipOverlay = player.querySelector('.ytp-pip-container');
               if (pipOverlay) pipOverlay.style.display = 'none';
             }

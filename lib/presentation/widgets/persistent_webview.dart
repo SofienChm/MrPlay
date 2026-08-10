@@ -671,10 +671,29 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         video.style.setProperty('visibility', 'visible', 'important');
         video.style.setProperty('opacity', '1', 'important');
         video.style.removeProperty('display');
+        video.style.removeProperty('clip');
+        video.style.removeProperty('clip-path');
+        video.style.removeProperty('width');
+        video.style.removeProperty('height');
+        video.style.setProperty('object-fit', 'contain', 'important');
         var player = document.querySelector('#movie_player');
         if (player) {
           var pipPlaceholder = player.querySelector('.ytp-pip-container, [class*="pip"]');
           if (pipPlaceholder) pipPlaceholder.remove();
+          var poster = player.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, .ytp-cued-thumbnail-overlay-image, [class*="thumbnail"][class*="overlay"]');
+          if (poster) poster.style.display = 'none';
+        }
+        // Scroll the video into the viewport in case the player layout
+        // was broken (e.g. by the old #movie_player position override).
+        var r = video.getBoundingClientRect();
+        if (r.height < 10 || r.width < 10 || r.top < -window.innerHeight) {
+          var c = player || video.parentElement;
+          if (c) {
+            var cr = c.getBoundingClientRect();
+            var t = window.scrollY + cr.top - 50;
+            if (t < 0) t = 0;
+            window.scrollTo({top: t, behavior: 'instant'});
+          }
         }
         // DOM reinsertion trick: if the video is still stuck in PiP mode after
         // the API call above, briefly remove it from the DOM and reinsert it.
