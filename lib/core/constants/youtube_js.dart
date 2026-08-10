@@ -40,7 +40,6 @@ class YouTubeJS {
           });
 
           v.addEventListener('playing', function() {
-            if (window.__mrplayReleaseSheltered) window.__mrplayReleaseSheltered(this);
             var el = this;
             el.style.setProperty('visibility', 'visible', 'important');
             el.style.setProperty('opacity', '1', 'important');
@@ -65,7 +64,6 @@ class YouTubeJS {
             window.flutter_inappwebview.callHandler('videoState', {
               playing: !this.paused && !this.ended,
               position: isFinite(this.currentTime) ? this.currentTime : 0,
-              // Live streams report duration = Infinity; Dart cannot convert that.
               duration: isFinite(this.duration) ? this.duration : 0,
               ended: !!this.ended,
               pip: pip
@@ -107,29 +105,6 @@ class YouTubeJS {
     })();
   ''';
 
-  /// PiP / background-audio shelter — DISABLED (see below).
-  ///
-  /// KEPT AS NO-OP: The shelter was the #1 cause of the persistent black-video
-  /// bug. It trapped the real playing <video> off-screen while YouTube created
-  /// a fresh empty one in the player. `restoreShelteredIntoPlayer` returned
-  /// early because the container already had ANY <video>, leaving the real one
-  /// in `#__mrplay_shelter`. The 1 s periodic check in
-  /// visibilityKeepAliveScript now keeps every <video> visible and inline.
-  /// We may re-add a safer shelter later.
-  ///
-  /// Current script only tears down any stale shelter state from a prior build
-  /// so nothing lingers in the DOM.
-  static const String searchSpaScript = '''
-    (function() {
-      if (location.hostname.indexOf('youtube.com') === -1) return;
-      try {
-        var shelterEl = document.getElementById('__mrplay_shelter');
-        if (shelterEl) shelterEl.remove();
-        window.__mrplayReleaseSheltered = function(){};
-      } catch (e) {}
-    })();
-  ''';
-
   static const String appBannerRemoverScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
@@ -166,10 +141,6 @@ class YouTubeJS {
     })();
   ''';
 
-  /// Adds a small overlay button bar (CC / PiP / Fullscreen) on top of the
-  /// actual YouTube player (#movie_player). The buttons stay anchored to the
-  /// player across re-renders and fullscreen, and forward taps to Dart via
-  /// the 'playerControl' handler so they drive the real <video> element.
   static const String playerControlsScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;

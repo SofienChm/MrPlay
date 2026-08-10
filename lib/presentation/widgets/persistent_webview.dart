@@ -41,6 +41,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _backgroundResumeAllowed = false;
   bool _userPausedInBackground = false;
   int _lastNowPlayingMs = 0;
+  Timer? _alignmentWatchdog;
 
   @override
   void initState() {
@@ -54,6 +55,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
+    _alignmentWatchdog?.cancel();
     PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
@@ -74,7 +76,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _enterBackground() {
     _appIsBackgrounded = true;
-    _backgroundResumeAllowed = ref.read(playerProvider).isPlaying && !_userPausedInBackground;
+    _backgroundResumeAllowed =
+        ref.read(playerProvider).isPlaying && !_userPausedInBackground;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
       BackgroundAudioKeepAlive.instance.start();
@@ -110,7 +113,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       handlerName: 'playerControl',
       callback: (args) {
         if (args.isEmpty || args.first is! Map) return;
-        final action = (args.first as Map<String, dynamic>)['action'] as String?;
+        final action =
+            (args.first as Map<String, dynamic>)['action'] as String?;
         switch (action) {
           case 'toggleCaptions':
             controlVideo('toggleCaptions');
@@ -142,7 +146,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
   }
 
-  Future<void> _onLoadStop(InAppWebViewController controller, WebUri? url) async {
+  Future<void> _onLoadStop(
+      InAppWebViewController controller, WebUri? url) async {
     _loadingTimer?.cancel();
     if (mounted) setState(() => _isLoading = false);
     _handleWatchPage(controller, url.toString());
@@ -194,7 +199,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         final videoIdMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(urlStr);
         final videoId = videoIdMatch?.group(1) ?? '';
         if (videoId.isNotEmpty) {
-          PlaybackStatsService.instance.resumePosition(videoId).then((resumeMs) {
+          PlaybackStatsService.instance
+              .resumePosition(videoId)
+              .then((resumeMs) {
             if (resumeMs > 0) {
               Future.delayed(const Duration(milliseconds: 3500), () async {
                 if (_resumeSeekDone) return;
@@ -517,7 +524,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   ) {
     if (request.isForMainFrame != false) {
       if (mounted) {
-        setState(() => _loadError = 'Could not load the page: ${error.description}');
+        setState(
+            () => _loadError = 'Could not load the page: ${error.description}');
       }
     }
   }
@@ -629,6 +637,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
+  void startVideoAlignmentWatchdog() {
+    _alignmentWatchdog?.cancel();
+    var ticks = 0;
+    _alignmentWatchdog = Timer.periodic(const Duration(milliseconds: 400), (t) {
+      scrollVideoIntoView();
+      ensureVideoVisible();
+      ticks++;
+      if (ticks >= 8) t.cancel();
+    });
+  }
+
+  void stopVideoAlignmentWatchdog() {
+    _alignmentWatchdog?.cancel();
+    _alignmentWatchdog = null;
+  }
+
   void togglePictureInPicture() {
     _webViewController?.evaluateJavascript(source: '''
       (function() {
@@ -657,67 +681,68 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       children: [
         Positioned.fill(
           child: InAppWebView(
-          initialUserScripts: UnmodifiableListView([
-            UserScript(
-              source: ContentBlockerJS.genericAdBlockerScript,
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+            initialUserScripts: UnmodifiableListView([
+              UserScript(
+                source: ContentBlockerJS.genericAdBlockerScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
+                source: YouTubeJS.visibilityKeepAliveScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
+                source: YouTubeJS.appBannerRemoverScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
+                source: YouTubeJS.playerControlsScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+            ]),
+            initialSettings: InAppWebViewSettings(
+              javaScriptEnabled: true,
+              allowsInlineMediaPlayback: true,
+              mediaPlaybackRequiresUserGesture: false,
+              allowBackgroundAudioPlaying: true,
+              allowsPictureInPictureMediaPlayback: true,
+              allowsAirPlayForMediaPlayback: true,
+              isFraudulentWebsiteWarningEnabled: false,
+              userAgent:
+                  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
             ),
-            UserScript(
-              source: YouTubeJS.visibilityKeepAliveScript,
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            ),
-            UserScript(
-              source: YouTubeJS.searchSpaScript,
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            ),
-            UserScript(
-              source: YouTubeJS.appBannerRemoverScript,
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            ),
-            UserScript(
-              source: YouTubeJS.playerControlsScript,
-              injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-            ),
-          ]),
-          initialSettings: InAppWebViewSettings(
-            javaScriptEnabled: true,
-            allowsInlineMediaPlayback: true,
-            mediaPlaybackRequiresUserGesture: false,
-            allowBackgroundAudioPlaying: true,
-            allowsPictureInPictureMediaPlayback: true,
-            allowsAirPlayForMediaPlayback: true,
-            isFraudulentWebsiteWarningEnabled: false,
-            userAgent:
-                'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
-          ),
-          onWebViewCreated: _onWebViewCreated,
-          onLoadStart: _onLoadStart,
-          onLoadStop: _onLoadStop,
-          onUpdateVisitedHistory: _onUpdateVisitedHistory,
-          onReceivedError: _onReceivedError,
-          onReceivedHttpError: _onReceivedHttpError,
-          shouldOverrideUrlLoading: (controller, navigationAction) async {
-            final url = navigationAction.request.url;
-            if (url != null) {
-              final scheme = url.scheme.toLowerCase();
-              if (scheme == 'http' || scheme == 'https' || scheme == 'about' || scheme == 'file') {
-                return NavigationActionPolicy.ALLOW;
+            onWebViewCreated: _onWebViewCreated,
+            onLoadStart: _onLoadStart,
+            onLoadStop: _onLoadStop,
+            onUpdateVisitedHistory: _onUpdateVisitedHistory,
+            onReceivedError: _onReceivedError,
+            onReceivedHttpError: _onReceivedHttpError,
+            shouldOverrideUrlLoading: (controller, navigationAction) async {
+              final url = navigationAction.request.url;
+              if (url != null) {
+                final scheme = url.scheme.toLowerCase();
+                if (scheme == 'http' ||
+                    scheme == 'https' ||
+                    scheme == 'about' ||
+                    scheme == 'file') {
+                  return NavigationActionPolicy.ALLOW;
+                }
+                if (scheme == 'javascript' ||
+                    scheme == 'data' ||
+                    scheme == 'blob') {
+                  return NavigationActionPolicy.CANCEL;
+                }
               }
-              if (scheme == 'javascript' || scheme == 'data' || scheme == 'blob') {
-                return NavigationActionPolicy.CANCEL;
+              return NavigationActionPolicy.ALLOW;
+            },
+            onCreateWindow: (controller, createWindowAction) async {
+              // Open popup/new-window targets (e.g. OAuth "Continue with ...")
+              // inside the main WebView instead of dropping them.
+              final url = createWindowAction.request.url;
+              if (url != null) {
+                controller.loadUrl(urlRequest: URLRequest(url: url));
               }
-            }
-            return NavigationActionPolicy.ALLOW;
-          },
-          onCreateWindow: (controller, createWindowAction) async {
-            // Open popup/new-window targets (e.g. OAuth "Continue with ...")
-            // inside the main WebView instead of dropping them.
-            final url = createWindowAction.request.url;
-            if (url != null) {
-              controller.loadUrl(urlRequest: URLRequest(url: url));
-            }
-            return false;
-          },
+              return false;
+            },
           ),
         ),
         if (_loadError != null && !_isLoading)
@@ -761,7 +786,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.play_circle_outline, color: Colors.white, size: 24),
+              child: const Icon(Icons.play_circle_outline,
+                  color: Colors.white, size: 24),
             ),
           ),
         ),
@@ -776,7 +802,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.picture_in_picture_alt, color: Colors.white, size: 24),
+              child: const Icon(Icons.picture_in_picture_alt,
+                  color: Colors.white, size: 24),
             ),
           ),
         ),

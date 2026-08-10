@@ -42,6 +42,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     ));
     _slideController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
+        MrPlayApp.webViewKey.currentState?.stopVideoAlignmentWatchdog();
         ref.read(playerProvider.notifier).minimize();
         _slideController.reset();
       }
@@ -148,6 +149,14 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(playerProvider, (prev, next) {
+      final justExpanded = (prev?.isMinimized ?? true) && !next.isMinimized;
+      final videoChanged = prev?.currentVideo?.id != next.currentVideo?.id;
+      if (!next.isMinimized && (justExpanded || videoChanged)) {
+        MrPlayApp.webViewKey.currentState?.startVideoAlignmentWatchdog();
+      }
+    });
+
     final state = ref.watch(playerProvider);
     final video = state.currentVideo;
     if (video == null || state.isMinimized) return const SizedBox.shrink();
@@ -446,8 +455,11 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                       ),
                       IconButton(
                         icon: const Icon(Icons.close, color: Colors.white54),
-                        onPressed: () =>
-                            ref.read(playerProvider.notifier).dismiss(),
+                        onPressed: () {
+                          MrPlayApp.webViewKey.currentState
+                              ?.stopVideoAlignmentWatchdog();
+                          ref.read(playerProvider.notifier).dismiss();
+                        },
                       ),
                     ],
                   ),
@@ -459,8 +471,11 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                     icon: const Icon(Icons.keyboard_arrow_down,
                         color: Colors.white),
                     tooltip: 'Minimize to mini player',
-                    onPressed: () =>
-                        ref.read(playerProvider.notifier).minimize(),
+                    onPressed: () {
+                      MrPlayApp.webViewKey.currentState
+                          ?.stopVideoAlignmentWatchdog();
+                      ref.read(playerProvider.notifier).minimize();
+                    },
                   ),
                 ],
               ),
