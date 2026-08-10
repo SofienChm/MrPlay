@@ -85,22 +85,33 @@ class YouTubeJS {
               var pipOverlay = player.querySelector('.ytp-pip-container');
               if (pipOverlay) pipOverlay.style.display = 'none';
             }
+            try {
+              if (el.webkitSetPresentationMode &&
+                  el.webkitPresentationMode === 'picture-in-picture' &&
+                  !document.pictureInPictureElement) {
+                el.webkitSetPresentationMode('inline');
+              }
+            } catch (e) {}
           });
         }
 
         function reportState() {
           if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-            var pip = false;
+            var pipStuck = false;
+            var pipActive = false;
             try {
-              pip = (typeof this.webkitPresentationMode !== 'undefined' && this.webkitPresentationMode === 'picture-in-picture') ||
-                    (typeof document.pictureInPictureElement !== 'undefined' && !!document.pictureInPictureElement);
+              var pm = typeof this.webkitPresentationMode !== 'undefined';
+              pipStuck = pm && this.webkitPresentationMode === 'picture-in-picture';
+              pipActive = (typeof document.pictureInPictureElement !== 'undefined' && !!document.pictureInPictureElement);
             } catch (e) {}
             window.flutter_inappwebview.callHandler('videoState', {
               playing: !this.paused && !this.ended,
               position: isFinite(this.currentTime) ? this.currentTime : 0,
               duration: isFinite(this.duration) ? this.duration : 0,
               ended: !!this.ended,
-              pip: pip
+              pip: pipStuck || pipActive,
+              pipActive: pipActive,
+              pipStuck: pipStuck && !pipActive
             });
           }
         }
@@ -127,6 +138,13 @@ class YouTubeJS {
               var pipOverlay = player.querySelector('.ytp-pip-container');
               if (pipOverlay) pipOverlay.style.display = 'none';
             }
+            try {
+              if (v.webkitSetPresentationMode &&
+                  v.webkitPresentationMode === 'picture-in-picture' &&
+                  !document.pictureInPictureElement) {
+                v.webkitSetPresentationMode('inline');
+              }
+            } catch (e) {}
           });
         }, 1000);
       } catch (e) {}
