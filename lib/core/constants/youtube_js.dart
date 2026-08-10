@@ -90,6 +90,21 @@ class YouTubeJS {
                   el.webkitPresentationMode === 'picture-in-picture' &&
                   !document.pictureInPictureElement) {
                 el.webkitSetPresentationMode('inline');
+                // If the API call didn't work and the video is still stuck,
+                // force a DOM reinsertion which resets the iOS presentation
+                // pipeline — this is the only reliable escape from stuck mode.
+                if (el.webkitPresentationMode === 'picture-in-picture') {
+                  var parent = el.parentNode;
+                  if (parent) {
+                    var wasPlaying = !el.paused;
+                    var next = el.nextSibling;
+                    var ct = el.currentTime;
+                    parent.removeChild(el);
+                    parent.insertBefore(el, next);
+                    el.currentTime = ct;
+                    if (wasPlaying) el.play().catch(function(){});
+                  }
+                }
               }
             } catch (e) {}
           });
@@ -125,6 +140,7 @@ class YouTubeJS {
           });
         }).observe(document.documentElement, { childList: true, subtree: true });
 
+        var _stuckCount = 0;
         setInterval(function() {
           document.querySelectorAll('video').forEach(function(v) {
             v.style.setProperty('visibility', 'visible', 'important');
@@ -143,6 +159,24 @@ class YouTubeJS {
                   v.webkitPresentationMode === 'picture-in-picture' &&
                   !document.pictureInPictureElement) {
                 v.webkitSetPresentationMode('inline');
+                _stuckCount++;
+                // If the API call fails 3 times in a row, force a DOM
+                // reinsertion which resets the iOS presentation pipeline.
+                if (_stuckCount >= 3) {
+                  var parent = v.parentNode;
+                  if (parent) {
+                    var wasPlaying = !v.paused;
+                    var next = v.nextSibling;
+                    var ct = v.currentTime;
+                    parent.removeChild(v);
+                    parent.insertBefore(v, next);
+                    v.currentTime = ct;
+                    if (wasPlaying) v.play().catch(function(){});
+                  }
+                  _stuckCount = 0;
+                }
+              } else {
+                _stuckCount = 0;
               }
             } catch (e) {}
           });

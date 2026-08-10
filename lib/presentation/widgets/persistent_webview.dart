@@ -651,7 +651,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   /// Last-resort fallback: if exitPiP failed to bring the video back inline,
   /// force the video element to be visible so the user doesn't see a black
-  /// screen. Also tries one final PiP exit in case the timing was just off.
+  /// screen. Tries webkitSetPresentationMode('inline'), then falls back to a
+  /// DOM reinsertion trick — removing the <video> from the DOM and putting it
+  /// back forces iOS to reset the presentation pipeline, which is more
+  /// reliable than the API call (which iOS can silently ignore).
   void ensureVideoVisible() {
     _pipRequestedByUser = false;
     _lastReportedPipActive = false;
@@ -665,13 +668,31 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             video.webkitSetPresentationMode('inline');
           }
         } catch (e) {}
-        video.style.visibility = 'visible';
-        video.style.opacity = '1';
-        video.style.display = '';
+        video.style.setProperty('visibility', 'visible', 'important');
+        video.style.setProperty('opacity', '1', 'important');
+        video.style.removeProperty('display');
         var player = document.querySelector('#movie_player');
         if (player) {
           var pipPlaceholder = player.querySelector('.ytp-pip-container, [class*="pip"]');
           if (pipPlaceholder) pipPlaceholder.remove();
+        }
+        // DOM reinsertion trick: if the video is still stuck in PiP mode after
+        // the API call above, briefly remove it from the DOM and reinsert it.
+        // This forces iOS WKWebView to tear down and rebuild the presentation
+        // pipeline — the only reliable way to escape a stuck presentation mode.
+        if (video.webkitPresentationMode === 'picture-in-picture') {
+          var parent = video.parentNode;
+          if (parent) {
+            var wasPlaying = !video.paused;
+            var next = video.nextSibling;
+            var currentTime = video.currentTime;
+            parent.removeChild(video);
+            parent.insertBefore(video, next);
+            video.currentTime = currentTime;
+            if (wasPlaying) {
+              video.play().catch(function(){});
+            }
+          }
         }
       })();
     ''');
