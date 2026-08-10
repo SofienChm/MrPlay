@@ -42,6 +42,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _userPausedInBackground = false;
   int _lastNowPlayingMs = 0;
   Timer? _alignmentWatchdog;
+  // Whether the active PiP session was explicitly requested by the user (PiP
+  // button / swipe-down-to-PiP). iOS can leave a video stuck in PiP
+  // presentation mode after the PiP window is dismissed - the in-page player
+  // then stays black while audio and the HTML controls keep working. PiP
+  // reports that were NOT requested are forced back inline (see
+  // [_onVideoState]); requested ones are left alone.
+  bool _pipRequestedByUser = false;
+  bool _lastReportedPip = false;
 
   @override
   void initState() {
@@ -70,6 +78,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
+      _pipRequestedByUser = false;
       Future.delayed(const Duration(milliseconds: 3000), ensureVideoVisible);
     }
   }
@@ -238,6 +247,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _endedHandled = false;
           _resumeSeekDone = false;
           _userPausedInBackground = false;
+          _pipRequestedByUser = false;
           ref.read(playerProvider.notifier).play(video);
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
@@ -264,6 +274,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final playing = data['playing'] == true;
       final ended = data['ended'] == true;
+      final pip = data['pip'] == true;
+      _lastReportedPip = pip;
+      // Stuck-PiP rescue: the video reports picture-in-picture presentation
+      // mode but the user never asked for PiP and the app is in the
+      // foreground. iOS can leave the mode stuck after the PiP window is
+      // dismissed, which turns the in-page player black while audio and the
+      // HTML controls keep working. Force it back inline.
+      if (pip && !_pipRequestedByUser && !_appIsBackgrounded) {
+        ensureVideoVisible();
+      }
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
       final posSec = (data['position'] as num?)?.toDouble() ?? 0;
@@ -342,6 +362,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     );
     ref.read(playerProvider.notifier).play(video);
     _userPausedInBackground = false;
+    _pipRequestedByUser = false;
     return video;
   }
 
@@ -551,6 +572,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void enterPiP({bool resumePlayback = false}) {
+    _pipRequestedByUser = true;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -597,6 +619,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Without this, returning to the app leaves the in-page player black while
   /// the video keeps floating in the PiP window.
   void exitPiP() {
+    _pipRequestedByUser = false;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -615,6 +638,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// force the video element to be visible so the user doesn't see a black
   /// screen. Also tries one final PiP exit in case the timing was just off.
   void ensureVideoVisible() {
+    _pipRequestedByUser = false;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -653,7 +677,21 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _alignmentWatchdog = null;
   }
 
+  /// Forces the video back inline when the full player collapses to the mini
+  /// player, unless PiP was explicitly requested (swipe-down-to-PiP also
+  /// collapses the full player - that case must be left alone). Covers the
+  /// stuck-PiP case where the black in-page video only becomes visible again
+  /// in the PiP window.
+  void _unstickPiPIfUnrequested() {
+    if (_pipRequestedByUser || _appIsBackgrounded) return;
+    ensureVideoVisible();
+  }
+
   void togglePictureInPicture() {
+    // The JS toggles based on the real mode; mirror the intent here so the
+    // stuck-PiP rescue leaves user-requested PiP alone. If the last report
+    // said PiP, the user is exiting; otherwise they are entering.
+    _pipRequestedByUser = !_lastReportedPip;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -675,6 +713,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   @override
   Widget build(BuildContext context) {
+    ref.listen(playerProvider, (prev, next) {
+      final collapsedToMini = prev?.isMinimized == false && next.isMinimized;
+      if (collapsedToMini) _unstickPiPIfUnrequested();
+    });
     if (!isReady) return const SizedBox.shrink();
 
     return Stack(
@@ -816,6 +858,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 urlRequest: URLRequest(url: WebUri('about:blank')),
               );
               _webViewController = null;
+              _pipRequestedByUser = false;
               BackgroundAudioKeepAlive.instance.stop();
               PlaybackStatsService.instance.flush();
               MediaControlsService.instance.clearNowPlaying();

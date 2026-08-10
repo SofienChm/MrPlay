@@ -33,6 +33,18 @@ MrPlay - Project Map
 >   shelters when LANDING on a /watch page, and `restoreShelteredIntoPlayer`
 >   (on `playing` + 800ms interval) puts YouTube's reused `<video>` element
 >   back into the visible player when a watch page claims the sheltered one
+> - Fixes 2026-08-10: black in-page video (audio + native YouTube controls
+>   working, frames only visible in PiP) root-caused to the video being stuck
+>   in PiP presentation mode with no visible PiP window — iOS leaves
+>   `webkitPresentationMode == 'picture-in-picture'` after the PiP window is
+>   dismissed, and the 1s force-back loop that masked it had been removed.
+>   Fixed with a smart un-stick guard instead of restoring the loop (which
+>   also killed intentional PiP): Dart tracks `_pipRequestedByUser` (set by
+>   the PiP button / swipe-down-to-PiP, cleared on exit/new video/app
+>   resume/dismiss), and any `videoState` report of `pip == true` that was
+>   NOT requested while foregrounded is forced back inline via
+>   `ensureVideoVisible()`; collapsing the full player to the mini player
+>   runs the same check unless PiP was requested
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.
