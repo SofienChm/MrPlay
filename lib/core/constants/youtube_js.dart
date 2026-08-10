@@ -253,7 +253,8 @@ class YouTubeJS {
       function ensureBar() {
         var player = document.querySelector('#movie_player');
         if (!player) return;
-        if (player.style.position !== 'absolute' && player.style.position !== 'relative') {
+        var pos = getComputedStyle(player).position;
+        if (pos !== 'absolute' && pos !== 'relative' && pos !== 'fixed') {
           player.style.position = 'relative';
         }
         var bar = document.getElementById(BAR_ID);
