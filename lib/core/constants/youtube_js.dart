@@ -22,11 +22,45 @@ class YouTubeJS {
           return origAdd.call(this, type, fn, opts);
         };
 
+        var _playsInlineSet = new WeakSet();
+        var _origLoad = HTMLMediaElement.prototype.load;
+        HTMLMediaElement.prototype.load = function() {
+          if (!_playsInlineSet.has(this)) {
+            this.playsInline = true;
+            this.setAttribute('playsinline', 'true');
+            this.setAttribute('webkit-playsinline', 'true');
+            _playsInlineSet.add(this);
+          }
+          return _origLoad.call(this);
+        };
+        (function() {
+          var desc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+          if (desc && desc.set) {
+            var _origSrcSet = desc.set;
+            Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+              get: desc.get,
+              set: function(v) {
+                if (!_playsInlineSet.has(this)) {
+                  this.playsInline = true;
+                  this.setAttribute('playsinline', 'true');
+                  this.setAttribute('webkit-playsinline', 'true');
+                  _playsInlineSet.add(this);
+                }
+                _origSrcSet.call(this, v);
+              },
+              configurable: true, enumerable: true
+            });
+          }
+        })();
+
         var lastReport = 0;
         function prepareVideo(v) {
-          v.setAttribute('playsinline', 'true');
-          v.setAttribute('webkit-playsinline', 'true');
-          v.setAttribute('pip', 'true');
+          if (!_playsInlineSet.has(v)) {
+            v.playsInline = true;
+            v.setAttribute('playsinline', 'true');
+            v.setAttribute('webkit-playsinline', 'true');
+            _playsInlineSet.add(v);
+          }
 
           v.addEventListener('play', reportState);
           v.addEventListener('pause', reportState);
@@ -85,12 +119,6 @@ class YouTubeJS {
             v.style.setProperty('visibility', 'visible', 'important');
             v.style.setProperty('opacity', '1', 'important');
             v.style.removeProperty('display');
-            try {
-              if (v.webkitSetPresentationMode &&
-                  v.webkitPresentationMode === 'picture-in-picture') {
-                v.webkitSetPresentationMode('inline');
-              }
-            } catch (e) {}
             var poster = v.parentElement && v.parentElement.querySelector(
               '.ytp-cued-thumbnail-overlay, .ytp-poster, [class*="thumbnail"][class*="overlay"]');
             if (poster) poster.style.display = 'none';
