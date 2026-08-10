@@ -91,6 +91,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
       BackgroundAudioKeepAlive.instance.start();
+      enterPiP(resumePlayback: true);
     }
   }
 
