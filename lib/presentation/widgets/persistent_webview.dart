@@ -479,12 +479,50 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       context: context,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black54,
+      isScrollControlled: true,
       builder: (sheetContext) {
-        return Container(
-          height: 300,
-          decoration: const BoxDecoration(
-            color: Color(0xFF1C1C1E),
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Container(
+            decoration: const BoxDecoration(
+              color: Color(0xFF1C1C1E),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  _SheetMenuItem(
+                    icon: Icons.settings,
+                    label: 'Settings',
+                    onTap: () => Navigator.pop(sheetContext),
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
+                    icon: Icons.share,
+                    label: 'Share',
+                    onTap: () => Navigator.pop(sheetContext),
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
+                    icon: Icons.airplay,
+                    label: 'AirPlay',
+                    onTap: () => Navigator.pop(sheetContext),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
           ),
         );
       },
@@ -987,6 +1025,45 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
       ],
+    );
+  }
+}
+
+class _SheetMenuItem extends StatelessWidget {
+  const _SheetMenuItem({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: Colors.white70, size: 22),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white24, size: 20),
+          ],
+        ),
+      ),
     );
   }
 }
