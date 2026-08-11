@@ -306,10 +306,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                       }),
                       const SizedBox(height: 16),
                           Builder(builder: (ctx) {
-                        Widget infoCard = GestureDetector(
-                          onVerticalDragStart: (_) {},
-                          onVerticalDragUpdate: (_) {},
-                          child: Container(
+                        Widget infoCard = Container(
                           margin: const EdgeInsets.symmetric(horizontal: 12),
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                           decoration: BoxDecoration(
@@ -415,7 +412,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                               ),
                             ],
                           ),
-                        ),
                         );
                         if (_dragOffset > 0 && opacity < 1.0) {
                           infoCard = Opacity(

@@ -17,6 +17,7 @@ import '../../data/repositories/queue_repository.dart';
 import '../../data/repositories/watch_later_repository.dart';
 import '../../data/models/favorite_video.dart';
 import '../../presentation/pages/settings_page.dart';
+import '../../presentation/pages/favorites_page.dart';
 import 'error_widget.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
@@ -555,6 +556,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                   ),
                   const Divider(color: Colors.white10, height: 1, indent: 56),
                   _SheetMenuItem(
+                    icon: Icons.bookmarks,
+                    label: 'View Bookmarks',
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const FavoritesPage()),
+                      );
+                    },
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
                     icon: Icons.airplay,
                     label: 'AirPlay',
                     onTap: () {
@@ -573,10 +586,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     icon: Icons.share,
                     label: 'Share Link',
                     onTap: () {
+                      final shareUrl =
+                          video?.videoUrl ?? _currentUrl ?? '';
+                      final shareTitle =
+                          video?.title ?? 'MrPlay Video';
                       Navigator.pop(sheetContext);
-                      if (video != null && video.videoUrl.isNotEmpty) {
-                        Share.share(video.videoUrl,
-                            subject: video.title);
+                      if (shareUrl.isNotEmpty) {
+                        Share.share(
+                          shareUrl,
+                          subject: shareTitle,
+                        );
                       }
                     },
                   ),
