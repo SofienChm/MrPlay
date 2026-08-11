@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/constants/youtube_js.dart';
 import '../../core/constants/content_blocker_js.dart';
 import '../../models/video.dart';
@@ -13,6 +14,9 @@ import '../../services/media_controls_service.dart';
 import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
+import '../../data/repositories/watch_later_repository.dart';
+import '../../data/models/favorite_video.dart';
+import '../../presentation/pages/settings_page.dart';
 import 'error_widget.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
@@ -476,6 +480,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void _showOptionsModal() {
+    final video = ref.read(playerProvider).currentVideo;
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -504,21 +509,88 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                   ),
                   const SizedBox(height: 8),
                   _SheetMenuItem(
-                    icon: Icons.settings,
-                    label: 'Settings',
-                    onTap: () => Navigator.pop(sheetContext),
+                    icon: Icons.picture_in_picture_alt,
+                    label: 'Picture in Picture',
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      togglePictureInPicture();
+                    },
                   ),
                   const Divider(color: Colors.white10, height: 1, indent: 56),
                   _SheetMenuItem(
-                    icon: Icons.share,
-                    label: 'Share',
-                    onTap: () => Navigator.pop(sheetContext),
+                    icon: Icons.bookmark_border,
+                    label: 'Add to Bookmarks',
+                    onTap: () async {
+                      Navigator.pop(sheetContext);
+                      if (video == null) return;
+                      final already =
+                          await WatchLaterRepository.isQueued(video.id);
+                      if (already) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Already in bookmarks'),
+                                duration: Duration(seconds: 1)),
+                          );
+                        }
+                        return;
+                      }
+                      await WatchLaterRepository.add(FavoriteVideo(
+                        id: video.id,
+                        title: video.title,
+                        channel:
+                            video.platform.isEmpty ? 'YouTube' : video.platform,
+                        thumbnailUrl: video.thumbnailUrl,
+                        platformUrl: video.videoUrl,
+                        addedAt: DateTime.now(),
+                      ));
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Added to bookmarks'),
+                              duration: Duration(seconds: 1)),
+                        );
+                      }
+                    },
                   ),
                   const Divider(color: Colors.white10, height: 1, indent: 56),
                   _SheetMenuItem(
                     icon: Icons.airplay,
                     label: 'AirPlay',
-                    onTap: () => Navigator.pop(sheetContext),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _webViewController?.evaluateJavascript(source: '''
+                        (function(){
+                          var v=document.querySelector('video');
+                          if(v&&v.webkitShowPlaybackTargetPicker)
+                            v.webkitShowPlaybackTargetPicker();
+                        })();
+                      ''');
+                    },
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
+                    icon: Icons.share,
+                    label: 'Share Link',
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      if (video != null && video.videoUrl.isNotEmpty) {
+                        Share.share(video.videoUrl,
+                            subject: video.title);
+                      }
+                    },
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
+                    icon: Icons.settings,
+                    label: 'Settings',
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                            builder: (_) => const SettingsPage()),
+                      );
+                    },
                   ),
                   const Divider(color: Colors.white10, height: 1, indent: 56),
                   _SheetMenuItem(
@@ -535,13 +607,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     label: 'Import Data',
                     onTap: () {
                       Navigator.pop(sheetContext);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                              'Share a .json or .csv file to MrPlay to import'),
-                          duration: Duration(seconds: 3),
-                        ),
-                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                                'Share a .json or .csv file to MrPlay to import'),
+                            duration: Duration(seconds: 3),
+                          ),
+                        );
+                      }
                     },
                   ),
                   const SizedBox(height: 12),
