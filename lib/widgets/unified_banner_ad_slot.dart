@@ -99,16 +99,12 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 0, 6),
+      padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
       child: Align(
         alignment: Alignment.centerLeft,
         child: Stack(
           clipBehavior: Clip.none,
           children: [
-            // Reserve the strip the close button straddles, so the WHOLE
-            // button stays inside the Stack's own bounds. Flutter never
-            // hit-tests a child outside the Stack's rect: with the button at
-            // (-20, -20) everything except a small sliver was dead to taps.
             Padding(
               padding: const EdgeInsets.only(top: 22, right: 22),
               child: ClipRRect(
@@ -117,29 +113,36 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
                   width: 320,
                   height: 100,
                   child: Container(
-                    color: Colors.black.withValues(alpha: 0.8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     child: Center(child: _adWidget!),
                   ),
                 ),
               ),
             ),
             Positioned(
-              top: 0,
-              right: 0,
+              top: 6,
+              right: 8,
               child: GestureDetector(
                 onTap: _handleDismiss,
                 behavior: HitTestBehavior.opaque,
                 child: Container(
-                  width: 44,
-                  height: 44,
+                  width: 36,
+                  height: 36,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
+                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
                     shape: BoxShape.circle,
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.15),
+                      width: 1,
+                    ),
                   ),
                   child: const Icon(
                     Icons.close,
-                    size: 22,
-                    color: Colors.white,
+                    size: 18,
+                    color: Colors.white70,
                   ),
                 ),
               ),

@@ -477,6 +477,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
+  void _showOptionsModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      builder: (sheetContext) {
+        return Container(
+          height: 300,
+          decoration: const BoxDecoration(
+            color: Color(0xFF1C1C1E),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+        );
+      },
+    );
+  }
+
   /// Full cleanup: pauses the video, cancels timers, stops audio keep-alive,
   /// clears now-playing, flushes stats, and dismisses the player state.
   void closePlayer() {
@@ -898,6 +915,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               ),
             ),
           ),
+        Positioned(
+          bottom: 206,
+          right: 16,
+          child: GestureDetector(
+            onTap: _showOptionsModal,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.more_horiz,
+                  color: Colors.white, size: 24),
+            ),
+          ),
+        ),
         Positioned(
           bottom: 164,
           right: 16,
