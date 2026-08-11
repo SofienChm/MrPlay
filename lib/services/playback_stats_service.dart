@@ -16,6 +16,7 @@ class PlaybackStatsService {
   static const String _progressKey = 'stats_progress';
   static const int _maxProgressEntries = 200;
   static const int _minResumeSeconds = 10;
+  static const int _maxDailyDays = 90;
 
   final Map<String, int> _dailySeconds = {}; // 'YYYY-MM-DD' -> seconds
   final Map<String, int> _platformSeconds = {}; // platform -> seconds
@@ -88,10 +89,26 @@ class PlaybackStatsService {
   Future<void> flush() async {
     _flushTimer?.cancel();
     _flushTimer = null;
+    _pruneDaily();
+    _prunePlatform();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_dailyKey, jsonEncode(_dailySeconds));
     await prefs.setString(_platformKey, jsonEncode(_platformSeconds));
     await prefs.setString(_progressKey, jsonEncode(_progress));
+  }
+
+  void _pruneDaily() {
+    if (_dailySeconds.length <= _maxDailyDays) return;
+    final cutoff = DateTime.now().subtract(const Duration(days: _maxDailyDays));
+    final cutoffKey = '${cutoff.year}-'
+        '${cutoff.month.toString().padLeft(2, '0')}-'
+        '${cutoff.day.toString().padLeft(2, '0')}';
+    _dailySeconds.removeWhere((k, _) => k.compareTo(cutoffKey) < 0);
+  }
+
+  void _prunePlatform() {
+    if (_platformSeconds.length <= 50) return;
+    _platformSeconds.removeWhere((_, v) => v <= 0);
   }
 
   /// Stops the delta tracker (call on pause / ended / new video).

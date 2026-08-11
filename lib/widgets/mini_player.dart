@@ -144,8 +144,9 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
                         IconButton(
                           icon: const Icon(Icons.close,
                               color: Colors.white54, size: 20),
-                          onPressed: () =>
-                              ref.read(playerProvider.notifier).dismiss(),
+                          onPressed: () {
+                            MrPlayApp.webViewKey.currentState?.closePlayer();
+                          },
                         ),
                       ],
                     ),

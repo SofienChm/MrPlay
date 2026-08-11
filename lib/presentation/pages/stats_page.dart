@@ -94,7 +94,7 @@ class _StatsPageState extends State<StatsPage> {
                 return BarChart(
                   BarChartData(
                     alignment: BarChartAlignment.spaceAround,
-                    maxY: _maxOf(days) * 1.2,
+                    maxY: _maxOr(days, fallback: 1.0) * 1.2,
                     barTouchData: BarTouchData(
                       touchTooltipData: BarTouchTooltipData(
                         getTooltipItem: (group, groupIndex, rod, rodIndex) =>
@@ -205,12 +205,12 @@ class _StatsPageState extends State<StatsPage> {
     return data[key] ?? 0;
   }
 
-  double _maxOf(List<double> values) {
-    var max = 1.0;
+  double _maxOr(List<double> values, {double fallback = 1.0}) {
+    var max = 0.0;
     for (final v in values) {
       if (v > max) max = v;
     }
-    return max;
+    return max > 0 ? max : fallback;
   }
 
   Color _platformColor(String name) {

@@ -51,6 +51,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _pipRequestedByUser = false;
   bool _lastReportedPipActive = false;
 
+  /// True when the video is actively in PiP (user or auto-background).
+  bool get isInPictureInPicture => _pipRequestedByUser;
+
   @override
   void initState() {
     super.initState();
@@ -72,7 +75,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive) {
-      _enterBackground();
+      _appIsBackgrounded = true;
     } else if (state == AppLifecycleState.paused) {
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
@@ -187,6 +190,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (urlStr.contains('youtube.com')) {
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {
+          if (!mounted) return;
           await controller.evaluateJavascript(source: '''
             (function() {
               var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
@@ -215,6 +219,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               .then((resumeMs) {
             if (resumeMs > 0) {
               Future.delayed(const Duration(milliseconds: 3500), () async {
+                if (!mounted) return;
                 if (_resumeSeekDone) return;
                 _resumeSeekDone = true;
                 await controller.evaluateJavascript(source: '''
@@ -402,6 +407,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (items.isEmpty) return;
     final next = items.first;
     await QueueRepository.remove(next.id);
+    exitPiP();
     if (mounted) loadUrl(next.platformUrl);
   }
 
@@ -469,6 +475,21 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (ref.read(playerProvider).currentVideo != null) {
       ref.read(playerProvider.notifier).minimize();
     }
+  }
+
+  /// Full cleanup: pauses the video, cancels timers, stops audio keep-alive,
+  /// clears now-playing, flushes stats, and dismisses the player state.
+  void closePlayer() {
+    controlVideo('pause');
+    stopVideoAlignmentWatchdog();
+    _loadingTimer?.cancel();
+    _loadingTimer = null;
+    _nowPlayingThrottle?.cancel();
+    _nowPlayingThrottle = null;
+    BackgroundAudioKeepAlive.instance.stop();
+    PlaybackStatsService.instance.flush();
+    MediaControlsService.instance.clearNowPlaying();
+    ref.read(playerProvider.notifier).dismiss();
   }
 
   void controlVideo(String action, {double? position}) {
@@ -548,6 +569,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       isReady = true;
       _isLoading = true;
     });
+    _endedHandled = false;
+    _resumeSeekDone = false;
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
     });

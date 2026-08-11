@@ -60,7 +60,10 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         (details.primaryVelocity != null && details.primaryVelocity! > 500) ||
             _dragOffset > 150;
     if (shouldMinimize) {
-      MrPlayApp.webViewKey.currentState?.enterPiP();
+      final webView = MrPlayApp.webViewKey.currentState;
+      if (webView == null || !webView.isInPictureInPicture) {
+        webView?.enterPiP();
+      }
       _slideController.forward();
     } else {
       _slideController.reverse();

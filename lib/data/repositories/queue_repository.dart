@@ -35,7 +35,6 @@ class QueueRepository {
       item.copyWith(sortIndex: 0),
       for (final existing in items) existing.copyWith(sortIndex: existing.sortIndex + 1),
     ];
-    await b.clear();
     await b.putAll({for (final i in updated) i.id: i});
   }
 
@@ -50,7 +49,9 @@ class QueueRepository {
     final reindexed = [
       for (var i = 0; i < ordered.length; i++) ordered[i].copyWith(sortIndex: i),
     ];
-    await b.clear();
+    final newIds = reindexed.map((e) => e.id).toSet();
+    final toDelete = b.keys.where((k) => !newIds.contains(k)).toList();
+    if (toDelete.isNotEmpty) await b.deleteAll(toDelete);
     await b.putAll({for (final item in reindexed) item.id: item});
   }
 
