@@ -49,7 +49,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // reports that were NOT requested are forced back inline (see
   // [_onVideoState]); requested ones are left alone.
   bool _pipRequestedByUser = false;
-  bool _lastReportedPipActive = false;
+  bool _lastReportedPip = false;
 
   /// True when the video is actively in PiP (user or auto-background).
   bool get isInPictureInPicture => _pipRequestedByUser;
@@ -82,7 +82,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
       _pipRequestedByUser = false;
-      _lastReportedPipActive = false;
+      _lastReportedPip = false;
       Future.delayed(const Duration(milliseconds: 3000), ensureVideoVisible);
     }
   }
@@ -255,7 +255,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _resumeSeekDone = false;
           _userPausedInBackground = false;
           _pipRequestedByUser = false;
-          _lastReportedPipActive = false;
+          _lastReportedPip = false;
           ref.read(playerProvider.notifier).play(video);
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
@@ -283,25 +283,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final playing = data['playing'] == true;
       final ended = data['ended'] == true;
       final pip = data['pip'] == true;
-      final pipActive = data['pipActive'] == true;
       final pipStuck = data['pipStuck'] == true;
-      _lastReportedPipActive = pipActive;
+      _lastReportedPip = pip;
       // Stuck-PiP rescue: iOS leaves webkitPresentationMode == 'picture-in-picture'
-      // after the PiP window is dismissed, making the in-page video element render
-      // black. "pipStuck" means the mode is stuck with no active PiP window.
-      // Force it back inline regardless of _pipRequestedByUser — if the user
-      // actually wanted PiP, pipActive would be true.
-      if (pipStuck && !_appIsBackgrounded) {
+      // after the PiP window is dismissed, rendering the in-page video black.
+      // Only rescue genuinely stuck mode — NOT when the user just requested PiP.
+      // On iOS, pipStuck is always true when in PiP mode (pictureInPictureElement
+      // doesn't exist), so we must respect _pipRequestedByUser.
+      if (pipStuck && !_appIsBackgrounded && !_pipRequestedByUser) {
         ensureVideoVisible();
-      } else if (pip && !pipActive && !_pipRequestedByUser && !_appIsBackgrounded) {
-        // Fallback: pip reports true but pipActive not provided (pre-update JS)
+      } else if (pip && !_pipRequestedByUser && !_appIsBackgrounded) {
         ensureVideoVisible();
       }
-      // When PiP window is actually dismissed (pipActive goes from true to false),
-      // clear the user-requested flag so future stuck-mode detection works.
-      if (!pipActive && _pipRequestedByUser) {
+      // When the video exits PiP mode entirely (pip goes from true to false),
+      // the PiP window was dismissed. Clear the user-requested flag.
+      if (!pip && _pipRequestedByUser) {
         _pipRequestedByUser = false;
-        ensureVideoVisible();
       }
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
@@ -382,7 +379,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ref.read(playerProvider.notifier).play(video);
     _userPausedInBackground = false;
     _pipRequestedByUser = false;
-    _lastReportedPipActive = false;
+    _lastReportedPip = false;
     return video;
   }
 
@@ -675,7 +672,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// the video keeps floating in the PiP window.
   void exitPiP() {
     _pipRequestedByUser = false;
-    _lastReportedPipActive = false;
+    _lastReportedPip = false;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -698,7 +695,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// reliable than the API call (which iOS can silently ignore).
   void ensureVideoVisible() {
     _pipRequestedByUser = false;
-    _lastReportedPipActive = false;
+    _lastReportedPip = false;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -780,16 +777,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// again in the PiP window.
   void _unstickPiPIfUnrequested() {
     if (_appIsBackgrounded) return;
-    if (_lastReportedPipActive && _pipRequestedByUser) return;
+    if (_pipRequestedByUser) return;
     ensureVideoVisible();
   }
 
   void togglePictureInPicture() {
-    // The JS toggles based on the real mode; mirror the intent here so the
-    // stuck-PiP rescue leaves user-requested PiP alone. Use the active-PiP
-    // signal rather than the stuck mode signal so we correctly predict the
-    // user's intent.
-    _pipRequestedByUser = !_lastReportedPipActive;
+    _pipRequestedByUser = !_lastReportedPip;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = document.querySelector('video');
@@ -973,7 +966,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               );
               _webViewController = null;
               _pipRequestedByUser = false;
-              _lastReportedPipActive = false;
+              _lastReportedPip = false;
               BackgroundAudioKeepAlive.instance.stop();
               PlaybackStatsService.instance.flush();
               MediaControlsService.instance.clearNowPlaying();
