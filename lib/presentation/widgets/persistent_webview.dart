@@ -11,6 +11,7 @@ import '../../providers/player_provider.dart';
 import '../../services/background_audio_keep_alive.dart';
 import '../../services/media_controls_service.dart';
 import '../../services/playback_stats_service.dart';
+import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
 import 'error_widget.dart';
 
@@ -518,6 +519,30 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     icon: Icons.airplay,
                     label: 'AirPlay',
                     onTap: () => Navigator.pop(sheetContext),
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
+                    icon: Icons.file_upload_outlined,
+                    label: 'Export Data',
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      DataExportService.instance.exportToJson();
+                    },
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  _SheetMenuItem(
+                    icon: Icons.file_download_outlined,
+                    label: 'Import Data',
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                              'Share a .json or .csv file to MrPlay to import'),
+                          duration: Duration(seconds: 3),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 12),
                 ],
