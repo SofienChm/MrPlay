@@ -305,8 +305,11 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                         return videoArea;
                       }),
                       const SizedBox(height: 16),
-                      Builder(builder: (ctx) {
-                        Widget infoCard = Container(
+                          Builder(builder: (ctx) {
+                        Widget infoCard = GestureDetector(
+                          onVerticalDragStart: (_) {},
+                          onVerticalDragUpdate: (_) {},
+                          child: Container(
                           margin: const EdgeInsets.symmetric(horizontal: 12),
                           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                           decoration: BoxDecoration(
@@ -412,6 +415,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                               ),
                             ],
                           ),
+                        ),
                         );
                         if (_dragOffset > 0 && opacity < 1.0) {
                           infoCard = Opacity(
@@ -436,6 +440,31 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
               }
               return body;
             }),
+          ),
+          Positioned(
+            top: topPadding + 4,
+            left: 16,
+            child: Opacity(
+              opacity: opacity,
+              child: Column(
+                children: [
+                  IconButton(
+                    iconSize: 30,
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black.withValues(alpha: 0.55),
+                    ),
+                    icon: const Icon(Icons.keyboard_arrow_down,
+                        color: Colors.white),
+                    tooltip: 'Minimize to mini player',
+                    onPressed: () {
+                      MrPlayApp.webViewKey.currentState
+                          ?.stopVideoAlignmentWatchdog();
+                      ref.read(playerProvider.notifier).minimize();
+                    },
+                  ),
+                ],
+              ),
+            ),
           ),
           Positioned(
             top: topPadding + 4,
@@ -465,20 +494,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                         },
                       ),
                     ],
-                  ),
-                  IconButton(
-                    iconSize: 30,
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.black.withValues(alpha: 0.55),
-                    ),
-                    icon: const Icon(Icons.keyboard_arrow_down,
-                        color: Colors.white),
-                    tooltip: 'Minimize to mini player',
-                    onPressed: () {
-                      MrPlayApp.webViewKey.currentState
-                          ?.stopVideoAlignmentWatchdog();
-                      ref.read(playerProvider.notifier).minimize();
-                    },
                   ),
                 ],
               ),
