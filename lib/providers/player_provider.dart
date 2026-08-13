@@ -38,6 +38,13 @@ class PlayerState {
 }
 
 class PlayerNotifier extends Notifier<PlayerState> {
+  /// Timestamp of the last manual [seekTo]. While a seek is still "in flight"
+  /// (the video element may take a moment to jump), JS position reports are
+  /// ignored so they don't snap the slider/thumb back to the pre-seek time.
+  DateTime _lastSeekAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  static const Duration _seekGrace = Duration(milliseconds: 1200);
+
   @override
   PlayerState build() => const PlayerState();
 
@@ -70,9 +77,17 @@ class PlayerNotifier extends Notifier<PlayerState> {
     } else if (ended) {
       PlaybackStatsService.instance.resetTrack();
     }
+    // Ignore JS position reports that arrive right after a manual seek, so the
+    // slider thumb doesn't jump back to the pre-seek position while the video
+    // element catches up.
+    final recentlySeeked =
+        DateTime.now().difference(_lastSeekAt) < _seekGrace;
+    final nextPosition = (recentlySeeked && position != null)
+        ? state.position
+        : (position ?? state.position);
     state = state.copyWith(
       isPlaying: playing,
-      position: position ?? state.position,
+      position: nextPosition,
       duration: duration ?? state.duration,
     );
   }
@@ -84,7 +99,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   void resume() => state = state.copyWith(isPlaying: true);
 
-  void seekTo(Duration position) => state = state.copyWith(position: position);
+  void seekTo(Duration position) {
+    _lastSeekAt = DateTime.now();
+    state = state.copyWith(position: position);
+  }
 
   void minimize() => state = state.copyWith(isMinimized: true);
 

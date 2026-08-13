@@ -586,20 +586,29 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     icon: Icons.share,
                     label: 'Share Link',
                     onTap: () {
-                      final shareUrl =
-                          video?.videoUrl ?? _currentUrl ?? '';
-                      final shareTitle =
-                          video?.title ?? 'MrPlay Video';
+                      var shareUrl = video?.videoUrl ?? '';
+                      if (shareUrl.isEmpty &&
+                          video != null &&
+                          video.id.isNotEmpty) {
+                        shareUrl =
+                            'https://www.youtube.com/watch?v=${video.id}';
+                      }
+                      if (shareUrl.isEmpty) shareUrl = _currentUrl ?? '';
+                      final shareTitle = video?.title ?? 'MrPlay Video';
+                      // iPad presents the share sheet as a popover and requires
+                      // a source rect, otherwise it silently drops the sheet.
+                      final origin = _sharePositionOrigin();
                       Navigator.pop(sheetContext);
                       // Defer Share.share until the bottom sheet's dismiss
                       // animation completes. iOS silently drops a share sheet
                       // presented on a controller mid-dismiss, which is why the
                       // button appeared to do nothing.
                       if (shareUrl.isNotEmpty) {
-                        Future.delayed(const Duration(milliseconds: 350), () {
+                        Future.delayed(const Duration(milliseconds: 400), () {
                           Share.share(
                             shareUrl,
                             subject: shareTitle,
+                            sharePositionOrigin: origin,
                           );
                         });
                       }
@@ -650,6 +659,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         );
       },
+    );
+  }
+
+  /// Returns a screen-anchored rect used as the popover source on iPad, where
+  /// [Share.share] requires a non-null `sharePositionOrigin` or it drops the
+  /// sheet silently.
+  Rect _sharePositionOrigin() {
+    final size = MediaQuery.of(context).size;
+    return Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: 1,
+      height: 1,
     );
   }
 

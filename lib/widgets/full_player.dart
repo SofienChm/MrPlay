@@ -365,10 +365,21 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                     ref
                                         .read(playerProvider.notifier)
                                         .seekTo(pos);
+                                  },
+                                  onChangeEnd: (value) {
+                                    final pos = Duration(
+                                      milliseconds: (value *
+                                              state.duration.inMilliseconds)
+                                          .round(),
+                                    );
+                                    ref
+                                        .read(playerProvider.notifier)
+                                        .seekTo(pos);
                                     MrPlayApp.webViewKey.currentState
                                         ?.controlVideo(
                                       'seek',
-                                      position: pos.inMilliseconds / 1000.0,
+                                      position:
+                                          pos.inMilliseconds / 1000.0,
                                     );
                                   },
                                 ),
