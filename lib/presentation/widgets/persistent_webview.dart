@@ -48,6 +48,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _userPausedInBackground = false;
   int _lastNowPlayingMs = 0;
   Timer? _alignmentWatchdog;
+  Timer? _statePoll;
   // Whether the active PiP session was explicitly requested by the user (PiP
   // button / swipe-down-to-PiP). iOS can leave a video stuck in PiP
   // presentation mode after the PiP window is dismissed - the in-page player
@@ -59,6 +60,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   /// True when the video is actively in PiP (user or auto-background).
   bool get isInPictureInPicture => _pipRequestedByUser;
+
+  /// JS that resolves the actively-playing `<video>` (falling back to the
+  /// first one), so controls target the real playback element rather than a
+  /// stale/ad/preview video that `document.querySelector('video')` may hit.
+  static const String _activeVideoJs = '''
+    (function() {
+      var videos = document.querySelectorAll('video');
+      for (var i = 0; i < videos.length; i++) {
+        if (!videos[i].paused && !videos[i].ended) return videos[i];
+      }
+      return videos.length > 0 ? videos[0] : null;
+    })()
+  ''';
 
   @override
   void initState() {
@@ -73,6 +87,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     _alignmentWatchdog?.cancel();
+    _statePoll?.cancel();
     PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
@@ -679,6 +694,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void closePlayer() {
     controlVideo('pause');
     stopVideoAlignmentWatchdog();
+    _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;
     _nowPlayingThrottle?.cancel();
@@ -696,7 +712,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       case 'play':
         controller.evaluateJavascript(source: '''
           (function() {
-            var v = document.querySelector('video');
+            var v = $_activeVideoJs;
             if (v) v.play().catch(function(){});
           })();
         ''');
@@ -704,7 +720,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       case 'pause':
         controller.evaluateJavascript(source: '''
           (function() {
-            var v = document.querySelector('video');
+            var v = $_activeVideoJs;
             if (v) v.pause();
           })();
         ''');
@@ -713,7 +729,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (position != null) {
           controller.evaluateJavascript(source: '''
             (function() {
-              var v = document.querySelector('video');
+              var v = $_activeVideoJs;
               if (v) v.currentTime = $position;
             })();
           ''');
@@ -722,7 +738,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       case 'toggleCaptions':
         controller.evaluateJavascript(source: '''
           (function() {
-            var v = document.querySelector('video');
+            var v = $_activeVideoJs;
             if (!v || !v.textTracks || v.textTracks.length === 0) return;
             var anyShown = false;
             for (var i = 0; i < v.textTracks.length; i++) {
@@ -737,7 +753,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       case 'fullscreen':
         controller.evaluateJavascript(source: '''
           (function() {
-            var v = document.querySelector('video');
+            var v = $_activeVideoJs;
             if (!v) return;
             if (v.requestFullscreen) {
               if (document.fullscreenElement) {
@@ -828,24 +844,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             });
           }
         }
-      })();
-    ''');
-  }
-
-  /// Brings the playing <video> back into the visible viewport. Used when the
-  /// full player is expanded so the live video (rendered by the webview) lines
-  /// up with the transparent video area of the full player.
-  void scrollVideoIntoView() {
-    _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        var v = document.querySelector('video');
-        if (!v) return;
-        var player = v.closest('#movie_player') || v.parentElement;
-        if (!player) return;
-        var r = player.getBoundingClientRect();
-        var targetY = window.scrollY + r.top - 47;
-        if (targetY < 0) targetY = 0;
-        window.scrollTo({top: targetY, behavior: 'smooth'});
       })();
     ''');
   }
@@ -942,7 +940,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _alignmentWatchdog?.cancel();
     var ticks = 0;
     _alignmentWatchdog = Timer.periodic(const Duration(milliseconds: 400), (t) {
-      scrollVideoIntoView();
       ensureVideoVisible();
       ticks++;
       if (ticks >= 8) t.cancel();
@@ -954,6 +951,62 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _alignmentWatchdog = null;
   }
 
+  /// Polls the webview for the live video position/duration from the Dart side.
+  /// While the full player overlays the webview, iOS can throttle the page's
+  /// own timers/events, so the JS `reportState` heartbeat may stop firing and
+  /// the seek slider / timer freeze. This keeps `position`/`duration` fresh
+  /// regardless of page-side throttling.
+  void _startStatePoll() {
+    _statePoll?.cancel();
+    _statePoll = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) => _pollVideoState(),
+    );
+  }
+
+  void _stopStatePoll() {
+    _statePoll?.cancel();
+    _statePoll = null;
+  }
+
+  Future<void> _pollVideoState() async {
+    final controller = _webViewController;
+    if (controller == null) return;
+    try {
+      final result = await controller.evaluateJavascript(source: '''
+        (function() {
+          var videos = document.querySelectorAll('video');
+          var v = null;
+          for (var i = 0; i < videos.length; i++) {
+            if (!videos[i].paused && !videos[i].ended) { v = videos[i]; break; }
+          }
+          if (!v && videos.length > 0) v = videos[0];
+          if (!v) return null;
+          var pipStuck = false;
+          var pipActive = false;
+          try {
+            pipStuck = (typeof v.webkitPresentationMode !== 'undefined') &&
+                       v.webkitPresentationMode === 'picture-in-picture';
+            pipActive = (typeof document.pictureInPictureElement !== 'undefined' &&
+                         !!document.pictureInPictureElement);
+          } catch (e) {}
+          return {
+            playing: !v.paused && !v.ended,
+            position: isFinite(v.currentTime) ? v.currentTime : 0,
+            duration: isFinite(v.duration) ? v.duration : 0,
+            ended: !!v.ended,
+            pip: pipStuck || pipActive,
+            pipActive: pipActive,
+            pipStuck: pipStuck && !pipActive
+          };
+        })();
+      ''');
+      if (result is Map) {
+        _onVideoState(Map<String, dynamic>.from(result));
+      }
+    } catch (_) {}
+  }
+
   /// Forces the video back inline when the full player collapses to the mini
   /// player, unless PiP is actively showing (user sees a PiP window). Covers
   /// the stuck-PiP case where the black in-page video only becomes visible
@@ -962,6 +1015,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_appIsBackgrounded) return;
     if (_pipRequestedByUser) return;
     ensureVideoVisible();
+    // iOS can leave the video stuck in PiP presentation mode even after the
+    // first un-stick attempt; re-check once shortly after so the in-page video
+    // doesn't stay black when the webview reappears.
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted && !_pipRequestedByUser) ensureVideoVisible();
+    });
   }
 
   void togglePictureInPicture() {
@@ -990,6 +1049,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ref.listen(playerProvider, (prev, next) {
       final collapsedToMini = prev?.isMinimized == false && next.isMinimized;
       if (collapsedToMini) _unstickPiPIfUnrequested();
+      final videoAppeared =
+          prev?.currentVideo == null && next.currentVideo != null;
+      final videoGone = prev?.currentVideo != null && next.currentVideo == null;
+      if (videoAppeared) _startStatePoll();
+      if (videoGone) _stopStatePoll();
     });
     if (!isReady) return const SizedBox.shrink();
 

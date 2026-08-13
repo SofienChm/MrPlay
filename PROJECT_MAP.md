@@ -45,6 +45,22 @@ MrPlay - Project Map
 >   NOT requested while foregrounded is forced back inline via
 >   `ensureVideoVisible()`; collapsing the full player to the mini player
 >   runs the same check unless PiP was requested
+> - Fixes 2026-08-13: seek slider/timer frozen + black video on minimize.
+>   The full player is an opaque overlay (thumbnail slot) that hides the
+>   webview; iOS throttles the page's own `timeupdate`/`setInterval` heartbeats
+>   while it's covered, so `position`/`duration` stopped updating and the
+>   slider had no live duration to seek against. Added a Dart-side
+>   `_pollVideoState` (500ms `evaluateJavascript`) that starts when a video is
+>   tracked, so position/duration stay fresh regardless of page throttling.
+>   `controlVideo` now targets the actively-playing `<video>` (not the first
+>   one) for play/pause/seek/captions/fullscreen. Removed `scrollVideoIntoView`
+>   from the alignment watchdog (the full player no longer shows the live
+>   webview video, so scrolling the hidden page only left the user stranded at
+>   the player after minimize). Minimize now re-runs `ensureVideoVisible` after
+>   a short delay to clear the stuck-PiP black frame. Share Link button fixed:
+>   iPad requires a non-null `sharePositionOrigin` (popover) or the share
+>   sheet is silently dropped; URL falls back videoUrl → YouTube id → current
+>   URL.
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.
