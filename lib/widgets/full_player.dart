@@ -174,15 +174,12 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     final isSliding = _slideController.isAnimating ||
         _slideController.status == AnimationStatus.completed;
 
-    final content = GestureDetector(
-      onVerticalDragUpdate: _onVerticalDragUpdate,
-      onVerticalDragEnd: _onVerticalDragEnd,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Positioned.fill(
-            child: Container(color: Colors.black),
-          ),
+    final content = Stack(
+      fit: StackFit.expand,
+      children: [
+        Positioned.fill(
+          child: Container(color: Colors.black),
+        ),
           Positioned.fill(
             child: Builder(builder: (ctx) {
               Widget body = SafeArea(
@@ -190,16 +187,23 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                   padding: const EdgeInsets.only(top: 20),
                   child: Column(
                     children: [
-                      Container(
-                        width: 40,
-                        height: 3,
-                        margin: const EdgeInsets.only(bottom: 24),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[600],
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      Builder(builder: (ctx) {
+                      GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onVerticalDragUpdate: _onVerticalDragUpdate,
+                        onVerticalDragEnd: _onVerticalDragEnd,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 40,
+                              height: 3,
+                              margin: const EdgeInsets.only(bottom: 24),
+                              decoration: BoxDecoration(
+                                color: Colors.grey[600],
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                            Builder(builder: (ctx) {
                         Widget videoArea = ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: AspectRatio(
@@ -304,6 +308,9 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                         }
                         return videoArea;
                       }),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: 16),
                           Builder(builder: (ctx) {
                         Widget infoCard = Container(
@@ -496,8 +503,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
             ),
           ),
         ],
-      ),
-    );
+      );
 
     if (isSliding) {
       return SlideTransition(

@@ -163,6 +163,16 @@ class YouTubeJS {
               var pipOverlay = player.querySelector('.ytp-pip-container');
               if (pipOverlay) pipOverlay.style.display = 'none';
             }
+            // Periodic state report: broadcasts position/duration/playing every
+            // tick even when `timeupdate`/`play`/`pause` events are throttled
+            // (this happens while the full-player overlay covers the webview,
+            // freezing the player's UI event loop). Without it Dart's
+            // position/duration stop updating for the expanded full player.
+            // Only report the actively-playing <video> so ad/stray elements
+            // can't overwrite the main video's state.
+            if (!v.paused && !v.ended) {
+              reportState.call(v);
+            }
             try {
               if (v.webkitSetPresentationMode &&
                   v.webkitPresentationMode === 'picture-in-picture' &&

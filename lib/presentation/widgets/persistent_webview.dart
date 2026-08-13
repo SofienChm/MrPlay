@@ -591,11 +591,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       final shareTitle =
                           video?.title ?? 'MrPlay Video';
                       Navigator.pop(sheetContext);
+                      // Defer Share.share until the bottom sheet's dismiss
+                      // animation completes. iOS silently drops a share sheet
+                      // presented on a controller mid-dismiss, which is why the
+                      // button appeared to do nothing.
                       if (shareUrl.isNotEmpty) {
-                        Share.share(
-                          shareUrl,
-                          subject: shareTitle,
-                        );
+                        Future.delayed(const Duration(milliseconds: 350), () {
+                          Share.share(
+                            shareUrl,
+                            subject: shareTitle,
+                          );
+                        });
                       }
                     },
                   ),
