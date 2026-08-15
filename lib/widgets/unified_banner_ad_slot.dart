@@ -94,7 +94,11 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
 
   @override
   Widget build(BuildContext context) {
-    if (!_adLoaded || _bannerAd == null || _isDismissed || !widget.isVisible || _isAppBackgrounded) {
+    if (!_adLoaded ||
+        _bannerAd == null ||
+        _isDismissed ||
+        !widget.isVisible ||
+        _isAppBackgrounded) {
       return const SizedBox.shrink();
     }
 
@@ -102,52 +106,47 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
       child: Align(
         alignment: Alignment.centerLeft,
-        child: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(top: 22, right: 22),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: 320,
-                  height: 100,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: 320,
+            height: 100,
+            child: Stack(
+              children: [
+                Positioned.fill(
                   child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
                     child: Center(child: _adWidget!),
                   ),
                 ),
-              ),
-            ),
-            Positioned(
-              top: 6,
-              right: 8,
-              child: GestureDetector(
-                onTap: _handleDismiss,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      width: 1,
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: GestureDetector(
+                    onTap: _handleDismiss,
+                    behavior: HitTestBehavior.opaque,
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.15),
+                          width: 1,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.close,
+                        size: 16,
+                        color: Colors.white70,
+                      ),
                     ),
                   ),
-                  child: const Icon(
-                    Icons.close,
-                    size: 18,
-                    color: Colors.white70,
-                  ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

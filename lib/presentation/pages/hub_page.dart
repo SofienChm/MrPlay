@@ -26,16 +26,21 @@ class _HubPageState extends State<HubPage> {
   String _defaultPlatform = 'YouTube';
 
   List<PlatformModel> get _allPlatforms {
-    final bookmarks = _customBookmarks.map(
-      (b) => PlatformModel(
-        name: b.name,
-        url: b.url,
-        icon: 'custom',
-        category: 'custom',
-        color: AppColors.border,
-      ),
-    ).toList();
+    final bookmarks = _customBookmarks
+        .map(
+          (b) => PlatformModel(
+            name: b.name,
+            url: b.url,
+            icon: 'custom',
+            category: 'custom',
+            color: AppColors.border,
+          ),
+        )
+        .toList();
     var platforms = [...PlatformConstants.platforms, ...bookmarks];
+    platforms.sort(
+      (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    );
     if (_defaultPlatform != 'YouTube') {
       final idx = platforms.indexWhere((p) => p.name == _defaultPlatform);
       if (idx > 0) {
@@ -156,6 +161,7 @@ class _HubPageState extends State<HubPage> {
   }
 
   void _onPlatformTap(PlatformModel platform) {
+    SettingsRepository.setLastPlatformUrl(platform.url);
     MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
   }
 
@@ -195,7 +201,8 @@ class _HubPageState extends State<HubPage> {
                           onPressed: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const FavoritesPage()),
+                              MaterialPageRoute(
+                                  builder: (_) => const FavoritesPage()),
                             );
                           },
                         ),
@@ -204,7 +211,8 @@ class _HubPageState extends State<HubPage> {
                           onPressed: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const SettingsPage()),
+                              MaterialPageRoute(
+                                  builder: (_) => const SettingsPage()),
                             );
                           },
                         ),
@@ -245,7 +253,8 @@ class _HubPageState extends State<HubPage> {
                             )
                           : null,
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 15),
                     ),
                   ),
                 ),
@@ -257,16 +266,19 @@ class _HubPageState extends State<HubPage> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.search_off, size: 64, color: Colors.white38),
+                            const Icon(Icons.search_off,
+                                size: 64, color: Colors.white38),
                             const SizedBox(height: 16),
                             Text(
                               'No platforms match "${_searchController.text}"',
-                              style: const TextStyle(color: Colors.white70, fontSize: 14),
+                              style: const TextStyle(
+                                  color: Colors.white70, fontSize: 14),
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Press Enter to search Google',
-                              style: const TextStyle(color: Colors.white38, fontSize: 12),
+                              style: const TextStyle(
+                                  color: Colors.white38, fontSize: 12),
                             ),
                           ],
                         ),
@@ -274,12 +286,14 @@ class _HubPageState extends State<HubPage> {
                     : Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: GridView.builder(
-                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          gridDelegate:
+                              const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 4,
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
                           ),
-                          itemCount: _filteredPlatforms.length + (_showResults ? 0 : 1),
+                          itemCount: _filteredPlatforms.length +
+                              (_showResults ? 0 : 1),
                           itemBuilder: (context, index) {
                             if (index >= _filteredPlatforms.length) {
                               return _AddCard(onTap: _showAddBookmarkDialog);

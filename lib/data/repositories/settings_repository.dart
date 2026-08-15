@@ -3,8 +3,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SettingsRepository {
   static const String _themeKey = 'theme_mode';
   static const String _defaultPlatformKey = 'default_platform';
+  static const String _lastPlatformUrlKey = 'last_platform_url';
 
-  static Future<SharedPreferences> get _prefs => SharedPreferences.getInstance();
+  static Future<SharedPreferences> get _prefs =>
+      SharedPreferences.getInstance();
 
   static Future<String> getThemeMode() async {
     final prefs = await _prefs;
@@ -26,9 +28,20 @@ class SettingsRepository {
     await prefs.setString(_defaultPlatformKey, name);
   }
 
+  static Future<String?> getLastPlatformUrl() async {
+    final prefs = await _prefs;
+    return prefs.getString(_lastPlatformUrlKey);
+  }
+
+  static Future<void> setLastPlatformUrl(String url) async {
+    final prefs = await _prefs;
+    await prefs.setString(_lastPlatformUrlKey, url);
+  }
+
   static Future<void> clearCache() async {
     final prefs = await _prefs;
     await prefs.remove(_themeKey);
     await prefs.remove(_defaultPlatformKey);
+    await prefs.remove(_lastPlatformUrlKey);
   }
 }

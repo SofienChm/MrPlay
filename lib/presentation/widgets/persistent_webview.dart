@@ -7,6 +7,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/constants/youtube_js.dart';
 import '../../core/constants/content_blocker_js.dart';
+import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/background_audio_keep_alive.dart';
@@ -15,9 +16,11 @@ import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
 import '../../data/repositories/watch_later_repository.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../data/models/favorite_video.dart';
 import '../../presentation/pages/settings_page.dart';
 import '../../presentation/pages/favorites_page.dart';
+import '../../widgets/sleep_timer_sheet.dart';
 import 'error_widget.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
@@ -79,6 +82,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
+    _restoreLastPlatform();
   }
 
   @override
@@ -291,7 +295,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           // Same video already tracked (fallback placeholder created it):
           // upgrade its metadata to the real title/thumbnail.
           final current = ref.read(playerProvider).currentVideo;
-          if (current != null && current.title == 'YouTube video') {
+          if (current != null &&
+              (current.title == 'YouTube video' ||
+                  current.title == 'Playing video')) {
             ref.read(playerProvider.notifier).updateMetadata(video);
           }
         }
@@ -388,20 +394,44 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (existing != null) return existing;
     final url = _currentUrl ?? '';
     final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
-    if (idMatch == null) return null;
-    final videoId = idMatch.group(1)!;
+    final String videoId;
+    final String thumbnailUrl;
+    final String platform;
+    if (idMatch != null) {
+      videoId = idMatch.group(1)!;
+      thumbnailUrl = 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg';
+      platform = 'YouTube';
+    } else {
+      final uri = Uri.tryParse(url);
+      if (uri == null || uri.host.isEmpty) return null;
+      videoId = url;
+      thumbnailUrl = '';
+      platform = _platformNameFromUrl(uri.host);
+    }
     final video = Video(
       id: videoId,
-      title: 'YouTube video',
-      thumbnailUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+      title: 'Playing video',
+      thumbnailUrl: thumbnailUrl,
       videoUrl: url,
-      platform: 'YouTube',
+      platform: platform,
     );
     ref.read(playerProvider.notifier).play(video);
     _userPausedInBackground = false;
     _pipRequestedByUser = false;
     _lastReportedPip = false;
     return video;
+  }
+
+  String _platformNameFromUrl(String host) {
+    var h = host;
+    if (h.startsWith('m.')) {
+      h = h.substring(2);
+    } else if (h.startsWith('www.')) {
+      h = h.substring(4);
+    }
+    final first = h.split('.').first;
+    if (first.isEmpty) return 'Web';
+    return '${first[0].toUpperCase()}${first.substring(1)}';
   }
 
   void _updateNowPlayingThrottled({
@@ -503,6 +533,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       barrierColor: Colors.black54,
       isScrollControlled: true,
       builder: (sheetContext) {
+        final maxHeight = MediaQuery.of(sheetContext).size.height * 0.85;
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Container(
@@ -510,165 +541,180 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               color: Color(0xFF1C1C1E),
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
+            constraints: BoxConstraints(maxHeight: maxHeight),
             child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 12),
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  _SheetMenuItem(
-                    icon: Icons.picture_in_picture_alt,
-                    label: 'Picture in Picture',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      togglePictureInPicture();
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.bookmark_border,
-                    label: 'Add to Bookmarks',
-                    onTap: () async {
-                      Navigator.pop(sheetContext);
-                      if (video == null) return;
-                      final already =
-                          await WatchLaterRepository.isQueued(video.id);
-                      if (already) {
+                    const SizedBox(height: 8),
+                    _SheetMenuItem(
+                      icon: Icons.picture_in_picture_alt,
+                      label: 'Picture in Picture',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        togglePictureInPicture();
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.bookmark_border,
+                      label: 'Add to Bookmarks',
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
+                        if (video == null) return;
+                        final already =
+                            await WatchLaterRepository.isQueued(video.id);
+                        if (already) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Already in bookmarks'),
+                                  duration: Duration(seconds: 1)),
+                            );
+                          }
+                          return;
+                        }
+                        await WatchLaterRepository.add(FavoriteVideo(
+                          id: video.id,
+                          title: video.title,
+                          channel: video.platform.isEmpty
+                              ? 'YouTube'
+                              : video.platform,
+                          thumbnailUrl: video.thumbnailUrl,
+                          platformUrl: video.videoUrl,
+                          addedAt: DateTime.now(),
+                        ));
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content: Text('Already in bookmarks'),
+                                content: Text('Added to bookmarks'),
                                 duration: Duration(seconds: 1)),
                           );
                         }
-                        return;
-                      }
-                      await WatchLaterRepository.add(FavoriteVideo(
-                        id: video.id,
-                        title: video.title,
-                        channel:
-                            video.platform.isEmpty ? 'YouTube' : video.platform,
-                        thumbnailUrl: video.thumbnailUrl,
-                        platformUrl: video.videoUrl,
-                        addedAt: DateTime.now(),
-                      ));
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Added to bookmarks'),
-                              duration: Duration(seconds: 1)),
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.bookmarks,
+                      label: 'View Bookmarks',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const FavoritesPage()),
                         );
-                      }
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.bookmarks,
-                    label: 'View Bookmarks',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const FavoritesPage()),
-                      );
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.airplay,
-                    label: 'AirPlay',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _webViewController?.evaluateJavascript(source: '''
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.bedtime,
+                      label: 'Sleep Timer',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        Future.delayed(const Duration(milliseconds: 400), () {
+                          if (mounted) showSleepTimerSheet(context);
+                        });
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.airplay,
+                      label: 'AirPlay',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _webViewController?.evaluateJavascript(source: '''
                         (function(){
                           var v=document.querySelector('video');
                           if(v&&v.webkitShowPlaybackTargetPicker)
                             v.webkitShowPlaybackTargetPicker();
                         })();
                       ''');
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.share,
-                    label: 'Share Link',
-                    onTap: () {
-                      var shareUrl = video?.videoUrl ?? '';
-                      if (shareUrl.isEmpty &&
-                          video != null &&
-                          video.id.isNotEmpty) {
-                        shareUrl =
-                            'https://www.youtube.com/watch?v=${video.id}';
-                      }
-                      if (shareUrl.isEmpty) shareUrl = _currentUrl ?? '';
-                      final shareTitle = video?.title ?? 'MrPlay Video';
-                      // iPad presents the share sheet as a popover and requires
-                      // a source rect, otherwise it silently drops the sheet.
-                      final origin = _sharePositionOrigin();
-                      Navigator.pop(sheetContext);
-                      // Defer Share.share until the bottom sheet's dismiss
-                      // animation completes. iOS silently drops a share sheet
-                      // presented on a controller mid-dismiss, which is why the
-                      // button appeared to do nothing.
-                      if (shareUrl.isNotEmpty) {
-                        Future.delayed(const Duration(milliseconds: 400), () {
-                          Share.share(
-                            shareUrl,
-                            subject: shareTitle,
-                            sharePositionOrigin: origin,
-                          );
-                        });
-                      }
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.settings,
-                    label: 'Settings',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const SettingsPage()),
-                      );
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.file_upload_outlined,
-                    label: 'Export Data',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      DataExportService.instance.exportToJson();
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.file_download_outlined,
-                    label: 'Import Data',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Share a .json or .csv file to MrPlay to import'),
-                            duration: Duration(seconds: 3),
-                          ),
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.share,
+                      label: 'Share Link',
+                      onTap: () {
+                        var shareUrl = video?.videoUrl ?? '';
+                        if (shareUrl.isEmpty &&
+                            video != null &&
+                            video.id.isNotEmpty) {
+                          shareUrl =
+                              'https://www.youtube.com/watch?v=${video.id}';
+                        }
+                        if (shareUrl.isEmpty) shareUrl = _currentUrl ?? '';
+                        final shareTitle = video?.title ?? 'MrPlay Video';
+                        // iPad presents the share sheet as a popover and requires
+                        // a source rect, otherwise it silently drops the sheet.
+                        final origin = _sharePositionOrigin();
+                        Navigator.pop(sheetContext);
+                        // Defer Share.share until the bottom sheet's dismiss
+                        // animation completes. iOS silently drops a share sheet
+                        // presented on a controller mid-dismiss, which is why the
+                        // button appeared to do nothing.
+                        if (shareUrl.isNotEmpty) {
+                          Future.delayed(const Duration(milliseconds: 400), () {
+                            Share.share(
+                              shareUrl,
+                              subject: shareTitle,
+                              sharePositionOrigin: origin,
+                            );
+                          });
+                        }
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.settings,
+                      label: 'Settings',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const SettingsPage()),
                         );
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.file_upload_outlined,
+                      label: 'Export Data',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        DataExportService.instance.exportToJson();
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.file_download_outlined,
+                      label: 'Import Data',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Share a .json or .csv file to MrPlay to import'),
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
               ),
             ),
           ),
@@ -770,6 +816,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
+  Future<void> _restoreLastPlatform() async {
+    final url = await SettingsRepository.getLastPlatformUrl();
+    if (url == null || url.isEmpty || !mounted) return;
+    loadUrl(url);
+  }
+
   void loadUrl(String url) {
     _loadingTimer?.cancel();
     _pendingUrl = url;
@@ -826,7 +878,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _pipRequestedByUser = true;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
-        var video = document.querySelector('video');
+        var video = $_activeVideoJs;
         if (!video) return;
         if (video.requestPictureInPicture) {
           if (document.pictureInPictureElement) return;
@@ -856,7 +908,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _lastReportedPip = false;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
-        var video = document.querySelector('video');
+        var video = $_activeVideoJs;
         if (!video) return;
         if (document.exitPictureInPicture && document.pictureInPictureElement) {
           document.exitPictureInPicture().catch(function(){});
@@ -1027,7 +1079,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _pipRequestedByUser = !_lastReportedPip;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
-        var video = document.querySelector('video');
+        var video = $_activeVideoJs;
         if (!video) return;
         if (video.requestPictureInPicture) {
           if (document.pictureInPictureElement) {
@@ -1076,6 +1128,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               ),
               UserScript(
                 source: YouTubeJS.playerControlsScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
+                source: MediaObserverJS.genericObserverScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
             ]),
@@ -1166,8 +1222,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.more_horiz,
-                  color: Colors.white, size: 24),
+              child:
+                  const Icon(Icons.more_horiz, color: Colors.white, size: 24),
             ),
           ),
         ),
