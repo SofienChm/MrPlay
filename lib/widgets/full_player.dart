@@ -265,6 +265,14 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                             tooltip: 'Captions',
                                             onTap: _toggleCaptions,
                                           ),
+                                          const SizedBox(width: 8),
+                                          _OverlayButton(
+                                            icon: Icons.picture_in_picture_alt,
+                                            tooltip: 'Picture in picture',
+                                            onTap: () => MrPlayApp
+                                                .webViewKey.currentState
+                                                ?.togglePictureInPicture(),
+                                          ),
                                         ],
                                       ),
                                     ),

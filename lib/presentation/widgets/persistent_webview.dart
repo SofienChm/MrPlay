@@ -132,6 +132,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           case 'toggleCaptions':
             controlVideo('toggleCaptions');
             break;
+          case 'pip':
+            togglePictureInPicture();
+            break;
           case 'fullscreen':
             controlVideo('fullscreen');
             break;
@@ -390,6 +393,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (items.isEmpty) return;
     final next = items.first;
     await QueueRepository.remove(next.id);
+    exitPiP();
     if (mounted) loadUrl(next.platformUrl);
   }
 
@@ -483,6 +487,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       ),
                     ),
                     const SizedBox(height: 8),
+                    _SheetMenuItem(
+                      icon: Icons.picture_in_picture_alt,
+                      label: 'Picture in Picture',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        togglePictureInPicture();
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
                     _SheetMenuItem(
                       icon: Icons.bookmark_border,
                       label: 'Add to Bookmarks',
@@ -790,6 +803,62 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _webViewController?.reload();
   }
 
+  /// Enters native Picture-in-Picture for the actively-playing video. Only
+  /// called from explicit user actions (PiP button / swipe-down), so iOS
+  /// presents the real floating window.
+  void enterPiP() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = $_activeVideoJs;
+        if (!video) return;
+        if (video.requestPictureInPicture) {
+          video.requestPictureInPicture().catch(function(){});
+        } else if (video.webkitSetPresentationMode) {
+          if (video.webkitPresentationMode !== 'picture-in-picture') {
+            video.webkitSetPresentationMode('picture-in-picture');
+          }
+        }
+      })();
+    ''');
+  }
+
+  /// Brings the video back inline after PiP. Uses only the clean API call —
+  /// no DOM surgery, so it can't corrupt YouTube's MediaSource pipeline.
+  void exitPiP() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = $_activeVideoJs;
+        if (!video) return;
+        if (document.exitPictureInPicture && document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(function(){});
+        } else if (video.webkitSetPresentationMode &&
+                   video.webkitPresentationMode === 'picture-in-picture') {
+          video.webkitSetPresentationMode('inline');
+        }
+      })();
+    ''');
+  }
+
+  void togglePictureInPicture() {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var video = $_activeVideoJs;
+        if (!video) return;
+        if (video.requestPictureInPicture) {
+          if (document.pictureInPictureElement) {
+            document.exitPictureInPicture().catch(function(){});
+          } else {
+            video.requestPictureInPicture().catch(function(){});
+          }
+        } else if (video.webkitSetPresentationMode) {
+          video.webkitSetPresentationMode(
+            video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
+          );
+        }
+      })();
+    ''');
+  }
+
   /// Polls the webview for the live video position/duration from the Dart side.
   /// While the full player overlays the webview, iOS can throttle the page's
   /// own timers/events, so the JS `reportState` heartbeat may stop firing and
@@ -987,6 +1056,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 borderRadius: BorderRadius.circular(20),
               ),
               child: const Icon(Icons.play_circle_outline,
+                  color: Colors.white, size: 24),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: 122,
+          right: 16,
+          child: GestureDetector(
+            onTap: togglePictureInPicture,
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Icon(Icons.picture_in_picture_alt,
                   color: Colors.white, size: 24),
             ),
           ),
