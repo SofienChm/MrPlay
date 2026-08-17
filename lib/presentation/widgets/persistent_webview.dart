@@ -10,7 +10,6 @@ import '../../core/constants/content_blocker_js.dart';
 import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
-import '../../services/background_audio_keep_alive.dart';
 import '../../services/media_controls_service.dart';
 import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
@@ -43,12 +42,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _endedHandled = false;
   bool _resumeSeekDone = false;
   bool _appIsBackgrounded = false;
-  // Whether a system-forced pause (iOS suspends the webview's video when the
-  // app backgrounds / the screen locks) may be auto-resumed to keep audio
-  // playing. User-initiated pauses (lock screen, Control Center, sleep timer)
-  // clear this so they are not fought.
-  bool _backgroundResumeAllowed = false;
-  bool _userPausedInBackground = false;
   int _lastNowPlayingMs = 0;
   Timer? _alignmentWatchdog;
   Timer? _statePoll;
@@ -93,7 +86,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _alignmentWatchdog?.cancel();
     _statePoll?.cancel();
     PlaybackStatsService.instance.flush();
-    BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
 
@@ -105,20 +97,20 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
-      _userPausedInBackground = false;
       _pipRequestedByUser = false;
       _lastReportedPip = false;
-      Future.delayed(const Duration(milliseconds: 3000), ensureVideoVisible);
+      // The video was auto-entered into PiP on background. iOS often leaves it
+      // stuck in PiP presentation mode after returning to the foreground, so
+      // neither the PiP window nor the in-page video is visible. Retry the
+      // un-stick over a few seconds instead of a single delayed attempt.
+      startVideoAlignmentWatchdog();
     }
   }
 
   void _enterBackground() {
     _appIsBackgrounded = true;
-    _backgroundResumeAllowed =
-        ref.read(playerProvider).isPlaying && !_userPausedInBackground;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
-      BackgroundAudioKeepAlive.instance.start();
       enterPiP(resumePlayback: true);
     }
   }
@@ -278,7 +270,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (currentId != video.id) {
           _endedHandled = false;
           _resumeSeekDone = false;
-          _userPausedInBackground = false;
           _pipRequestedByUser = false;
           _lastReportedPip = false;
           ref.read(playerProvider.notifier).play(video);
@@ -359,28 +350,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           );
         }
       }
-      if (playing && !ended) {
-        BackgroundAudioKeepAlive.instance.start();
-        _userPausedInBackground = false;
-      } else if (!_appIsBackgrounded) {
-        // While the app is backgrounded, iOS may pause the webview video
-        // momentarily (before/around PiP takeover). Don't kill the keep-alive
-        // loop then, or the app gets suspended and audio stops.
-        BackgroundAudioKeepAlive.instance.stop();
-        if (ended) {
-          PlaybackStatsService.instance.flush();
-          final id = video?.id ?? '';
-          if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
-          _handleEnded();
-        }
-      } else if (!ended && _backgroundResumeAllowed && data['pip'] != true) {
-        // Backgrounded / screen locked and iOS force-paused the webview video
-        // (PiP could not take over, e.g. on the lock screen). Resume it so the
-        // audio keeps playing; the keep-alive loop holds the process alive and
-        // the .playback audio session carries the sound. A pause reported
-        // while in PiP is the user pressing the PiP window's pause button -
-        // that one must not be resumed.
-        controlVideo('play');
+      if (!playing && !_appIsBackgrounded && ended) {
+        PlaybackStatsService.instance.flush();
+        final id = video?.id ?? '';
+        if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+        _handleEnded();
       }
     } catch (_) {}
   }
@@ -416,7 +390,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       platform: platform,
     );
     ref.read(playerProvider.notifier).play(video);
-    _userPausedInBackground = false;
     _pipRequestedByUser = false;
     _lastReportedPip = false;
     return video;
@@ -465,8 +438,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final positionMs = position?.inMilliseconds ?? 0;
     switch (command) {
       case 'play':
-        _backgroundResumeAllowed = true;
-        _userPausedInBackground = false;
         notifier.resume();
         controlVideo('play');
         break;
@@ -477,8 +448,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (state.isPlaying) {
           userInitiatedPause();
         } else {
-          _backgroundResumeAllowed = true;
-          _userPausedInBackground = false;
           notifier.resume();
           controlVideo('play');
         }
@@ -505,11 +474,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   /// Pauses playback as an explicit user action (lock screen / Control Center
-  /// / sleep timer). While backgrounded, system-forced pauses are auto-resumed
-  /// to keep audio playing; user pauses must not be fought.
+  /// / sleep timer).
   void userInitiatedPause() {
-    _backgroundResumeAllowed = false;
-    if (_appIsBackgrounded) _userPausedInBackground = true;
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
   }
@@ -518,7 +484,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// there is something to display) and collapses the full player. Bound to
   /// the mini-player overlay button in the webview.
   void showMiniPlayer() {
-    _userPausedInBackground = false;
     _trackVideoFromUrl();
     if (ref.read(playerProvider).currentVideo != null) {
       ref.read(playerProvider.notifier).minimize();
@@ -745,7 +710,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer = null;
     _nowPlayingThrottle?.cancel();
     _nowPlayingThrottle = null;
-    BackgroundAudioKeepAlive.instance.stop();
     PlaybackStatsService.instance.flush();
     MediaControlsService.instance.clearNowPlaying();
     ref.read(playerProvider.notifier).dismiss();
@@ -1270,7 +1234,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               _webViewController = null;
               _pipRequestedByUser = false;
               _lastReportedPip = false;
-              BackgroundAudioKeepAlive.instance.stop();
               PlaybackStatsService.instance.flush();
               MediaControlsService.instance.clearNowPlaying();
               ref.read(playerProvider.notifier).dismiss();
