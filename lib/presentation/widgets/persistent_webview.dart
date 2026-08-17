@@ -10,6 +10,7 @@ import '../../core/constants/content_blocker_js.dart';
 import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
+import '../../services/background_audio_keep_alive.dart';
 import '../../services/media_controls_service.dart';
 import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
@@ -43,19 +44,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _resumeSeekDone = false;
   bool _appIsBackgrounded = false;
   int _lastNowPlayingMs = 0;
-  Timer? _alignmentWatchdog;
   Timer? _statePoll;
-  // Whether the active PiP session was explicitly requested by the user (PiP
-  // button / swipe-down-to-PiP). iOS can leave a video stuck in PiP
-  // presentation mode after the PiP window is dismissed - the in-page player
-  // then stays black while audio and the HTML controls keep working. PiP
-  // reports that were NOT requested are forced back inline (see
-  // [_onVideoState]); requested ones are left alone.
-  bool _pipRequestedByUser = false;
-  bool _lastReportedPip = false;
-
-  /// True when the video is actively in PiP (user or auto-background).
-  bool get isInPictureInPicture => _pipRequestedByUser;
 
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
@@ -83,9 +72,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
-    _alignmentWatchdog?.cancel();
     _statePoll?.cancel();
     PlaybackStatsService.instance.flush();
+    BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
 
@@ -97,12 +86,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
-      _pipRequestedByUser = false;
-      _lastReportedPip = false;
-      // Safety net: if a phantom PiP state was left behind (e.g. from the
-      // explicit PiP button), force the video back inline so the user doesn't
-      // return to a black screen.
-      startVideoAlignmentWatchdog();
     }
   }
 
@@ -110,7 +93,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _appIsBackgrounded = true;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
-      enterPiP(resumePlayback: true);
+      BackgroundAudioKeepAlive.instance.start();
     }
   }
 
@@ -148,9 +131,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         switch (action) {
           case 'toggleCaptions':
             controlVideo('toggleCaptions');
-            break;
-          case 'pip':
-            togglePictureInPicture();
             break;
           case 'fullscreen':
             controlVideo('fullscreen');
@@ -269,8 +249,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (currentId != video.id) {
           _endedHandled = false;
           _resumeSeekDone = false;
-          _pipRequestedByUser = false;
-          _lastReportedPip = false;
           ref.read(playerProvider.notifier).play(video);
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
@@ -299,24 +277,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final playing = data['playing'] == true;
       final ended = data['ended'] == true;
-      final pip = data['pip'] == true;
-      final pipStuck = data['pipStuck'] == true;
-      _lastReportedPip = pip;
-      // Stuck-PiP rescue: iOS leaves webkitPresentationMode == 'picture-in-picture'
-      // after the PiP window is dismissed, rendering the in-page video black.
-      // Only rescue genuinely stuck mode — NOT when the user just requested PiP.
-      // On iOS, pipStuck is always true when in PiP mode (pictureInPictureElement
-      // doesn't exist), so we must respect _pipRequestedByUser.
-      if (pipStuck && !_appIsBackgrounded && !_pipRequestedByUser) {
-        ensureVideoVisible();
-      } else if (pip && !_pipRequestedByUser && !_appIsBackgrounded) {
-        ensureVideoVisible();
-      }
-      // When the video exits PiP mode entirely (pip goes from true to false),
-      // the PiP window was dismissed. Clear the user-requested flag.
-      if (!pip && _pipRequestedByUser) {
-        _pipRequestedByUser = false;
-      }
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
       final posSec = (data['position'] as num?)?.toDouble() ?? 0;
@@ -349,11 +309,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           );
         }
       }
-      if (!playing && !_appIsBackgrounded && ended) {
-        PlaybackStatsService.instance.flush();
-        final id = video?.id ?? '';
-        if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
-        _handleEnded();
+      if (playing && !ended) {
+        BackgroundAudioKeepAlive.instance.start();
+      } else if (!_appIsBackgrounded) {
+        BackgroundAudioKeepAlive.instance.stop();
+        if (ended) {
+          PlaybackStatsService.instance.flush();
+          final id = video?.id ?? '';
+          if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+          _handleEnded();
+        }
       }
     } catch (_) {}
   }
@@ -389,8 +354,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       platform: platform,
     );
     ref.read(playerProvider.notifier).play(video);
-    _pipRequestedByUser = false;
-    _lastReportedPip = false;
     return video;
   }
 
@@ -427,7 +390,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (items.isEmpty) return;
     final next = items.first;
     await QueueRepository.remove(next.id);
-    exitPiP();
     if (mounted) loadUrl(next.platformUrl);
   }
 
@@ -521,15 +483,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       ),
                     ),
                     const SizedBox(height: 8),
-                    _SheetMenuItem(
-                      icon: Icons.picture_in_picture_alt,
-                      label: 'Picture in Picture',
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        togglePictureInPicture();
-                      },
-                    ),
-                    const Divider(color: Colors.white10, height: 1, indent: 56),
                     _SheetMenuItem(
                       icon: Icons.bookmark_border,
                       label: 'Add to Bookmarks',
@@ -703,12 +656,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// clears now-playing, flushes stats, and dismisses the player state.
   void closePlayer() {
     controlVideo('pause');
-    stopVideoAlignmentWatchdog();
     _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;
     _nowPlayingThrottle?.cancel();
     _nowPlayingThrottle = null;
+    BackgroundAudioKeepAlive.instance.stop();
     PlaybackStatsService.instance.flush();
     MediaControlsService.instance.clearNowPlaying();
     ref.read(playerProvider.notifier).dismiss();
@@ -837,135 +790,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _webViewController?.reload();
   }
 
-  void enterPiP({bool resumePlayback = false}) {
-    _pipRequestedByUser = true;
-    _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        var video = $_activeVideoJs;
-        if (!video) return;
-        if (video.requestPictureInPicture) {
-          if (document.pictureInPictureElement) return;
-          video.requestPictureInPicture().catch(function(){});
-        } else if (video.webkitSetPresentationMode) {
-          if (video.webkitPresentationMode !== 'picture-in-picture') {
-            video.webkitSetPresentationMode('picture-in-picture');
-          }
-        }
-        if ($resumePlayback) {
-          if (video.paused) {
-            video.play().catch(function() {
-              var btn = document.querySelector('.ytp-play-button');
-              if (btn) btn.click();
-            });
-          }
-        }
-      })();
-    ''');
-  }
-
-  /// Brings the playing <video> back inline after auto-PiP on backgrounding.
-  /// Without this, returning to the app leaves the in-page player black while
-  /// the video keeps floating in the PiP window.
-  void exitPiP() {
-    _pipRequestedByUser = false;
-    _lastReportedPip = false;
-    _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        var video = $_activeVideoJs;
-        if (!video) return;
-        if (document.exitPictureInPicture && document.pictureInPictureElement) {
-          document.exitPictureInPicture().catch(function(){});
-        } else if (video.webkitSetPresentationMode &&
-                   video.webkitPresentationMode === 'picture-in-picture') {
-          video.webkitSetPresentationMode('inline');
-        }
-      })();
-    ''');
-  }
-
-  /// Last-resort fallback: if exitPiP failed to bring the video back inline,
-  /// force the video element to be visible so the user doesn't see a black
-  /// screen. Tries webkitSetPresentationMode('inline'), then falls back to a
-  /// DOM reinsertion trick — removing the <video> from the DOM and putting it
-  /// back forces iOS to reset the presentation pipeline, which is more
-  /// reliable than the API call (which iOS can silently ignore).
-  void ensureVideoVisible() {
-    _pipRequestedByUser = false;
-    _lastReportedPip = false;
-    _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        var video = document.querySelector('video');
-        if (!video) return;
-        try {
-          if (video.webkitSetPresentationMode &&
-              video.webkitPresentationMode === 'picture-in-picture') {
-            video.webkitSetPresentationMode('inline');
-          }
-        } catch (e) {}
-        video.style.setProperty('visibility', 'visible', 'important');
-        video.style.setProperty('opacity', '1', 'important');
-        video.style.removeProperty('display');
-        video.style.removeProperty('clip');
-        video.style.removeProperty('clip-path');
-        video.style.removeProperty('width');
-        video.style.removeProperty('height');
-        video.style.setProperty('object-fit', 'contain', 'important');
-        var player = document.querySelector('#movie_player');
-        if (player) {
-          var pipPlaceholder = player.querySelector('.ytp-pip-container, [class*="pip"]');
-          if (pipPlaceholder) pipPlaceholder.remove();
-          var poster = player.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, .ytp-cued-thumbnail-overlay-image, [class*="thumbnail"][class*="overlay"]');
-          if (poster) poster.style.display = 'none';
-        }
-        // Scroll the video into the viewport in case the player layout
-        // was broken (e.g. by the old #movie_player position override).
-        var r = video.getBoundingClientRect();
-        if (r.height < 10 || r.width < 10 || r.top < -window.innerHeight) {
-          var c = player || video.parentElement;
-          if (c) {
-            var cr = c.getBoundingClientRect();
-            var t = window.scrollY + cr.top - 50;
-            if (t < 0) t = 0;
-            window.scrollTo({top: t, behavior: 'instant'});
-          }
-        }
-        // DOM reinsertion trick: if the video is still stuck in PiP mode after
-        // the API call above, briefly remove it from the DOM and reinsert it.
-        // This forces iOS WKWebView to tear down and rebuild the presentation
-        // pipeline — the only reliable way to escape a stuck presentation mode.
-        if (video.webkitPresentationMode === 'picture-in-picture') {
-          var parent = video.parentNode;
-          if (parent) {
-            var wasPlaying = !video.paused;
-            var next = video.nextSibling;
-            var currentTime = video.currentTime;
-            parent.removeChild(video);
-            parent.insertBefore(video, next);
-            video.currentTime = currentTime;
-            if (wasPlaying) {
-              video.play().catch(function(){});
-            }
-          }
-        }
-      })();
-    ''');
-  }
-
-  void startVideoAlignmentWatchdog() {
-    _alignmentWatchdog?.cancel();
-    var ticks = 0;
-    _alignmentWatchdog = Timer.periodic(const Duration(milliseconds: 400), (t) {
-      ensureVideoVisible();
-      ticks++;
-      if (ticks >= 8) t.cancel();
-    });
-  }
-
-  void stopVideoAlignmentWatchdog() {
-    _alignmentWatchdog?.cancel();
-    _alignmentWatchdog = null;
-  }
-
   /// Polls the webview for the live video position/duration from the Dart side.
   /// While the full player overlays the webview, iOS can throttle the page's
   /// own timers/events, so the JS `reportState` heartbeat may stop firing and
@@ -1022,48 +846,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } catch (_) {}
   }
 
-  /// Forces the video back inline when the full player collapses to the mini
-  /// player, unless PiP is actively showing (user sees a PiP window). Covers
-  /// the stuck-PiP case where the black in-page video only becomes visible
-  /// again in the PiP window.
-  void _unstickPiPIfUnrequested() {
-    if (_appIsBackgrounded) return;
-    if (_pipRequestedByUser) return;
-    ensureVideoVisible();
-    // iOS can leave the video stuck in PiP presentation mode even after the
-    // first un-stick attempt; re-check once shortly after so the in-page video
-    // doesn't stay black when the webview reappears.
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (mounted && !_pipRequestedByUser) ensureVideoVisible();
-    });
-  }
-
-  void togglePictureInPicture() {
-    _pipRequestedByUser = !_lastReportedPip;
-    _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        var video = $_activeVideoJs;
-        if (!video) return;
-        if (video.requestPictureInPicture) {
-          if (document.pictureInPictureElement) {
-            document.exitPictureInPicture().catch(function(){});
-          } else {
-            video.requestPictureInPicture().catch(function(){});
-          }
-        } else if (video.webkitSetPresentationMode) {
-          video.webkitSetPresentationMode(
-            video.webkitPresentationMode === 'picture-in-picture' ? 'inline' : 'picture-in-picture'
-          );
-        }
-      })();
-    ''');
-  }
-
   @override
   Widget build(BuildContext context) {
     ref.listen(playerProvider, (prev, next) {
-      final collapsedToMini = prev?.isMinimized == false && next.isMinimized;
-      if (collapsedToMini) _unstickPiPIfUnrequested();
       final videoAppeared =
           prev?.currentVideo == null && next.currentVideo != null;
       final videoGone = prev?.currentVideo != null && next.currentVideo == null;
@@ -1207,22 +992,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 122,
-          right: 16,
-          child: GestureDetector(
-            onTap: togglePictureInPicture,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(Icons.picture_in_picture_alt,
-                  color: Colors.white, size: 24),
-            ),
-          ),
-        ),
-        Positioned(
           bottom: 80,
           right: 16,
           child: GestureDetector(
@@ -1231,8 +1000,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 urlRequest: URLRequest(url: WebUri('about:blank')),
               );
               _webViewController = null;
-              _pipRequestedByUser = false;
-              _lastReportedPip = false;
+              BackgroundAudioKeepAlive.instance.stop();
               PlaybackStatsService.instance.flush();
               MediaControlsService.instance.clearNowPlaying();
               ref.read(playerProvider.notifier).dismiss();

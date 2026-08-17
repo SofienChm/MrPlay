@@ -22,12 +22,6 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
-    final shouldEnterPiP =
-        (details.primaryVelocity != null && details.primaryVelocity! > 400) ||
-            _dragOffset > 150;
-    if (shouldEnterPiP) {
-      MrPlayApp.webViewKey.currentState?.enterPiP();
-    }
     setState(() => _dragOffset = 0);
   }
 
@@ -58,7 +52,6 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
         opacity: 1 - dragProgress * 0.7,
         child: GestureDetector(
           onTap: () {
-            MrPlayApp.webViewKey.currentState?.exitPiP();
             ref.read(playerProvider.notifier).expand();
           },
           onVerticalDragUpdate: _onVerticalDragUpdate,
