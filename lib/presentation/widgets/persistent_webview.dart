@@ -99,10 +99,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _appIsBackgrounded = false;
       _pipRequestedByUser = false;
       _lastReportedPip = false;
-      // The video was auto-entered into PiP on background. iOS often leaves it
-      // stuck in PiP presentation mode after returning to the foreground, so
-      // neither the PiP window nor the in-page video is visible. Retry the
-      // un-stick over a few seconds instead of a single delayed attempt.
+      // Safety net: if a phantom PiP state was left behind (e.g. from the
+      // explicit PiP button), force the video back inline so the user doesn't
+      // return to a black screen.
       startVideoAlignmentWatchdog();
     }
   }
@@ -110,9 +109,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _enterBackground() {
     _appIsBackgrounded = true;
     _reassertAudioSession();
-    if (ref.read(playerProvider).isPlaying) {
-      enterPiP(resumePlayback: true);
-    }
   }
 
   Future<void> _reassertAudioSession() async {
