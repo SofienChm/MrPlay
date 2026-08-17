@@ -109,6 +109,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _enterBackground() {
     _appIsBackgrounded = true;
     _reassertAudioSession();
+    if (ref.read(playerProvider).isPlaying) {
+      enterPiP(resumePlayback: true);
+    }
   }
 
   Future<void> _reassertAudioSession() async {
