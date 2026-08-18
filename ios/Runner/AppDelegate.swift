@@ -24,6 +24,8 @@ import MediaPlayer
 
     setupSpotlightChannel()
     setupMediaChannel()
+    setupPipChannel()
+    observeAudioSessionInterruptions()
 
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -213,5 +215,45 @@ import MediaPlayer
       arguments.append(positionMs)
     }
     mediaChannel?.invokeMethod("remoteCommand", arguments: arguments)
+  }
+
+  // MARK: - Picture in Picture
+
+  private func setupPipChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else { return }
+    let channel = FlutterMethodChannel(name: "com.mrplay/pip", binaryMessenger: controller.binaryMessenger)
+    PiPBridge.shared.attach(channel: channel)
+  }
+
+  // MARK: - Audio session interruptions (phone calls, Siri, alarms)
+
+  private func observeAudioSessionInterruptions() {
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleAudioSessionInterruption(_:)),
+      name: AVAudioSession.interruptionNotification,
+      object: AVAudioSession.sharedInstance()
+    )
+  }
+
+  @objc private func handleAudioSessionInterruption(_ notification: Notification) {
+    guard let info = notification.userInfo,
+          let rawType = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+          let type = AVAudioSession.InterruptionType(rawValue: rawType) else {
+      return
+    }
+    switch type {
+    case .began:
+      mediaChannel?.invokeMethod("interruption", arguments: ["state": "began"])
+    case .ended:
+      let options = (info[AVAudioSessionInterruptionOptionKey] as? UInt)
+        .map { AVAudioSession.InterruptionOptions(rawValue: $0) } ?? []
+      mediaChannel?.invokeMethod("interruption", arguments: [
+        "state": "ended",
+        "resume": options.contains(.shouldResume),
+      ])
+    @unknown default:
+      break
+    }
   }
 }

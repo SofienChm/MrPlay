@@ -16,21 +16,39 @@ class MediaControlsService {
 
   void Function(String command, {Duration? position})? _remoteHandler;
 
+  void Function(bool began, {bool resume})? _interruptionHandler;
+
   void setRemoteCommandHandler(
     void Function(String command, {Duration? position}) handler,
   ) {
     _remoteHandler = handler;
     _channel.setMethodCallHandler((call) async {
-      if (call.method != 'remoteCommand') return;
-      final args = call.arguments as List<dynamic>? ?? const [];
-      final command = args.isNotEmpty ? args[0] as String? ?? '' : '';
-      Duration? position;
-      if (args.length > 1 && args[1] != null) {
-        final ms = (args[1] as num).toDouble();
-        position = Duration(milliseconds: ms.round());
+      switch (call.method) {
+        case 'remoteCommand':
+          final args = call.arguments as List<dynamic>? ?? const [];
+          final command = args.isNotEmpty ? args[0] as String? ?? '' : '';
+          Duration? position;
+          if (args.length > 1 && args[1] != null) {
+            final ms = (args[1] as num).toDouble();
+            position = Duration(milliseconds: ms.round());
+          }
+          _remoteHandler?.call(command, position: position);
+          break;
+        case 'interruption':
+          final args = call.arguments as Map<dynamic, dynamic>? ?? const {};
+          final state = args['state'] as String? ?? '';
+          final resume = args['resume'] == true;
+          _interruptionHandler?.call(state == 'began', resume: resume);
+          break;
       }
-      _remoteHandler?.call(command, position: position);
     });
+  }
+
+  /// Receives AVAudioSession interruption events (phone calls, Siri, alarms).
+  void setInterruptionHandler(
+    void Function(bool began, {bool resume}) handler,
+  ) {
+    _interruptionHandler = handler;
   }
 
   /// Full update including artwork. Call when a new video starts.

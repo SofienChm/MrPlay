@@ -61,6 +61,27 @@ MrPlay - Project Map
 >   iPad requires a non-null `sharePositionOrigin` (popover) or the share
 >   sheet is silently dropped; URL falls back videoUrl → YouTube id → current
 >   URL.
+> - Fixes 2026-08-13 (2): full player "down" button now enters PiP on collapse.
+>   Collapsing the full player straight back to the native page left the
+>   in-page `<video>` black (frames only render in the PiP pipeline on iOS).
+>   The down button now calls `enterPiP()` before `minimize()` — matching the
+>   swipe-down gesture — so the video stays visible in its floating window
+>   instead of a black inline frame. `enterPiP`/`exitPiP`/`togglePictureInPicture`
+>   also now target the actively-playing `<video>`.
+> - **Native AVPlayer migration (2026-08)** for YouTube playback: YouTube URLs are
+>   routed off the WebView to a native `video_player` pipeline — `youtube_explode_dart`
+>   (`lib/services/youtube_stream_resolver.dart`) resolves a highest-bitrate muxed
+>   stream (HLS fallback; `androidSdkless`+`androidVr` clients, `tv` fallback), and
+>   `lib/services/native_youtube_player.dart` plays it with `allowBackgroundPlayback`.
+>   Lock-screen/remote controls and background audio reuse the existing
+>   `com.mrplay/media` MediaControlsService (no `audio_service`), extended with an
+>   `interruption` method tied to a native AVAudioSession interruption observer in
+>   `AppDelegate.swift`. Native PiP uses a new `PiPBridge.swift` + `com.mrplay/pip`
+>   channel (`AVPictureInPictureController` over the AVPlayerLayer; the video_player
+>   surface must use `viewType: platformView` on iOS so the layer is findable).
+>   `full_player.dart` renders the native surface (plus buffering spinner and a
+>   skip/retry error overlay); captions/fullscreen buttons are hidden for native.
+>   Non-YouTube URLs keep the WebView path unchanged.
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.

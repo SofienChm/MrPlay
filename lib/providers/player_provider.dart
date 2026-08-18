@@ -8,31 +8,39 @@ class PlayerState {
   final Video? currentVideo;
   final bool isPlaying;
   final bool isMinimized;
+  final bool isBuffering;
   final Duration position;
   final Duration duration;
+  final String? loadError;
 
   const PlayerState({
     this.currentVideo,
     this.isPlaying = false,
     this.isMinimized = true,
+    this.isBuffering = false,
     this.position = Duration.zero,
     this.duration = Duration.zero,
+    this.loadError,
   });
 
   PlayerState copyWith({
     Video? currentVideo,
     bool? isPlaying,
     bool? isMinimized,
+    bool? isBuffering,
     Duration? position,
     Duration? duration,
+    String? loadError,
     bool clearVideo = false,
   }) {
     return PlayerState(
       currentVideo: clearVideo ? null : (currentVideo ?? this.currentVideo),
       isPlaying: isPlaying ?? this.isPlaying,
       isMinimized: isMinimized ?? this.isMinimized,
+      isBuffering: isBuffering ?? this.isBuffering,
       position: position ?? this.position,
       duration: duration ?? this.duration,
+      loadError: loadError ?? this.loadError,
     );
   }
 }
@@ -68,6 +76,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
     bool? isPlaying,
     Duration? position,
     Duration? duration,
+    bool? buffering,
     bool ended = false,
   }) {
     final playing = ended ? false : (isPlaying ?? state.isPlaying);
@@ -87,10 +96,17 @@ class PlayerNotifier extends Notifier<PlayerState> {
         : (position ?? state.position);
     state = state.copyWith(
       isPlaying: playing,
+      isBuffering: buffering ?? state.isBuffering,
       position: nextPosition,
       duration: duration ?? state.duration,
     );
   }
+
+  /// Surfaces a playback/load failure in the player UI.
+  void declareError(String message) =>
+      state = state.copyWith(isPlaying: false, loadError: message);
+
+  void clearError() => state = state.copyWith(loadError: null);
 
   void updateMetadata(Video video) =>
       state = state.copyWith(currentVideo: video);

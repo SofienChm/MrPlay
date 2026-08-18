@@ -11,6 +11,9 @@ import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/media_controls_service.dart';
+import '../../services/native_youtube_player.dart';
+import '../../services/pip_service.dart';
+import '../../services/youtube_stream_resolver.dart';
 import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
@@ -63,6 +66,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
+    PiPService.instance.init();
+    PiPService.instance.onStateChanged = _onPipStateChanged;
+    MediaControlsService.instance
+        .setInterruptionHandler((began, {bool resume = false}) {
+      _onInterruption(began, resume: resume);
+    });
+    final native = NativeYoutubePlayer.instance;
+    native.onVideoState = _onNativeVideoState;
+    native.onPlayerInfo = _onNativePlayerInfo;
+    native.onLoadFailed = _onNativeLoadFailed;
     _restoreLastPlatform();
   }
 
@@ -87,14 +100,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // The video was phantom-PiP'd on background to keep audio alive. Restore
       // it inline after a short delay so WebKit can finish its own reattachment
       // first; the restore is event-driven (webkitpresentationmodechanged)
-      // with a page reload as a last resort.
-      Future.delayed(const Duration(milliseconds: 300), _restoreVideoInline);
+      // with a page reload as a last resort. Native playback keeps running on
+      // its own, so nothing to restore there.
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (NativeYoutubePlayer.instance.isActive) return;
+        _restoreVideoInline();
+      });
     }
   }
 
   void _enterBackground() {
     _appIsBackgrounded = true;
     _reassertAudioSession();
+    if (NativeYoutubePlayer.instance.isActive) return;
     if (ref.read(playerProvider).isPlaying) {
       _enterPhantomPiP();
     }
@@ -112,6 +130,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     controller.addJavaScriptHandler(
       handlerName: 'playerInfo',
       callback: (args) {
+        if (NativeYoutubePlayer.instance.isActive) return;
         if (args.isNotEmpty && args.first is Map) {
           _onPlayerInfo(args.first as Map<String, dynamic>);
         }
@@ -120,6 +139,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     controller.addJavaScriptHandler(
       handlerName: 'videoState',
       callback: (args) {
+        if (NativeYoutubePlayer.instance.isActive) return;
         if (args.isNotEmpty && args.first is Map) {
           _onVideoState(args.first as Map<String, dynamic>);
         }
@@ -244,6 +264,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final title = data['title'] as String? ?? '';
       if (title.isNotEmpty) {
+        final channel = data['channel'] as String? ?? '';
         final video = Video(
           id: data['id'] ?? '',
           title: title,
@@ -258,7 +279,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ref.read(playerProvider.notifier).play(video);
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
-            artist: video.platform.isEmpty ? 'YouTube' : video.platform,
+            artist: channel.isNotEmpty
+                ? channel
+                : (video.platform.isEmpty ? 'YouTube' : video.platform),
             position: Duration.zero,
             duration: Duration.zero,
             isPlaying: true,
@@ -283,6 +306,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final playing = data['playing'] == true;
       final ended = data['ended'] == true;
+      final buffering = data['buffering'] == true;
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
       final posSec = (data['position'] as num?)?.toDouble() ?? 0;
@@ -301,6 +325,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               isPlaying: playing,
               position: Duration(milliseconds: positionMs.round()),
               duration: Duration(milliseconds: durationMs.round()),
+              buffering: buffering,
               ended: ended,
             );
         _updateNowPlayingThrottled(
@@ -393,6 +418,49 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     await QueueRepository.remove(next.id);
     exitPiP();
     if (mounted) loadUrl(next.platformUrl);
+  }
+
+  // MARK: - Native playback bridge
+
+  void _onNativeVideoState(Map<String, dynamic> data) {
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    _onVideoState(data);
+  }
+
+  void _onNativePlayerInfo(Map<String, dynamic> data) {
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    ref.read(playerProvider.notifier).clearError();
+    _onPlayerInfo(data);
+  }
+
+  void _onNativeLoadFailed(YoutubeStreamException error) {
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    debugPrint('[MrPlay] Native playback failed: ${error.type} ${error.message}');
+    PlaybackStatsService.instance.resetTrack();
+    if (mounted) {
+      ref.read(playerProvider.notifier).declareError(error.message);
+    }
+  }
+
+  bool _wasPlayingBeforeInterruption = false;
+
+  /// Handles AVAudioSession interruptions (calls, Siri, alarms). Native
+  /// playback pauses on begin and resumes only when iOS asks us to.
+  void _onInterruption(bool began, {bool resume = false}) {
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    if (began) {
+      _wasPlayingBeforeInterruption = ref.read(playerProvider).isPlaying;
+      if (_wasPlayingBeforeInterruption) {
+        ref.read(playerProvider.notifier).pause();
+        NativeYoutubePlayer.instance.pause();
+      }
+    } else {
+      if (resume && _wasPlayingBeforeInterruption) {
+        ref.read(playerProvider.notifier).resume();
+        NativeYoutubePlayer.instance.play();
+      }
+      _wasPlayingBeforeInterruption = false;
+    }
   }
 
   void _onRemoteCommand(String command, {Duration? position}) {
@@ -560,6 +628,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       label: 'AirPlay',
                       onTap: () {
                         Navigator.pop(sheetContext);
+                        if (NativeYoutubePlayer.instance.isActive) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text(
+                                      'AirPlay is not available for this video'),
+                                  duration: Duration(seconds: 1)),
+                            );
+                          }
+                          return;
+                        }
                         _webViewController?.evaluateJavascript(source: '''
                         (function(){
                           var v=document.querySelector('video');
@@ -666,6 +745,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Full cleanup: pauses the video, cancels timers, stops audio keep-alive,
   /// clears now-playing, flushes stats, and dismisses the player state.
   void closePlayer() {
+    if (NativeYoutubePlayer.instance.isActive) {
+      PiPService.instance.exitPiP();
+      NativeYoutubePlayer.instance.close();
+      _stopStatePoll();
+      _loadingTimer?.cancel();
+      _loadingTimer = null;
+      _nowPlayingThrottle?.cancel();
+      _nowPlayingThrottle = null;
+      PlaybackStatsService.instance.flush();
+      MediaControlsService.instance.clearNowPlaying();
+      ref.read(playerProvider.notifier).dismiss();
+      return;
+    }
     controlVideo('pause');
     _stopStatePoll();
     _loadingTimer?.cancel();
@@ -678,6 +770,29 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void controlVideo(String action, {double? position}) {
+    final native = NativeYoutubePlayer.instance;
+    if (native.isActive) {
+      switch (action) {
+        case 'play':
+          native.play();
+          break;
+        case 'pause':
+          native.pause();
+          break;
+        case 'seek':
+          if (position != null) {
+            native.seekTo(
+              Duration(milliseconds: (position * 1000).round()),
+            );
+          }
+          break;
+        case 'toggleCaptions':
+        case 'fullscreen':
+          // Not surfaced for native playback - the buttons are hidden.
+          break;
+      }
+      return;
+    }
     final controller = _webViewController;
     if (controller == null) return;
     switch (action) {
@@ -749,6 +864,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void loadUrl(String url) {
+    _currentUrl = url;
+    if (NativeYoutubePlayer.isYouTubeVideoUrl(url)) {
+      _startNativePlayback(url);
+      return;
+    }
+    // Switching back to the WebView: stop any native playback first.
+    NativeYoutubePlayer.instance.close();
     _loadingTimer?.cancel();
     _pendingUrl = url;
     if (_webViewController != null) {
@@ -765,6 +887,35 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
     });
+  }
+
+  /// Routes a YouTube video URL to the native AVPlayer. Unloads any stale
+  /// WebView page so it can't keep playing audio underneath.
+  void _startNativePlayback(String url) {
+    _webViewController?.loadUrl(
+      urlRequest: URLRequest(url: WebUri('about:blank')),
+    );
+    NativeYoutubePlayer.instance.load(url);
+    if (mounted && _loadError != null) setState(() => _loadError = null);
+  }
+
+  Future<void> skipNativePlayback() async {
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    final items = await QueueRepository.getAll();
+    NativeYoutubePlayer.instance.close();
+    ref.read(playerProvider.notifier).dismiss();
+    if (items.isNotEmpty) {
+      final next = items.first;
+      await QueueRepository.remove(next.id);
+      if (mounted) loadUrl(next.platformUrl);
+    }
+  }
+
+  /// Retries the native playback of the current video (full player retry).
+  void retryNativePlayback() {
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    ref.read(playerProvider.notifier).clearError();
+    NativeYoutubePlayer.instance.retry();
   }
 
   void _onReceivedError(
@@ -795,6 +946,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void _retryLoad() {
+    final native = NativeYoutubePlayer.instance;
+    if (native.isActive) {
+      ref.read(playerProvider.notifier).clearError();
+      native.retry();
+      return;
+    }
     if (!mounted) return;
     setState(() => _loadError = null);
     _webViewController?.reload();
@@ -804,6 +961,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// called from explicit user actions (PiP button / swipe-down), so iOS
   /// presents the real floating window.
   void enterPiP() {
+    final native = NativeYoutubePlayer.instance;
+    if (native.isActive) {
+      _nativeEnterPiP();
+      return;
+    }
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = $_activeVideoJs;
@@ -822,6 +984,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Brings the video back inline after PiP. Uses only the clean API call —
   /// no DOM surgery, so it can't corrupt YouTube's MediaSource pipeline.
   void exitPiP() {
+    final native = NativeYoutubePlayer.instance;
+    if (native.isActive) {
+      PiPService.instance.exitPiP();
+      return;
+    }
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = $_activeVideoJs;
@@ -837,6 +1004,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void togglePictureInPicture() {
+    if (NativeYoutubePlayer.instance.isActive) {
+      PiPService.instance.isActive().then((active) {
+        if (active) {
+          PiPService.instance.exitPiP();
+        } else {
+          _nativeEnterPiP();
+        }
+      });
+      return;
+    }
     _webViewController?.evaluateJavascript(source: '''
       (function() {
         var video = $_activeVideoJs;
@@ -854,6 +1031,36 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       })();
     ''');
+  }
+
+  /// Requests native PiP. The AVPlayerLayer only exists while the full player
+  /// is mounted, so a minimized player is expanded first.
+  void _nativeEnterPiP() {
+    final state = ref.read(playerProvider);
+    if (state.isMinimized) {
+      ref.read(playerProvider.notifier).expand();
+      Future.delayed(const Duration(milliseconds: 400), () {
+        if (!mounted) return;
+        if (NativeYoutubePlayer.instance.isActive) {
+          PiPService.instance.enterPiP();
+        }
+      });
+    } else {
+      PiPService.instance.enterPiP();
+    }
+  }
+
+  void _onPipStateChanged(String state) {
+    switch (state) {
+      case 'started':
+        // The video now floats in PiP; collapse the inline surface so the app
+        // shows the browsing UI again.
+        ref.read(playerProvider.notifier).minimize();
+        break;
+      case 'restoreUI':
+        ref.read(playerProvider.notifier).expand();
+        break;
+    }
   }
 
   /// Restores the video inline after phantom PiP (used on background to keep
@@ -986,6 +1193,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// the seek slider / timer freeze. This keeps `position`/`duration` fresh
   /// regardless of page-side throttling.
   void _startStatePoll() {
+    if (NativeYoutubePlayer.instance.isActive) return;
     _statePoll?.cancel();
     _statePoll = Timer.periodic(
       const Duration(milliseconds: 500),
@@ -1202,6 +1410,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           right: 16,
           child: GestureDetector(
             onTap: () {
+              if (NativeYoutubePlayer.instance.isActive) {
+                closePlayer();
+                return;
+              }
               _webViewController?.loadUrl(
                 urlRequest: URLRequest(url: WebUri('about:blank')),
               );

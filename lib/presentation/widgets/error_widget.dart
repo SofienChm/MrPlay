@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class CustomErrorWidget extends StatelessWidget {
   final String message;
   final VoidCallback? onRetry;
+  final VoidCallback? onSkip;
 
   const CustomErrorWidget({
     super.key,
     this.message = 'Something went wrong',
     this.onRetry,
+    this.onSkip,
   });
 
   @override
@@ -38,6 +40,13 @@ class CustomErrorWidget extends StatelessWidget {
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),
+              ),
+            ],
+            if (onSkip != null) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: onSkip,
+                child: const Text('Skip video'),
               ),
             ],
           ],

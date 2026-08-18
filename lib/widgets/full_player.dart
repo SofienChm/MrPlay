@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_player/video_player.dart';
 import '../providers/player_provider.dart';
 import '../models/video.dart';
 import '../data/models/favorite_video.dart';
@@ -9,8 +10,10 @@ import '../data/repositories/favorites_repository.dart';
 import '../data/repositories/watch_later_repository.dart';
 import '../data/repositories/queue_repository.dart';
 import '../services/sleep_timer_service.dart';
+import '../services/native_youtube_player.dart';
 import 'sleep_timer_sheet.dart';
 import '../presentation/pages/queue_page.dart';
+import '../presentation/widgets/error_widget.dart';
 import '../app.dart';
 
 class FullPlayerWidget extends ConsumerStatefulWidget {
@@ -192,6 +195,9 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                             ),
                           ),
                           Builder(builder: (ctx) {
+                            final nativeActive =
+                                NativeYoutubePlayer.instance.isActive;
+                            final hasError = state.loadError != null;
                             Widget videoArea = ClipRRect(
                               borderRadius: BorderRadius.circular(12),
                               child: AspectRatio(
@@ -200,93 +206,163 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                   fit: StackFit.expand,
                                   children: [
                                     Positioned.fill(
-                                      child: video.thumbnailUrl.isNotEmpty
-                                          ? CachedNetworkImage(
-                                              imageUrl: video.thumbnailUrl,
-                                              fit: BoxFit.cover,
-                                              placeholder: (_, __) => Container(
-                                                  color: Colors.grey[900]),
-                                              errorWidget: (_, __, ___) =>
-                                                  Container(
-                                                      color: Colors.grey[900]),
+                                      child: nativeActive
+                                          ? ValueListenableBuilder<
+                                              VideoPlayerController?>(
+                                              valueListenable: NativeYoutubePlayer
+                                                  .instance
+                                                  .videoController,
+                                              builder: (ctx, controller, _) {
+                                                if (controller != null) {
+                                                  return Container(
+                                                    color: Colors.black,
+                                                    child: Center(
+                                                      child: VideoPlayer(
+                                                          controller),
+                                                    ),
+                                                  );
+                                                }
+                                                return _buildThumbnail(video);
+                                              },
                                             )
-                                          : Container(color: Colors.grey[900]),
+                                          : _buildThumbnail(video),
                                     ),
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color:
-                                            Colors.black.withValues(alpha: 0.3),
-                                      ),
-                                    ),
-                                    Center(
-                                      child: Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          IconButton(
-                                            iconSize: 40,
-                                            icon: const Icon(Icons.replay_10,
-                                                color: Colors.white),
-                                            tooltip: 'Back 10 seconds',
-                                            onPressed: () => _seekBy(-10),
-                                          ),
-                                          IconButton(
-                                            iconSize: 56,
-                                            icon: Icon(
-                                              state.isPlaying
-                                                  ? Icons.pause_circle_filled
-                                                  : Icons.play_circle_filled,
-                                              color: Colors.white,
+                                    if (hasError)
+                                      Positioned.fill(
+                                        child: CustomErrorWidget(
+                                          message: state.loadError!,
+                                          onRetry: () => MrPlayApp.webViewKey
+                                              .currentState
+                                              ?.retryNativePlayback(),
+                                          onSkip: () => MrPlayApp.webViewKey
+                                              .currentState
+                                              ?.skipNativePlayback(),
+                                        ),
+                                      )
+                                    else
+                                      Positioned.fill(
+                                        child: Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            Container(
+                                              decoration: BoxDecoration(
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.3),
+                                              ),
                                             ),
-                                            tooltip: state.isPlaying
-                                                ? 'Pause'
-                                                : 'Play',
-                                            onPressed: _togglePlayPause,
-                                          ),
-                                          IconButton(
-                                            iconSize: 40,
-                                            icon: const Icon(Icons.forward_10,
-                                                color: Colors.white),
-                                            tooltip: 'Forward 10 seconds',
-                                            onPressed: () => _seekBy(10),
-                                          ),
-                                        ],
+                                            Center(
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  IconButton(
+                                                    iconSize: 40,
+                                                    icon: const Icon(
+                                                        Icons.replay_10,
+                                                        color: Colors.white),
+                                                    tooltip:
+                                                        'Back 10 seconds',
+                                                    onPressed: () =>
+                                                        _seekBy(-10),
+                                                  ),
+                                                  IconButton(
+                                                    iconSize: 56,
+                                                    icon: Icon(
+                                                      state.isPlaying
+                                                          ? Icons
+                                                              .pause_circle_filled
+                                                          : Icons
+                                                              .play_circle_filled,
+                                                      color: Colors.white,
+                                                    ),
+                                                    tooltip: state.isPlaying
+                                                        ? 'Pause'
+                                                        : 'Play',
+                                                    onPressed:
+                                                        _togglePlayPause,
+                                                  ),
+                                                  IconButton(
+                                                    iconSize: 40,
+                                                    icon: const Icon(
+                                                        Icons.forward_10,
+                                                        color: Colors.white),
+                                                    tooltip:
+                                                        'Forward 10 seconds',
+                                                    onPressed: () =>
+                                                        _seekBy(10),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            Positioned(
+                                              top: 8,
+                                              right: 8,
+                                              child: Row(
+                                                mainAxisSize:
+                                                    MainAxisSize.min,
+                                                children: [
+                                                  if (!nativeActive) ...[
+                                                    _OverlayButton(
+                                                      icon: Icons.subtitles,
+                                                      active: _captionsEnabled,
+                                                      tooltip: 'Captions',
+                                                      onTap: _toggleCaptions,
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                  ],
+                                                  _OverlayButton(
+                                                    icon: Icons
+                                                        .picture_in_picture_alt,
+                                                    tooltip:
+                                                        'Picture in picture',
+                                                    onTap: () => MrPlayApp
+                                                        .webViewKey
+                                                        .currentState
+                                                        ?.togglePictureInPicture(),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            if (!nativeActive)
+                                              Positioned(
+                                                bottom: 8,
+                                                right: 8,
+                                                child: _OverlayButton(
+                                                  icon: Icons.fullscreen,
+                                                  tooltip: 'Fullscreen',
+                                                  onTap: () => MrPlayApp
+                                                      .webViewKey.currentState
+                                                      ?.controlVideo(
+                                                          'fullscreen'),
+                                                ),
+                                              ),
+                                            if (state.isBuffering)
+                                              Positioned(
+                                                top: 0,
+                                                left: 0,
+                                                right: 0,
+                                                child: Center(
+                                                  child: Padding(
+                                                    padding: const EdgeInsets
+                                                        .only(top: 16),
+                                                    child: SizedBox(
+                                                      width: 20,
+                                                      height: 20,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        valueColor:
+                                                            const AlwaysStoppedAnimation<
+                                                                Color>(
+                                                                Colors.red),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                    Positioned(
-                                      top: 8,
-                                      right: 8,
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          _OverlayButton(
-                                            icon: Icons.subtitles,
-                                            active: _captionsEnabled,
-                                            tooltip: 'Captions',
-                                            onTap: _toggleCaptions,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          _OverlayButton(
-                                            icon: Icons.picture_in_picture_alt,
-                                            tooltip: 'Picture in picture',
-                                            onTap: () => MrPlayApp
-                                                .webViewKey.currentState
-                                                ?.togglePictureInPicture(),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    Positioned(
-                                      bottom: 8,
-                                      right: 8,
-                                      child: _OverlayButton(
-                                        icon: Icons.fullscreen,
-                                        tooltip: 'Fullscreen',
-                                        onTap: () => MrPlayApp
-                                            .webViewKey.currentState
-                                            ?.controlVideo('fullscreen'),
-                                      ),
-                                    ),
                                   ],
                                 ),
                               ),
@@ -504,6 +580,17 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
       );
     }
     return content;
+  }
+
+  Widget _buildThumbnail(Video video) {
+    return video.thumbnailUrl.isNotEmpty
+        ? CachedNetworkImage(
+            imageUrl: video.thumbnailUrl,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => Container(color: Colors.grey[900]),
+            errorWidget: (_, __, ___) => Container(color: Colors.grey[900]),
+          )
+        : Container(color: Colors.grey[900]);
   }
 
   String _formatDuration(Duration d) {
