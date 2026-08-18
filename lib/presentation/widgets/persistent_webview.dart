@@ -924,7 +924,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final controller = _webViewController;
     if (controller == null) return;
     try {
-      await controller.callAsyncJavaScript(functionBody: '''
+      final result = await controller.callAsyncJavaScript(functionBody: '''
         var videos = document.querySelectorAll('video');
         var video = null;
         for (var i = 0; i < videos.length; i++) {
@@ -932,6 +932,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
         if (!video && videos.length > 0) video = videos[0];
         if (!video || !video.webkitSetPresentationMode) return { ok: false, reason: 'no-video' };
+        try { video.disablePictureInPicture = false; video.removeAttribute('disablepictureinpicture'); } catch (e) {}
         if (video.webkitPresentationMode !== 'picture-in-picture') {
           await new Promise(function(resolve) {
             var timer = setTimeout(function() {
@@ -970,6 +971,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
         return { ok: !video.paused, reason: video.paused ? 'still-paused' : 'playing' };
       ''');
+      final value = result?.value;
+      if (value is Map && value['ok'] != true) {
+        debugPrint('[MrPlay] phantom PiP failed: ${value['reason']}');
+      }
     } catch (_) {
       // WebContent may already be suspended; nothing else we can do from Dart.
     }

@@ -23,6 +23,16 @@ class YouTubeJS {
         };
 
         var _playsInlineSet = new WeakSet();
+        // YouTube Music sets disablePictureInPicture=true on its player <video>,
+        // which silently refuses our phantom-PiP handoff on background (so audio
+        // dies for music VIDEOS while plain songs keep playing natively). Force
+        // it off on every element so the PiP/AVFoundation keep-alive can engage.
+        function unblockPiP(v) {
+          try {
+            v.disablePictureInPicture = false;
+            v.removeAttribute('disablepictureinpicture');
+          } catch (e) {}
+        }
         var _origLoad = HTMLMediaElement.prototype.load;
         HTMLMediaElement.prototype.load = function() {
           if (!_playsInlineSet.has(this)) {
@@ -31,6 +41,7 @@ class YouTubeJS {
             this.setAttribute('webkit-playsinline', 'true');
             _playsInlineSet.add(this);
           }
+          unblockPiP(this);
           return _origLoad.call(this);
         };
         (function() {
@@ -46,6 +57,7 @@ class YouTubeJS {
                   this.setAttribute('webkit-playsinline', 'true');
                   _playsInlineSet.add(this);
                 }
+                unblockPiP(this);
                 _origSrcSet.call(this, v);
               },
               configurable: true, enumerable: true
@@ -61,6 +73,7 @@ class YouTubeJS {
             v.setAttribute('webkit-playsinline', 'true');
             _playsInlineSet.add(v);
           }
+          unblockPiP(v);
 
           v.addEventListener('play', reportState);
           v.addEventListener('pause', reportState);
@@ -125,6 +138,7 @@ class YouTubeJS {
 
         setInterval(function() {
           document.querySelectorAll('video').forEach(function(v) {
+            unblockPiP(v);
             v.style.setProperty('visibility', 'visible', 'important');
             v.style.setProperty('opacity', '1', 'important');
             v.style.removeProperty('display');
