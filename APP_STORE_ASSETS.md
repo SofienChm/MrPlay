@@ -7,10 +7,10 @@ MrPlay
 Your Video Hub
 
 ## Description
-MrPlay is a multi-platform video and content hub that brings all your favorite platforms together in one place. With a clean, native iOS experience, MrPlay makes it easy to access YouTube, Twitch, Instagram, Reddit, and 16+ more platforms from a single app.
+MrPlay is a multi-platform video and content hub that brings all your favorite platforms together in one place. With a clean, native iOS experience, MrPlay makes it easy to access YouTube, Twitch, Instagram, Reddit, and 13+ more platforms from a single app.
 
 Features:
-• Multi-platform hub with 20+ platforms organized by category
+• Multi-platform hub with 17 platforms organized by category
 • Persistent mini player that keeps your video playing while you browse
 • Background audio support for uninterrupted listening
 • Notification center controls for quick play/pause
@@ -26,7 +26,7 @@ video hub, background audio, mini player, multi platform, youtube, twitch, strea
 
 ## What's New (1.0.0)
 • Initial release
-• Multi-platform hub with 20+ platforms
+• Multi-platform hub with 17 platforms
 • Persistent mini player
 • Background audio with notification controls
 • Favorites and search
