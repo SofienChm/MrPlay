@@ -47,6 +47,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _appIsBackgrounded = false;
   int _lastNowPlayingMs = 0;
   Timer? _statePoll;
+  Timer? _silenceWebViewTimer;
 
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
@@ -85,6 +86,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     _statePoll?.cancel();
+    _silenceWebViewTimer?.cancel();
     PlaybackStatsService.instance.flush();
     super.dispose();
   }
@@ -206,13 +208,39 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   /// Runs the watch-page tasks (title extraction for the mini player and
-  /// resume-seek). Safe to call repeatedly for the same page: playerInfo is
-  /// deduped by video id and the seek is guarded by [_resumeSeekDone].
+  /// resume-seek) and routes YouTube video pages to native AVPlayer playback.
+  /// Safe to call repeatedly for the same page: playback is deduped by the
+  /// active native URL and the seek is guarded by [_resumeSeekDone].
   void _handleWatchPage(InAppWebViewController controller, String urlStr) {
+    final native = NativeYoutubePlayer.instance;
+    // A YouTube video URL reached while browsing (SPA navigation / page load)
+    // takes over playback natively. The WebView stays loaded on the watch page
+    // so browsing/comments remain visible; in-page audio is silenced instead.
+    if (NativeYoutubePlayer.isYouTubeVideoUrl(urlStr)) {
+      if (!native.isActive || native.activeUrl != urlStr) {
+        _currentUrl = urlStr;
+        _startNativePlayback(urlStr);
+        return;
+      }
+    }
     if (urlStr.contains('youtube.com')) {
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {
           if (!mounted) return;
+          // Native playback keeps the watch page visible, so silence the
+          // in-page player again once it has rendered (autoplay retries).
+          if (NativeYoutubePlayer.instance.isActive) {
+            await controller.evaluateJavascript(source: '''
+              (function() {
+                try {
+                  var vs = document.querySelectorAll('video');
+                  for (var i = 0; i < vs.length; i++) {
+                    if (!vs[i].paused) vs[i].pause();
+                  }
+                } catch (e) {}
+              })();
+            ''');
+          }
           await controller.evaluateJavascript(source: '''
             (function() {
               var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
@@ -889,14 +917,39 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
   }
 
-  /// Routes a YouTube video URL to the native AVPlayer. Unloads any stale
-  /// WebView page so it can't keep playing audio underneath.
+  /// Routes a YouTube video URL to the native AVPlayer. The WebView stays on
+  /// its current page (watch page / other site) so browsing keeps working; any
+  /// in-page `<video>` is paused so it can't double-play audio underneath.
   void _startNativePlayback(String url) {
-    _webViewController?.loadUrl(
-      urlRequest: URLRequest(url: WebUri('about:blank')),
-    );
+    _silenceWebViewVideo();
     NativeYoutubePlayer.instance.load(url);
     if (mounted && _loadError != null) setState(() => _loadError = null);
+  }
+
+  /// Pauses any `<video>` currently rendering in the WebView so the native
+  /// AVPlayer is the only source of audio. The page may still be navigating or
+  /// autoplay after render, so short retries cover the article and the SPA
+  /// watch page settling.
+  void _silenceWebViewVideo() {
+    final controller = _webViewController;
+    if (controller == null) return;
+    const pauseScript = '''
+      (function() {
+        try {
+          var vs = document.querySelectorAll('video');
+          for (var i = 0; i < vs.length; i++) {
+            if (!vs[i].paused) vs[i].pause();
+          }
+        } catch (e) {}
+      })();
+    ''';
+    controller.evaluateJavascript(source: pauseScript);
+    _silenceWebViewTimer?.cancel();
+    final timer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted || !NativeYoutubePlayer.instance.isActive) return;
+      _webViewController?.evaluateJavascript(source: pauseScript);
+    });
+    _silenceWebViewTimer = timer;
   }
 
   Future<void> skipNativePlayback() async {

@@ -53,6 +53,10 @@ class NativeYoutubePlayer {
 
   bool get isActive => _controller != null || _inFlight || _failed;
 
+  /// The URL currently loaded for native playback (null when inactive). Used
+  /// to dedupe repeated SPA navigations to the same video.
+  String? get activeUrl => _activeUrl;
+
   /// Resolves [url] (a YouTube watch/shorts/embed/live URL) and starts native
   /// playback. Streams are resolved fresh on every call because direct URLs
   /// expire.
