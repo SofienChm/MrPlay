@@ -10,7 +10,6 @@ import '../../core/constants/content_blocker_js.dart';
 import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
-import '../../services/background_audio_keep_alive.dart';
 import '../../services/media_controls_service.dart';
 import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
@@ -74,7 +73,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _nowPlayingThrottle?.cancel();
     _statePoll?.cancel();
     PlaybackStatsService.instance.flush();
-    BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
 
@@ -86,6 +84,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
+      // The video was phantom-PiP'd on background to keep audio alive. Restore
+      // it inline after a short delay so WebKit can finish its own reattachment
+      // first; the restore is event-driven (webkitpresentationmodechanged)
+      // with a page reload as a last resort.
+      Future.delayed(const Duration(milliseconds: 300), _restoreVideoInline);
     }
   }
 
@@ -93,7 +96,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _appIsBackgrounded = true;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
-      BackgroundAudioKeepAlive.instance.start();
+      enterPiP();
     }
   }
 
@@ -312,16 +315,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           );
         }
       }
-      if (playing && !ended) {
-        BackgroundAudioKeepAlive.instance.start();
-      } else if (!_appIsBackgrounded) {
-        BackgroundAudioKeepAlive.instance.stop();
-        if (ended) {
-          PlaybackStatsService.instance.flush();
-          final id = video?.id ?? '';
-          if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
-          _handleEnded();
-        }
+      if (!playing && !_appIsBackgrounded && ended) {
+        PlaybackStatsService.instance.flush();
+        final id = video?.id ?? '';
+        if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+        _handleEnded();
       }
     } catch (_) {}
   }
@@ -674,7 +672,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer = null;
     _nowPlayingThrottle?.cancel();
     _nowPlayingThrottle = null;
-    BackgroundAudioKeepAlive.instance.stop();
     PlaybackStatsService.instance.flush();
     MediaControlsService.instance.clearNowPlaying();
     ref.read(playerProvider.notifier).dismiss();
@@ -857,6 +854,65 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       })();
     ''');
+  }
+
+  /// Restores the video inline after phantom PiP (used on background to keep
+  /// audio alive). Event-driven: waits for webkitpresentationmodechanged to
+  /// confirm 'inline', verifies rendering, and reloads the page as a last
+  /// resort — no DOM surgery, which corrupts YouTube's MediaSource pipeline.
+  Future<void> _restoreVideoInline() async {
+    final controller = _webViewController;
+    if (controller == null) return;
+    try {
+      final result = await controller.callAsyncJavaScript(functionBody: '''
+        var videos = document.querySelectorAll('video');
+        var video = null;
+        for (var i = 0; i < videos.length; i++) {
+          if (!videos[i].paused && !videos[i].ended) { video = videos[i]; break; }
+        }
+        if (!video && videos.length > 0) video = videos[0];
+        if (!video) return { ok: true, reason: 'no-video' };
+        if (!video.webkitSetPresentationMode ||
+            video.webkitPresentationMode !== 'picture-in-picture') {
+          return { ok: true, reason: 'already-inline' };
+        }
+        return new Promise(function(resolve) {
+          var done = false;
+          var timer = setTimeout(function() {
+            if (done) return;
+            done = true;
+            video.removeEventListener('webkitpresentationmodechanged', onMode);
+            resolve({ ok: false, reason: 'timeout' });
+          }, 1500);
+          function onMode() {
+            if (video.webkitPresentationMode !== 'inline') return;
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            video.removeEventListener('webkitpresentationmodechanged', onMode);
+            var rendered = video.videoWidth > 0;
+            resolve({ ok: rendered, reason: rendered ? 'inline' : 'no-render' });
+          }
+          video.addEventListener('webkitpresentationmodechanged', onMode);
+          try {
+            video.webkitSetPresentationMode('inline');
+          } catch (e) {
+            if (done) return;
+            done = true;
+            clearTimeout(timer);
+            video.removeEventListener('webkitpresentationmodechanged', onMode);
+            resolve({ ok: false, reason: 'api-error' });
+          }
+        });
+      ''');
+      final value = result?.value;
+      final ok = value is Map && value['ok'] == true;
+      if (!ok) {
+        _webViewController?.reload();
+      }
+    } catch (_) {
+      _webViewController?.reload();
+    }
   }
 
   /// Polls the webview for the live video position/duration from the Dart side.
@@ -1085,7 +1141,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 urlRequest: URLRequest(url: WebUri('about:blank')),
               );
               _webViewController = null;
-              BackgroundAudioKeepAlive.instance.stop();
               PlaybackStatsService.instance.flush();
               MediaControlsService.instance.clearNowPlaying();
               ref.read(playerProvider.notifier).dismiss();
