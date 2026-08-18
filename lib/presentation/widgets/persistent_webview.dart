@@ -96,7 +96,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _appIsBackgrounded = true;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
-      enterPiP();
+      _enterPhantomPiP();
     }
   }
 
@@ -912,6 +912,66 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       }
     } catch (_) {
       _webViewController?.reload();
+    }
+  }
+
+  /// Enters phantom PiP on background and makes sure the video is actually
+  /// playing inside the PiP session. iOS pauses the webview video when the app
+  /// backgrounds; the PiP handoff alone leaves it paused (no audio). We wait for
+  /// the mode-change event, then resume playback so the PiP/AVFoundation session
+  /// keeps the audio alive.
+  Future<void> _enterPhantomPiP() async {
+    final controller = _webViewController;
+    if (controller == null) return;
+    try {
+      await controller.callAsyncJavaScript(functionBody: '''
+        var videos = document.querySelectorAll('video');
+        var video = null;
+        for (var i = 0; i < videos.length; i++) {
+          if (!videos[i].paused && !videos[i].ended) { video = videos[i]; break; }
+        }
+        if (!video && videos.length > 0) video = videos[0];
+        if (!video || !video.webkitSetPresentationMode) return { ok: false, reason: 'no-video' };
+        if (video.webkitPresentationMode !== 'picture-in-picture') {
+          await new Promise(function(resolve) {
+            var timer = setTimeout(function() {
+              cleanup();
+              resolve();
+            }, 1500);
+            function onMode() {
+              if (video.webkitPresentationMode === 'picture-in-picture') {
+                cleanup();
+                resolve();
+              }
+            }
+            function cleanup() {
+              clearTimeout(timer);
+              video.removeEventListener('webkitpresentationmodechanged', onMode);
+            }
+            video.addEventListener('webkitpresentationmodechanged', onMode);
+            try {
+              video.webkitSetPresentationMode('picture-in-picture');
+            } catch (e) {
+              cleanup();
+              resolve();
+            }
+          });
+        }
+        if (video.paused) {
+          for (var attempt = 0; attempt < 2; attempt++) {
+            try {
+              await video.play();
+              break;
+            } catch (e) {
+              if (attempt === 1) return { ok: false, reason: 'play-rejected' };
+              await new Promise(function(r) { setTimeout(r, 200); });
+            }
+          }
+        }
+        return { ok: !video.paused, reason: video.paused ? 'still-paused' : 'playing' };
+      ''');
+    } catch (_) {
+      // WebContent may already be suspended; nothing else we can do from Dart.
     }
   }
 
