@@ -21,6 +21,9 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
         return
       }
       switch call.method {
+      case "prepare":
+        self.prepare()
+        result(nil)
       case "enterPiP":
         self.enterPiP()
         result(nil)
@@ -31,6 +34,9 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
         result(self.pipController?.isPictureInPicturePossible ?? false)
       case "isPiPActive":
         result(self.pipController?.isPictureInPictureActive ?? false)
+      case "clear":
+        self.clear()
+        result(nil)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -41,6 +47,28 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
   func clear() {
     pipController = nil
     playerLayer = nil
+  }
+
+  /// Links an [AVPictureInPictureController] to the current AVPlayerLayer
+  /// WITHOUT starting PiP, and opts into automatic PiP when the app
+  /// backgrounds. iOS then presents the floating window on home-screen
+  /// swipe-off by itself — no synthetic commands needed. The layer must be
+  /// in a window for the link to succeed (it is: the mini/full player keeps
+  /// the native surface mounted while playback is active).
+  func prepare() {
+    guard let layer = findPlayerLayer() else { return }
+    if pipController == nil || pipController?.playerLayer !== layer {
+      let controller = AVPictureInPictureController(playerLayer: layer)
+      controller?.delegate = self
+      if #available(iOS 15.0, *) {
+        controller?.canStartPictureInPictureAutomaticallyFromInline = true
+      }
+      pipController = controller
+      // Retain the layer: the system needs it alive for PiP to continue.
+      playerLayer = layer
+    } else if #available(iOS 15.0, *) {
+      pipController?.canStartPictureInPictureAutomaticallyFromInline = true
+    }
   }
 
   private func findPlayerLayer() -> AVPlayerLayer? {
@@ -75,6 +103,9 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
     if pipController == nil || pipController?.playerLayer !== layer {
       let controller = AVPictureInPictureController(playerLayer: layer)
       controller?.delegate = self
+      if #available(iOS 15.0, *) {
+        controller?.canStartPictureInPictureAutomaticallyFromInline = true
+      }
       pipController = controller
       // Retain the layer: the Flutter surface is hidden when the mini player
       // collapses, and the system needs the layer alive for PiP to continue.

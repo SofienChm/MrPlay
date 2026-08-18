@@ -38,6 +38,22 @@ class PiPService {
     }
   }
 
+  /// Links the native PiP controller to the playing surface without opening a
+  /// PiP window, and enables automatic PiP when the app backgrounds. Call once
+  /// playback starts so a home-screen swipe hands off to PiP seamlessly.
+  Future<void> prepare() async {
+    try {
+      await _channel.invokeMethod('prepare');
+    } catch (_) {}
+  }
+
+  /// Releases the native PiP controller / retained layer.
+  Future<void> clear() async {
+    try {
+      await _channel.invokeMethod('clear');
+    } catch (_) {}
+  }
+
   Future<void> enterPiP() async {
     try {
       await _channel.invokeMethod('enterPiP');

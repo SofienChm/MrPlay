@@ -459,6 +459,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!NativeYoutubePlayer.instance.isActive) return;
     ref.read(playerProvider.notifier).clearError();
     _onPlayerInfo(data);
+    // Arm automatic PiP on the home-screen swipe: link the native PiP
+    // controller to the AVPlayerLayer once playback starts. The surface must
+    // have mounted first (mini/full player keeps the layer in a window), so
+    // wait a beat before the bridge searches for it.
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (!NativeYoutubePlayer.instance.isActive) return;
+      PiPService.instance.prepare();
+    });
   }
 
   void _onNativeLoadFailed(YoutubeStreamException error) {
@@ -775,6 +783,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void closePlayer() {
     if (NativeYoutubePlayer.instance.isActive) {
       PiPService.instance.exitPiP();
+      PiPService.instance.clear();
       NativeYoutubePlayer.instance.close();
       _stopStatePoll();
       _loadingTimer?.cancel();
@@ -899,6 +908,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
     // Switching back to the WebView: stop any native playback first.
     NativeYoutubePlayer.instance.close();
+    PiPService.instance.clear();
     _loadingTimer?.cancel();
     _pendingUrl = url;
     if (_webViewController != null) {
@@ -956,6 +966,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!NativeYoutubePlayer.instance.isActive) return;
     final items = await QueueRepository.getAll();
     NativeYoutubePlayer.instance.close();
+    PiPService.instance.clear();
     ref.read(playerProvider.notifier).dismiss();
     if (items.isNotEmpty) {
       final next = items.first;
