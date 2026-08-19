@@ -51,6 +51,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _appIsBackgrounded = false;
   int _lastNowPlayingMs = 0;
   Timer? _statePoll;
+  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
 
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
@@ -71,6 +72,30 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     WidgetsBinding.instance.addObserver(this);
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
     _restoreLastPlatform();
+    _subscribeToAudioInterruptions();
+  }
+
+  /// Another app (TikTok, Spotify, a call...) has taken the audio session -
+  /// iOS pauses our playback and silences the phantom-PiP keep-alive. Update
+  /// the player state and Now Playing so Control Center doesn't keep showing
+  /// "playing" while the video is actually paused. When the interruption ends
+  /// the webview stays paused; the user resumes explicitly.
+  Future<void> _subscribeToAudioInterruptions() async {
+    try {
+      final session = await AudioSession.instance;
+      _interruptionSub = session.interruptionEventStream.listen((event) {
+        if (!event.begin) return;
+        if (!mounted) return;
+        if (ref.read(playerProvider).isPlaying) {
+          ref.read(playerProvider.notifier).pause();
+          MediaControlsService.instance.setPlaying(false);
+          // Pause the actual element so JS-side state (and the state poll)
+          // stop reporting "playing" and no phantom-PiP keep-alive audio
+          // lingers.
+          controlVideo('pause');
+        }
+      });
+    } catch (_) {}
   }
 
   @override
@@ -79,6 +104,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     _statePoll?.cancel();
+    _interruptionSub?.cancel();
     PlaybackStatsService.instance.flush();
     super.dispose();
   }
