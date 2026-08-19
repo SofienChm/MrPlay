@@ -37,6 +37,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   String? _pendingVideoUrl;
   double _tabSwipeOffset = 0;
   bool _waitingToGoBack = false;
+  bool _videoTabIntro = false;
+  bool _unmuteDone = false;
   bool isReady = false;
   bool _isLoading = false;
   String? _pendingUrl;
@@ -337,6 +339,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (currentId != video.id) {
           _endedHandled = false;
           _resumeSeekDone = false;
+          _unmuteDone = false;
           if (_videoTabUrl != null) {
             ref.read(playerProvider.notifier).openVideoTab(video);
           } else {
@@ -375,6 +378,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final durSec = (data['duration'] as num?)?.toDouble() ?? 0;
       final positionMs = posSec.isFinite ? posSec * 1000 : 0.0;
       final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
+      // YouTube starts some videos muted (or the user previously muted); once
+      // the video is actually playing, force-unmute it so audio is audible.
+      if (playing && !ended && !_unmuteDone) {
+        _unmuteDone = true;
+        _unmuteVideo();
+      }
       var video = ref.read(playerProvider).currentVideo;
       // Fallback: if the video is actually playing but the `playerInfo` JS
       // (title extraction) never reported in, build the Video from the current
@@ -544,19 +553,30 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   /// Opens (or re-slot) the dedicated video tab onto the given watch URL.
-  /// If the tab webview already exists it simply navigates; otherwise the
-  /// URL is stashed and consumed when the tab widget is built.
+  /// If the tab webview already exists it simply navigates (reloading the new
+  /// video); otherwise the URL is stashed and consumed when the tab widget is
+  /// built. The tab is expanded and fades in from the bottom so a new video
+  /// selected on the browse tab visibly pops the second tab back up.
   void _openVideoTab(String url) {
     if (_videoTabUrl == url) return;
     _videoTabUrl = url;
+    _resumeSeekDone = false;
+    _endedHandled = false;
+    _unmuteDone = false;
+    ref.read(playerProvider.notifier).videoTabActive();
+    _videoTabIntro = true;
     final vc = _videoWebViewController;
     if (vc != null) {
-      _resumeSeekDone = false;
       vc.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
     } else {
       _pendingVideoUrl = url;
     }
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _videoTabIntro) setState(() => _videoTabIntro = false);
+      });
+    }
   }
 
   /// Tears down the video tab: pauses playback, resets the player, and lets
@@ -874,6 +894,26 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         ''');
         break;
     }
+  }
+
+  /// Un-mutes the actively playing video. YouTube sometimes starts playback
+  /// muted (or the user previously muted it), and the "tap to unmute" overlay
+  /// needs a tap. We bypass the UI by directly clearing `muted` on the video
+  /// element(s) and restoring volume, once per video.
+  void _unmuteVideo() {
+    _activeController?.evaluateJavascript(source: '''
+      (function() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          var v = videos[i];
+          if (v.muted || v.volume === 0) {
+            v.muted = false;
+            v.defaultMuted = false;
+            v.volume = 1;
+          }
+        }
+      })();
+    ''');
   }
 
   Future<void> _restoreLastPlatform() async {
@@ -1265,17 +1305,20 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         // Tab 2 — dedicated video tab. Rendered on top while "full", fades
         // away (but stays alive) when minimized so the browse webview below
         // is visible and interactive. Never disposed while playing: that would
-        // cut the audio.
+        // cut the audio. On first appearance it fades in from the bottom
+        // (_videoTabIntro), matching the swipe-down collapse direction.
         if (_videoTabUrl != null)
           Positioned.fill(
             child: IgnorePointer(
               ignoring: videoTabCollapsed,
               child: AnimatedOpacity(
-                opacity: videoTabCollapsed ? 0.0 : 1.0,
+                opacity: (videoTabCollapsed || _videoTabIntro) ? 0.0 : 1.0,
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
                 child: AnimatedSlide(
-                  offset: videoTabCollapsed ? const Offset(0, 0.12) : Offset.zero,
+                  offset: (videoTabCollapsed || _videoTabIntro)
+                      ? const Offset(0, 0.18)
+                      : Offset.zero,
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeInOut,
                   child: InAppWebView(
@@ -1288,6 +1331,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       ),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: VideoTabJS.headerRemoverScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                       ),
                       UserScript(
@@ -1381,18 +1428,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               ),
             ),
           ),
-        // Swipe-down handle shown only while the video tab is expanded.
+        // Swipe-down handle shown only while the video tab is expanded. Full-
+        // width strip (not just the pill) so a swipe starting anywhere along
+        // the top of the tab collapses it, matching the arrow button.
         if (_videoTabUrl != null && !videoTabCollapsed)
           Positioned(
             top: MediaQuery.of(context).padding.top + 6,
             left: 0,
             right: 0,
-            child: Center(
-              child: GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onVerticalDragUpdate: _onTabSwipeUpdate,
-                onVerticalDragEnd: _onTabSwipeEnd,
-                onTap: _minimizeVideoTab,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onVerticalDragUpdate: _onTabSwipeUpdate,
+              onVerticalDragEnd: _onTabSwipeEnd,
+              onTap: _minimizeVideoTab,
+              child: Container(
+                height: 44,
+                width: double.infinity,
+                color: Colors.transparent,
+                alignment: Alignment.center,
                 child: Transform.translate(
                   offset: Offset(0, _tabSwipeOffset),
                   child: AnimatedOpacity(

@@ -267,3 +267,35 @@ class YouTubeJS {
     })();
   ''';
 }
+
+class VideoTabJS {
+  /// Removes the YouTube masthead / logo / search bar so the video tab is a
+  /// clean playback surface. Applied only to the dedicated video tab.
+  static const String headerRemoverScript = '''
+    (function() {
+      if (location.hostname.indexOf('youtube.com') === -1) return;
+      var selectors = [
+        '#masthead',
+        '#masthead-container',
+        'ytd-masthead',
+        'ytm-masthead',
+        'ytd-topbar-logo-renderer',
+        'ytm-topbar-logo-renderer',
+        '.mobile-topbar-header',
+        '.ytp-chrome-top:not(.ytp-visible)',
+        'ytm-topbar',
+        'ytd-page-manager > ytd-rich-grid-renderer ytd-banner-promo-renderer'
+      ];
+      function hide() {
+        document.querySelectorAll(selectors.join(',')).forEach(function(el) {
+          el.style.setProperty('display', 'none', 'important');
+        });
+        document.querySelectorAll('#tabsContainer').forEach(function(el) {
+          el.style.setProperty('display', 'none', 'important');
+        });
+      }
+      hide();
+      new MutationObserver(hide).observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  ''';
+}
