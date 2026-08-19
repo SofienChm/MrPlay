@@ -82,6 +82,19 @@ MrPlay - Project Map
 >   `full_player.dart` renders the native surface (plus buffering spinner and a
 >   skip/retry error overlay); captions/fullscreen buttons are hidden for native.
 >   Non-YouTube URLs keep the WebView path unchanged.
+> - **Option A — "the YouTube page IS the player" (2026-08-19, Video Lite model)**:
+>   native playback no longer hides the WebView. The watch page stays visible and
+>   interactive; the in-page `<video>` is MUTED (not paused) every 1s so it keeps
+>   providing visuals while AVPlayer owns all audio (`_keepWebViewVideoSilent` +
+>   injected `#mrplay-native-player` CSS hides YT player chrome). The expanded
+>   native view (`full_player.dart#_buildNativePageMode`) is a transparent screen
+>   showing the page with a floating control card (small live surface = PiP
+>   source, slider, transport, PiP + queue buttons) and top action row; PiP is
+>   auto-armed on expand so home-swipe yields a real floating window. The mini
+>   dock is a thumbnail-only (no live layer → no scroll lag); tapping it calls
+>   `expandPlayer()` which re-navigates the WebView to `activeUrl` if it drifted
+>   (deduped, never restarts the stream) then expands. Play/pause/seek on the
+>   controls mirror to the page video via `_runOnPageVideo`.
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.
