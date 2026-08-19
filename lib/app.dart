@@ -119,6 +119,7 @@ class _MrPlayAppState extends State<MrPlayApp> {
                 const HubPage(),
                 Positioned.fill(
                   child: SafeArea(
+                    bottom: false,
                     child: PersistentWebView(key: MrPlayApp.webViewKey),
                   ),
                 ),
