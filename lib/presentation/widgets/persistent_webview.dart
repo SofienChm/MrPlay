@@ -32,6 +32,11 @@ class PersistentWebView extends ConsumerStatefulWidget {
 class PersistentWebViewState extends ConsumerState<PersistentWebView>
     with WidgetsBindingObserver {
   InAppWebViewController? _webViewController;
+  InAppWebViewController? _videoWebViewController;
+  String? _videoTabUrl;
+  String? _pendingVideoUrl;
+  double _tabSwipeOffset = 0;
+  bool _waitingToGoBack = false;
   bool isReady = false;
   bool _isLoading = false;
   String? _pendingUrl;
@@ -109,6 +114,33 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _onWebViewCreated(InAppWebViewController controller) {
     _webViewController = controller;
+    _registerVideoHandlers(controller);
+    if (_pendingUrl != null) {
+      controller.loadUrl(
+        urlRequest: URLRequest(url: WebUri(_pendingUrl!)),
+      );
+      _pendingUrl = null;
+    }
+  }
+
+  void _onVideoWebViewCreated(InAppWebViewController controller) {
+    _videoWebViewController = controller;
+    _registerVideoHandlers(controller);
+    // initialUrlRequest already started the load; only issue a second
+    // navigation when the stashed URL differs (a video replaced mid-creation).
+    if (_pendingVideoUrl != null && _pendingVideoUrl != _videoTabUrl) {
+      controller.loadUrl(
+        urlRequest: URLRequest(url: WebUri(_pendingVideoUrl!)),
+      );
+      _pendingVideoUrl = null;
+    }
+  }
+
+  /// Registers the JS<->Dart bridges used to feed the player/controls. Shared
+  /// between the browse webview and the video tab. Player actions always
+  /// target the most recently created controller, so the video tab wins when
+  /// it is present.
+  void _registerVideoHandlers(InAppWebViewController controller) {
     controller.addJavaScriptHandler(
       handlerName: 'playerInfo',
       callback: (args) {
@@ -144,13 +176,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       },
     );
-    if (_pendingUrl != null) {
-      controller.loadUrl(
-        urlRequest: URLRequest(url: WebUri(_pendingUrl!)),
-      );
-      _pendingUrl = null;
-    }
   }
+
+  InAppWebViewController? get _activeController =>
+      _videoWebViewController ?? _webViewController;
 
   void _onLoadStart(InAppWebViewController controller, WebUri? url) {
     _currentUrl = url?.toString();
@@ -166,15 +195,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       InAppWebViewController controller, WebUri? url) async {
     _loadingTimer?.cancel();
     if (mounted) setState(() => _isLoading = false);
-    _handleWatchPage(controller, url.toString());
+    final urlStr = url.toString();
+    if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
+      if (_videoTabUrl != null && _videoTabUrl == urlStr) {
+        _handleWatchPage(controller, urlStr);
+        return;
+      }
+      _openVideoTab(urlStr);
+      return;
+    }
+    _handleWatchPage(controller, urlStr);
   }
 
   /// YouTube mobile is a single-page app: tapping a video navigates to /watch
   /// via the history API, so neither onLoadStart nor onLoadStop fires. iOS
   /// reports those URL changes through onUpdateVisitedHistory (KVO on
-  /// WKWebView.url) - without this the current URL stays stale and the mini
-  /// player never appears for SPA-opened videos.
-  void _onUpdateVisitedHistory(
+  /// WKWebView.url). The browse webview re-routes /watch pages into the
+  /// dedicated video tab and steps back so the normal navigation surface is
+  /// always the search/home feed.
+  void _onBrowseVisitedHistory(
     InAppWebViewController controller,
     WebUri? url,
     bool? isReload,
@@ -182,7 +221,50 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final urlStr = url?.toString();
     if (urlStr == null) return;
     _currentUrl = urlStr;
+    if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
+      _openVideoTab(urlStr);
+      // YouTube uses pushState, so stepping back returns to the feed while the
+      // new tab keeps the watch page alive. Guard against re-entry so a queued
+      // back call doesn't bounce us forward again.
+      if (_waitingToGoBack) return;
+      _waitingToGoBack = true;
+      Future.delayed(const Duration(milliseconds: 80), () {
+        _waitingToGoBack = false;
+        try {
+          controller.goBack();
+        } catch (_) {}
+      });
+      return;
+    }
     _handleWatchPage(controller, urlStr);
+  }
+
+  /// The video tab also tracks its own watch navigations (related video,
+  /// autoplay queue). The SPA has already navigated by the time this fires, so
+  /// we only update the tracked URL + re-run watch tasks — never reload.
+  void _onVideoVisitedHistory(
+    InAppWebViewController controller,
+    WebUri? url,
+    bool? isReload,
+  ) {
+    final urlStr = url?.toString();
+    if (urlStr == null) return;
+    if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
+      if (urlStr != _videoTabUrl) {
+        _videoTabUrl = urlStr;
+        _resumeSeekDone = false;
+        _endedHandled = false;
+      }
+      _handleWatchPage(controller, urlStr);
+    }
+  }
+
+  void _onVideoLoadStart(InAppWebViewController controller, WebUri? url) {
+    final urlStr = url?.toString();
+    if (urlStr == null) return;
+    if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
+      if (urlStr != _videoTabUrl) _openVideoTab(urlStr);
+    }
   }
 
   /// Runs the watch-page tasks (title extraction for the mini player and
@@ -255,7 +337,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (currentId != video.id) {
           _endedHandled = false;
           _resumeSeekDone = false;
-          ref.read(playerProvider.notifier).play(video);
+          if (_videoTabUrl != null) {
+            ref.read(playerProvider.notifier).openVideoTab(video);
+          } else {
+            ref.read(playerProvider.notifier).play(video);
+          }
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
             artist: video.platform.isEmpty ? 'YouTube' : video.platform,
@@ -331,7 +417,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   Video? _trackVideoFromUrl() {
     final existing = ref.read(playerProvider).currentVideo;
     if (existing != null) return existing;
-    final url = _currentUrl ?? '';
+    final url = _videoTabUrl ?? _currentUrl ?? '';
     final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
     final String videoId;
     final String thumbnailUrl;
@@ -354,7 +440,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       videoUrl: url,
       platform: platform,
     );
-    ref.read(playerProvider.notifier).play(video);
+    if (_videoTabUrl != null) {
+      ref.read(playerProvider.notifier).openVideoTab(video);
+    } else {
+      ref.read(playerProvider.notifier).play(video);
+    }
     return video;
   }
 
@@ -451,6 +541,44 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (ref.read(playerProvider).currentVideo != null) {
       ref.read(playerProvider.notifier).minimize();
     }
+  }
+
+  /// Opens (or re-slot) the dedicated video tab onto the given watch URL.
+  /// If the tab webview already exists it simply navigates; otherwise the
+  /// URL is stashed and consumed when the tab widget is built.
+  void _openVideoTab(String url) {
+    if (_videoTabUrl == url) return;
+    _videoTabUrl = url;
+    final vc = _videoWebViewController;
+    if (vc != null) {
+      _resumeSeekDone = false;
+      vc.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+    } else {
+      _pendingVideoUrl = url;
+    }
+    if (mounted) setState(() {});
+  }
+
+  /// Tears down the video tab: pauses playback, resets the player, and lets
+  /// the tab widget unmount (which disposes the WKWebView underneath).
+  void _closeVideoTab() {
+    try {
+      _videoWebViewController?.evaluateJavascript(source: '''
+        (function() {
+          var v = $_activeVideoJs;
+          if (v) v.pause();
+        })();
+      ''');
+    } catch (_) {}
+    _stopStatePoll();
+    _videoTabUrl = null;
+    _videoWebViewController = null;
+    _pendingVideoUrl = null;
+    _tabSwipeOffset = 0;
+    PlaybackStatsService.instance.flush();
+    MediaControlsService.instance.clearNowPlaying();
+    ref.read(playerProvider.notifier).dismiss();
+    if (mounted) setState(() {});
   }
 
   void _showOptionsModal() {
@@ -560,7 +688,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       label: 'AirPlay',
                       onTap: () {
                         Navigator.pop(sheetContext);
-                        _webViewController?.evaluateJavascript(source: '''
+                        _activeController?.evaluateJavascript(source: '''
                         (function(){
                           var v=document.querySelector('video');
                           if(v&&v.webkitShowPlaybackTargetPicker)
@@ -664,7 +792,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   /// Full cleanup: pauses the video, cancels timers, stops audio keep-alive,
-  /// clears now-playing, flushes stats, and dismisses the player state.
+  /// clears now-playing, flushes stats, and dismisses the player state. When a
+  /// video tab is open it is closed too, so playback fully stops.
   void closePlayer() {
     controlVideo('pause');
     _stopStatePoll();
@@ -672,13 +801,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer = null;
     _nowPlayingThrottle?.cancel();
     _nowPlayingThrottle = null;
+    _videoTabUrl = null;
+    _videoWebViewController = null;
+    _pendingVideoUrl = null;
+    _tabSwipeOffset = 0;
     PlaybackStatsService.instance.flush();
     MediaControlsService.instance.clearNowPlaying();
     ref.read(playerProvider.notifier).dismiss();
+    if (mounted) setState(() {});
   }
 
   void controlVideo(String action, {double? position}) {
-    final controller = _webViewController;
+    final controller = _activeController;
     if (controller == null) return;
     switch (action) {
       case 'play':
@@ -749,6 +883,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void loadUrl(String url) {
+    if (url.contains('youtube.com') && url.contains('/watch')) {
+      _openVideoTab(url);
+      return;
+    }
     _loadingTimer?.cancel();
     _pendingUrl = url;
     if (_webViewController != null) {
@@ -804,7 +942,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// called from explicit user actions (PiP button / swipe-down), so iOS
   /// presents the real floating window.
   void enterPiP() {
-    _webViewController?.evaluateJavascript(source: '''
+    _activeController?.evaluateJavascript(source: '''
       (function() {
         var video = $_activeVideoJs;
         if (!video) return;
@@ -822,7 +960,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Brings the video back inline after PiP. Uses only the clean API call —
   /// no DOM surgery, so it can't corrupt YouTube's MediaSource pipeline.
   void exitPiP() {
-    _webViewController?.evaluateJavascript(source: '''
+    _activeController?.evaluateJavascript(source: '''
       (function() {
         var video = $_activeVideoJs;
         if (!video) return;
@@ -837,7 +975,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void togglePictureInPicture() {
-    _webViewController?.evaluateJavascript(source: '''
+    _activeController?.evaluateJavascript(source: '''
       (function() {
         var video = $_activeVideoJs;
         if (!video) return;
@@ -861,7 +999,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// confirm 'inline', verifies rendering, and reloads the page as a last
   /// resort — no DOM surgery, which corrupts YouTube's MediaSource pipeline.
   Future<void> _restoreVideoInline() async {
-    final controller = _webViewController;
+    final controller = _activeController;
     if (controller == null) return;
     try {
       final result = await controller.callAsyncJavaScript(functionBody: '''
@@ -908,10 +1046,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final value = result?.value;
       final ok = value is Map && value['ok'] == true;
       if (!ok) {
-        _webViewController?.reload();
+        _activeController?.reload();
       }
     } catch (_) {
-      _webViewController?.reload();
+      _activeController?.reload();
     }
   }
 
@@ -921,7 +1059,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// the mode-change event, then resume playback so the PiP/AVFoundation session
   /// keeps the audio alive.
   Future<void> _enterPhantomPiP() async {
-    final controller = _webViewController;
+    final controller = _activeController;
     if (controller == null) return;
     try {
       final result = await controller.callAsyncJavaScript(functionBody: '''
@@ -999,7 +1137,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   Future<void> _pollVideoState() async {
-    final controller = _webViewController;
+    final controller = _activeController;
     if (controller == null) return;
     try {
       final result = await controller.evaluateJavascript(source: '''
@@ -1047,6 +1185,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
     if (!isReady) return const SizedBox.shrink();
 
+    final playerState = ref.watch(playerProvider);
+    final videoTabCollapsed = _videoTabUrl != null &&
+        playerState.isVideoTab &&
+        playerState.isMinimized;
+
     return Stack(
       children: [
         Positioned.fill(
@@ -1087,7 +1230,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             onWebViewCreated: _onWebViewCreated,
             onLoadStart: _onLoadStart,
             onLoadStop: _onLoadStop,
-            onUpdateVisitedHistory: _onUpdateVisitedHistory,
+            onUpdateVisitedHistory: _onBrowseVisitedHistory,
             onReceivedError: _onReceivedError,
             onReceivedHttpError: _onReceivedHttpError,
             shouldOverrideUrlLoading: (controller, navigationAction) async {
@@ -1119,6 +1262,95 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             },
           ),
         ),
+        // Tab 2 — dedicated video tab. Rendered on top while "full", fades
+        // away (but stays alive) when minimized so the browse webview below
+        // is visible and interactive. Never disposed while playing: that would
+        // cut the audio.
+        if (_videoTabUrl != null)
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: videoTabCollapsed,
+              child: AnimatedOpacity(
+                opacity: videoTabCollapsed ? 0.0 : 1.0,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeInOut,
+                child: AnimatedSlide(
+                  offset: videoTabCollapsed ? const Offset(0, 0.12) : Offset.zero,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  child: InAppWebView(
+                    key: const ValueKey('video-tab'),
+                    initialUrlRequest: URLRequest(url: WebUri(_videoTabUrl!)),
+                    initialUserScripts: UnmodifiableListView([
+                      UserScript(
+                        source: ContentBlockerJS.genericAdBlockerScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: YouTubeJS.visibilityKeepAliveScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: YouTubeJS.appBannerRemoverScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: YouTubeJS.playerControlsScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: MediaObserverJS.genericObserverScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                    ]),
+                    initialSettings: InAppWebViewSettings(
+                      javaScriptEnabled: true,
+                      allowsInlineMediaPlayback: true,
+                      mediaPlaybackRequiresUserGesture: false,
+                      allowBackgroundAudioPlaying: true,
+                      allowsPictureInPictureMediaPlayback: true,
+                      allowsAirPlayForMediaPlayback: true,
+                      isFraudulentWebsiteWarningEnabled: false,
+                      userAgent:
+                          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+                    ),
+                    onWebViewCreated: _onVideoWebViewCreated,
+                    onLoadStart: _onVideoLoadStart,
+                    onLoadStop: _onLoadStop,
+                    onUpdateVisitedHistory: _onVideoVisitedHistory,
+                    onReceivedError: _onReceivedError,
+                    onReceivedHttpError: _onReceivedHttpError,
+                    shouldOverrideUrlLoading:
+                        (controller, navigationAction) async {
+                      final url = navigationAction.request.url;
+                      if (url != null) {
+                        final scheme = url.scheme.toLowerCase();
+                        if (scheme == 'http' ||
+                            scheme == 'https' ||
+                            scheme == 'about' ||
+                            scheme == 'file') {
+                          return NavigationActionPolicy.ALLOW;
+                        }
+                        if (scheme == 'javascript' ||
+                            scheme == 'data' ||
+                            scheme == 'blob') {
+                          return NavigationActionPolicy.CANCEL;
+                        }
+                      }
+                      return NavigationActionPolicy.ALLOW;
+                    },
+                    onCreateWindow: (controller, createWindowAction) async {
+                      final url = createWindowAction.request.url;
+                      if (url != null) {
+                        controller.loadUrl(urlRequest: URLRequest(url: url));
+                      }
+                      return false;
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
         if (_loadError != null && !_isLoading)
           Positioned.fill(
             child: Container(
@@ -1145,6 +1377,40 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
                   valueColor: AlwaysStoppedAnimation<Color>(Colors.red),
+                ),
+              ),
+            ),
+          ),
+        // Swipe-down handle shown only while the video tab is expanded.
+        if (_videoTabUrl != null && !videoTabCollapsed)
+          Positioned(
+            top: MediaQuery.of(context).padding.top + 6,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onVerticalDragUpdate: _onTabSwipeUpdate,
+                onVerticalDragEnd: _onTabSwipeEnd,
+                onTap: _minimizeVideoTab,
+                child: Transform.translate(
+                  offset: Offset(0, _tabSwipeOffset),
+                  child: AnimatedOpacity(
+                    opacity: _tabSwipeOffset > 20 ? 0.3 : 1.0,
+                    duration: const Duration(milliseconds: 120),
+                    child: Container(
+                      width: 128,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1C1C1E).withValues(alpha: 0.85),
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: const Icon(Icons.keyboard_arrow_down,
+                          color: Colors.white70, size: 26),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -1202,17 +1468,21 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           right: 16,
           child: GestureDetector(
             onTap: () {
-              _webViewController?.loadUrl(
-                urlRequest: URLRequest(url: WebUri('about:blank')),
-              );
-              _webViewController = null;
-              PlaybackStatsService.instance.flush();
-              MediaControlsService.instance.clearNowPlaying();
-              ref.read(playerProvider.notifier).dismiss();
-              setState(() {
-                isReady = false;
-                _isLoading = false;
-              });
+              if (_videoTabUrl != null) {
+                _closeVideoTab();
+              } else {
+                _webViewController?.loadUrl(
+                  urlRequest: URLRequest(url: WebUri('about:blank')),
+                );
+                _webViewController = null;
+                PlaybackStatsService.instance.flush();
+                MediaControlsService.instance.clearNowPlaying();
+                ref.read(playerProvider.notifier).dismiss();
+                setState(() {
+                  isReady = false;
+                  _isLoading = false;
+                });
+              }
             },
             child: Container(
               padding: const EdgeInsets.all(8),
@@ -1226,6 +1496,28 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         ),
       ],
     );
+  }
+
+  void _minimizeVideoTab() {
+    if (_videoTabUrl == null) return;
+    _tabSwipeOffset = 0;
+    ref.read(playerProvider.notifier).minimize();
+  }
+
+  void _onTabSwipeUpdate(DragUpdateDetails details) {
+    setState(() {
+      _tabSwipeOffset += details.delta.dy;
+      if (_tabSwipeOffset < 0) _tabSwipeOffset = 0;
+    });
+  }
+
+  void _onTabSwipeEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity > 350 || _tabSwipeOffset > 110) {
+      _minimizeVideoTab();
+    } else {
+      setState(() => _tabSwipeOffset = 0);
+    }
   }
 }
 

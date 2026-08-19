@@ -8,6 +8,7 @@ class PlayerState {
   final Video? currentVideo;
   final bool isPlaying;
   final bool isMinimized;
+  final bool isVideoTab;
   final Duration position;
   final Duration duration;
 
@@ -15,6 +16,7 @@ class PlayerState {
     this.currentVideo,
     this.isPlaying = false,
     this.isMinimized = true,
+    this.isVideoTab = false,
     this.position = Duration.zero,
     this.duration = Duration.zero,
   });
@@ -23,6 +25,7 @@ class PlayerState {
     Video? currentVideo,
     bool? isPlaying,
     bool? isMinimized,
+    bool? isVideoTab,
     Duration? position,
     Duration? duration,
     bool clearVideo = false,
@@ -31,6 +34,7 @@ class PlayerState {
       currentVideo: clearVideo ? null : (currentVideo ?? this.currentVideo),
       isPlaying: isPlaying ?? this.isPlaying,
       isMinimized: isMinimized ?? this.isMinimized,
+      isVideoTab: isVideoTab ?? this.isVideoTab,
       position: position ?? this.position,
       duration: duration ?? this.duration,
     );
@@ -63,6 +67,34 @@ class PlayerNotifier extends Notifier<PlayerState> {
       url: video.videoUrl,
     );
   }
+
+  /// Tracks a video that lives in the dedicated video tab (the full YouTube
+  /// page). The tab webview itself is the "full player", so no overlay is
+  /// shown until the user explicitly minimizes the tab.
+  void openVideoTab(Video video) {
+    state = state.copyWith(
+      currentVideo: video,
+      isPlaying: true,
+      isMinimized: false,
+      isVideoTab: true,
+      position: Duration.zero,
+      duration: Duration.zero,
+    );
+    RecentActivityService.instance.recordVideo(video);
+    SpotlightService.index(
+      title: video.title,
+      subtitle: video.platform.isEmpty ? 'MrPlay' : video.platform,
+      url: video.videoUrl,
+    );
+  }
+
+  /// Marks the player as backed by a video tab without replacing metadata
+  /// (used when the tab is created before the title extraction reports in).
+  void videoTabActive() => state = state.copyWith(
+        isVideoTab: true,
+        isMinimized: false,
+        isPlaying: true,
+      );
 
   void syncState({
     bool? isPlaying,
