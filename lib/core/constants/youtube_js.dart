@@ -298,4 +298,37 @@ class VideoTabJS {
       new MutationObserver(hide).observe(document.documentElement, { childList: true, subtree: true });
     })();
   ''';
+
+  /// Collapses the video tab when the user drags straight down while the page
+  /// is at the very top (scrollY === 0). WKWebView handles its own touches
+  /// natively, so Flutter gestures can't reach it — this JS detects the swipe
+  /// inside the page and notifies Dart via the `videoTabSwipe` bridge, which
+  /// runs the same minimize path as the arrow button.
+  static const String swipeCollapseScript = '''
+    (function() {
+      if (location.hostname.indexOf('youtube.com') === -1) return;
+      var startY = null;
+      var startX = null;
+      var fired = false;
+      document.addEventListener('touchstart', function(e) {
+        startY = e.touches[0].clientY;
+        startX = e.touches[0].clientX;
+        fired = false;
+      }, { passive: true });
+      document.addEventListener('touchmove', function(e) {
+        if (startY === null || fired) return;
+        var dy = e.touches[0].clientY - startY;
+        var dx = Math.abs(e.touches[0].clientX - startX);
+        var scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+        if (dy > 60 && dx < 40 && scrollTop <= 2) {
+          fired = true;
+          if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+            window.flutter_inappwebview.callHandler('videoTabSwipe');
+          }
+          startY = null;
+          startX = null;
+        }
+      }, { passive: true });
+    })();
+  ''';
 }

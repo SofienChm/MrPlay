@@ -178,6 +178,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       },
     );
+    controller.addJavaScriptHandler(
+      handlerName: 'videoTabSwipe',
+      callback: (args) {
+        _minimizeVideoTab();
+      },
+    );
   }
 
   InAppWebViewController? get _activeController =>
@@ -577,28 +583,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (mounted && _videoTabIntro) setState(() => _videoTabIntro = false);
       });
     }
-  }
-
-  /// Tears down the video tab: pauses playback, resets the player, and lets
-  /// the tab widget unmount (which disposes the WKWebView underneath).
-  void _closeVideoTab() {
-    try {
-      _videoWebViewController?.evaluateJavascript(source: '''
-        (function() {
-          var v = $_activeVideoJs;
-          if (v) v.pause();
-        })();
-      ''');
-    } catch (_) {}
-    _stopStatePoll();
-    _videoTabUrl = null;
-    _videoWebViewController = null;
-    _pendingVideoUrl = null;
-    _tabSwipeOffset = 0;
-    PlaybackStatsService.instance.flush();
-    MediaControlsService.instance.clearNowPlaying();
-    ref.read(playerProvider.notifier).dismiss();
-    if (mounted) setState(() {});
   }
 
   void _showOptionsModal() {
@@ -1316,9 +1300,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 duration: const Duration(milliseconds: 300),
                 curve: Curves.easeInOut,
                 child: AnimatedSlide(
-                  offset: (videoTabCollapsed || _videoTabIntro)
-                      ? const Offset(0, 0.18)
-                      : Offset.zero,
+                  offset: _videoTabIntro
+                      ? const Offset(0, 0.35)
+                      : (videoTabCollapsed ? const Offset(0, 0.25) : Offset.zero),
                   duration: const Duration(milliseconds: 300),
                   curve: Curves.easeInOut,
                   child: InAppWebView(
@@ -1335,6 +1319,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       ),
                       UserScript(
                         source: VideoTabJS.headerRemoverScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: VideoTabJS.swipeCollapseScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                       ),
                       UserScript(
@@ -1520,23 +1508,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           bottom: 80,
           right: 16,
           child: GestureDetector(
-            onTap: () {
-              if (_videoTabUrl != null) {
-                _closeVideoTab();
-              } else {
-                _webViewController?.loadUrl(
-                  urlRequest: URLRequest(url: WebUri('about:blank')),
-                );
-                _webViewController = null;
-                PlaybackStatsService.instance.flush();
-                MediaControlsService.instance.clearNowPlaying();
-                ref.read(playerProvider.notifier).dismiss();
-                setState(() {
-                  isReady = false;
-                  _isLoading = false;
-                });
-              }
-            },
+            onTap: _goToHub,
             child: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -1549,6 +1521,37 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         ),
       ],
     );
+  }
+
+  /// Full reset back to the hub: pauses playback, tears down the video tab
+  /// (if any), blanks the browse webview, and hides the whole webview layer so
+  /// the HubPage (below in the app Stack) becomes visible again.
+  void _goToHub() {
+    controlVideo('pause');
+    _stopStatePoll();
+    _loadingTimer?.cancel();
+    _loadingTimer = null;
+    _nowPlayingThrottle?.cancel();
+    _nowPlayingThrottle = null;
+    _videoTabUrl = null;
+    _videoWebViewController = null;
+    _pendingVideoUrl = null;
+    _tabSwipeOffset = 0;
+    _webViewController?.loadUrl(
+      urlRequest: URLRequest(url: WebUri('about:blank')),
+    );
+    _webViewController = null;
+    _currentUrl = null;
+    PlaybackStatsService.instance.flush();
+    MediaControlsService.instance.clearNowPlaying();
+    ref.read(playerProvider.notifier).dismiss();
+    if (mounted) {
+      setState(() {
+        isReady = false;
+        _isLoading = false;
+        _loadError = null;
+      });
+    }
   }
 
   void _minimizeVideoTab() {
