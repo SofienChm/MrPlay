@@ -3,6 +3,7 @@ class PlatformModel {
   final String url;
   final String icon;
   final String category;
+  final String subtitle;
   final dynamic color;
 
   const PlatformModel({
@@ -10,6 +11,7 @@ class PlatformModel {
     required this.url,
     required this.icon,
     required this.category,
+    this.subtitle = '',
     this.color,
   });
 }

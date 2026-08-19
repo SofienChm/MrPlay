@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MrPlay — Your Video Hub</title>
+  <meta name="description" content="MrPlay is a multi-platform video and content hub for iOS. YouTube, Twitch, Instagram, Reddit and 16+ more platforms in one app with a floating mini player, background audio and lock-screen controls." />
+  <style>
+    :root {
+      --primary: #F05D23;
+      --primary-dark: #d34c16;
+      --bg: #0b0b0f;
+      --bg-soft: #141419;
+      --card: #17171d;
+      --border: #26262e;
+      --text: #f4f4f6;
+      --muted: #9b9ba6;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: inherit; text-decoration: none; }
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+    /* ---------- NAV ---------- */
+    nav {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(11,11,15,.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
+    .logo { font-size: 22px; font-weight: 800; letter-spacing: -.5px; }
+    .logo span { color: var(--primary); }
+    .nav-links { display: flex; align-items: center; gap: 28px; }
+    .nav-links a { color: var(--muted); font-size: 15px; font-weight: 500; }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      background: var(--primary); color: #fff; padding: 9px 18px; border-radius: 10px;
+      font-size: 14px; font-weight: 600;
+    }
+    .nav-cta:hover { background: var(--primary-dark); }
+
+    /* ---------- HERO ---------- */
+    .hero { padding: 96px 0 72px; text-align: center; position: relative; overflow: hidden; }
+    .hero::before {
+      content: ""; position: absolute; inset: -40% -20% auto; height: 480px;
+      background: radial-gradient(circle at 50% 0%, rgba(240,93,35,.28), transparent 65%);
+      pointer-events: none;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(240,93,35,.12); color: #ff9a6b; border: 1px solid rgba(240,93,35,.3);
+      padding: 7px 16px; border-radius: 999px; font-size: 13px; font-weight: 600;
+    }
+    .hero h1 { font-size: 60px; line-height: 1.08; font-weight: 800; letter-spacing: -2px; margin: 22px 0 18px; }
+    .hero h1 .grad {
+      background: linear-gradient(90deg, var(--primary), #ff8a4d);
+      -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .hero p.sub { font-size: 19px; color: var(--muted); max-width: 620px; margin: 0 auto 34px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 10px; padding: 15px 28px; border-radius: 14px;
+      font-size: 16px; font-weight: 700;
+    }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-ghost { background: var(--card); border: 1px solid var(--border); color: var(--text); }
+    .btn-ghost:hover { border-color: var(--primary); }
+    .hero-note { margin-top: 22px; font-size: 13px; color: var(--muted); }
+
+    /* ---------- SECTIONS ---------- */
+    section { padding: 72px 0; }
+    .section-head { text-align: center; max-width: 640px; margin: 0 auto 48px; }
+    .section-head h2 { font-size: 36px; font-weight: 800; letter-spacing: -1px; margin-bottom: 12px; }
+    .section-head p { color: var(--muted); font-size: 17px; }
+
+    .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .feature {
+      background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 28px;
+      transition: transform .15s ease, border-color .15s ease;
+    }
+    .feature:hover { transform: translateY(-4px); border-color: var(--primary); }
+    .feature .icon {
+      width: 48px; height: 48px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      background: rgba(240,93,35,.14); margin-bottom: 18px;
+    }
+    .feature .icon svg { width: 24px; height: 24px; stroke: var(--primary); }
+    .feature h3 { font-size: 18px; margin-bottom: 8px; }
+    .feature p { color: var(--muted); font-size: 15px; }
+
+    /* ---------- STEPS ---------- */
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+    .step { text-align: center; padding: 30px 24px; }
+    .step .num {
+      width: 56px; height: 56px; border-radius: 50%; margin: 0 auto 18px;
+      background: var(--primary); color: #fff; font-size: 22px; font-weight: 800;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step h3 { font-size: 18px; margin-bottom: 8px; }
+    .step p { color: var(--muted); font-size: 15px; }
+
+    /* ---------- DOWNLOAD ---------- */
+    .download {
+      background: linear-gradient(160deg, #1a0e08, #140b06);
+      border: 1px solid var(--border); border-radius: 24px; padding: 56px 40px; text-align: center;
+    }
+    .download h2 { font-size: 34px; font-weight: 800; letter-spacing: -1px; margin-bottom: 12px; }
+    .download p { color: var(--muted); font-size: 17px; max-width: 520px; margin: 0 auto 28px; }
+    .perks { display: flex; gap: 22px; justify-content: center; flex-wrap: wrap; margin-top: 32px; }
+    .perk { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+    .perk .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+
+    /* ---------- PLATFORMS ---------- */
+    .chips { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+    .chip {
+      background: var(--card); border: 1px solid var(--border); padding: 9px 16px;
+      border-radius: 999px; font-size: 14px; color: var(--text);
+    }
+    .chip:hover { border-color: var(--primary); }
+
+    /* ---------- FAQ ---------- */
+    .faq { max-width: 720px; margin: 0 auto; }
+    details {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 18px 22px; margin-bottom: 12px;
+    }
+    details summary { cursor: pointer; font-weight: 600; font-size: 16px; list-style: none; }
+    details summary::-webkit-details-marker { display: none; }
+    details summary::after { content: "+"; float: right; color: var(--primary); font-size: 20px; }
+    details[open] summary::after { content: "–"; }
+    details p { color: var(--muted); margin-top: 12px; font-size: 15px; }
+
+    /* ---------- FOOTER ---------- */
+    footer { border-top: 1px solid var(--border); padding: 56px 0 40px; margin-top: 40px; }
+    .foot-grid { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 40px; }
+    .foot-col h4 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-bottom: 16px; }
+    .foot-col a { display: block; color: var(--text); font-size: 15px; margin-bottom: 10px; }
+    .foot-col a:hover { color: var(--primary); }
+    .foot-bottom { border-top: 1px solid var(--border); margin-top: 40px; padding-top: 24px; text-align: center; color: var(--muted); font-size: 14px; }
+
+    @media (max-width: 860px) {
+      .hero h1 { font-size: 42px; }
+      .features, .steps { grid-template-columns: 1fr; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="container nav-inner">
+      <a class="logo" href="#top">Mr<span>Play</span></a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#how">How it works</a>
+        <a href="#faq">FAQ</a>
+        <a href="support.html">Support</a>
+      </div>
+      <a class="nav-cta" href="https://apps.apple.com/app/id000000000">Download</a>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <div class="container">
+      <span class="badge">✦ Your Video Hub for iOS</span>
+      <h1>All your platforms.<br /><span class="grad">One single hub.</span></h1>
+      <p class="sub">MrPlay brings YouTube, Twitch, Instagram, Reddit and 16+ more platforms together in one clean, native iOS experience — with a floating mini player, background audio and lock-screen controls.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://apps.apple.com/app/id000000000">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+          Download for iOS
+        </a>
+        <a class="btn btn-ghost" href="#features">See features</a>
+      </div>
+      <p class="hero-note">Free · iPhone &amp; iPad · iOS 13.0+</p>
+    </div>
+  </header>
+
+  <section id="features">
+    <div class="container">
+      <div class="section-head">
+        <h2>Everything in one place</h2>
+        <p>A native experience around the platforms you already use — no setup, no accounts required.</p>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></div>
+          <h3>Multi-platform hub</h3>
+          <p>20+ platforms organized by category — all reachable from a single colorful home screen.</p>
+        </div>
+        <div class="feature">
+          <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><rect x="8" y="15" width="8" height="5" rx="1"/></svg></div>
+          <h3>Floating mini player</h3>
+          <p>Keep watching while you browse other content. Swipe to expand, minimize or send to Picture-in-Picture.</p>
+        </div>
+        <div class="feature">
+          <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg></div>
+          <h3>Background audio</h3>
+          <p>Lock your screen or switch apps — audio keeps playing with full lock-screen controls.</p>
+        </div>
+        <div class="feature">
+          <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M9 18h6"/></svg></div>
+          <h3>Notification controls</h3>
+          <p>Play, pause and seek straight from the lock screen or Control Center.</p>
+        </div>
+        <div class="feature">
+          <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></div>
+          <h3>Favorites &amp; Watch Later</h3>
+          <p>Save videos, build a queue, and resume right where you left off.</p>
+        </div>
+        <div class="feature">
+          <div class="icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+          <h3>Sleep timer</h3>
+          <p>Fall asleep to your favorite content — playback stops automatically after your chosen time.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="container">
+      <div class="section-head">
+        <h2>How it works</h2>
+        <p>Get started in three simple steps.</p>
+      </div>
+      <div class="steps">
+        <div class="step">
+          <div class="num">1</div>
+          <h3>Download the app</h3>
+          <p>Get MrPlay free from the App Store for iPhone or iPad.</p>
+        </div>
+        <div class="step">
+          <div class="num">2</div>
+          <h3>Pick a platform</h3>
+          <p>Tap any platform on the hub and browse its official site.</p>
+        </div>
+        <div class="step">
+          <div class="num">3</div>
+          <h3>Play &amp; keep going</h3>
+          <p>Watch in the mini player, listen in the background, and save for later.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="platforms">
+    <div class="container">
+      <div class="section-head">
+        <h2>One hub, every platform</h2>
+        <p>All your favorites, organized and one tap away.</p>
+      </div>
+      <div class="chips">
+        <span class="chip">YouTube</span><span class="chip">YouTube Music</span><span class="chip">Twitch</span>
+        <span class="chip">Rumble</span><span class="chip">Instagram</span><span class="chip">Reddit</span>
+        <span class="chip">Facebook</span><span class="chip">X</span><span class="chip">Pinterest</span>
+        <span class="chip">Quora</span><span class="chip">9GAG</span><span class="chip">iFunny</span>
+        <span class="chip">Disney+</span><span class="chip">HBO Max</span><span class="chip">Prime Video</span>
+        <span class="chip">Duolingo</span><span class="chip">Babbel</span><span class="chip">Memrise</span>
+        <span class="chip">Mondly</span><span class="chip">Busuu</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="download">
+    <div class="container">
+      <div class="download">
+        <h2>Download MrPlay</h2>
+        <p>Experience your favorite platforms like never before — with a floating player, background audio, and more — completely free.</p>
+        <a class="btn btn-primary" href="https://apps.apple.com/app/id000000000">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M17.05 20.28c-.98.95-2.05.86-3.08.38-1.09-.5-2.08-.48-3.24 0-1.44.62-2.2.44-3.06-.38C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.53 4.08zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
+          App Store
+        </a>
+        <div class="perks">
+          <span class="perk"><span class="dot"></span> Free</span>
+          <span class="perk"><span class="dot"></span> Background play</span>
+          <span class="perk"><span class="dot"></span> Picture-in-Picture</span>
+          <span class="perk"><span class="dot"></span> No account required</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="container">
+      <div class="section-head">
+        <h2>Frequently asked questions</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>How do I start watching?</summary>
+          <p>Open MrPlay, tap any platform on the hub, and browse its official website. When a video plays, it appears in the mini player at the bottom of the screen.</p>
+        </details>
+        <details>
+          <summary>How does background audio work?</summary>
+          <p>Start playing a video, then switch to another app or lock your screen. Audio keeps playing, and you can control playback from the lock screen or Notification Center.</p>
+        </details>
+        <details>
+          <summary>Do I need an account?</summary>
+          <p>No. MrPlay does not require an account. If you sign in to a platform (like YouTube) inside the app, that happens on the platform's own website.</p>
+        </details>
+        <details>
+          <summary>How do I use the mini player?</summary>
+          <p>Tap the mini player to expand to the full player. Swipe down to minimize, or tap the down arrow to move the video into Picture-in-Picture.</p>
+        </details>
+        <details>
+          <summary>How do I save a video for later?</summary>
+          <p>Use the bookmark (Watch Later) or heart (Favorites) buttons in the full player, or open the menu and choose "Add to Bookmarks".</p>
+        </details>
+        <details>
+          <summary>Why am I seeing ads?</summary>
+          <p>MrPlay is free and supported by advertising. You can control ad personalization in iOS Settings → Privacy &amp; Security → Tracking.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="container">
+      <div class="foot-grid">
+        <div class="foot-col">
+          <a class="logo" href="#top" style="font-size:22px;font-weight:800;">Mr<span style="color:var(--primary)">Play</span></a>
+          <p style="color:var(--muted);margin-top:14px;max-width:260px;font-size:14px;">A multi-platform video and content hub for iOS. All your platforms, in one place.</p>
+        </div>
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#faq">FAQ</a>
+        </div>
+        <div class="foot-col">
+          <h4>Support</h4>
+          <a href="support.html">Support</a>
+          <a href="mailto:support@app-miniminds.com">Contact</a>
+        </div>
+        <div class="foot-col">
+          <h4>Legal</h4>
+          <a href="privacy.html">Privacy Policy</a>
+          <a href="support.html">Terms</a>
+        </div>
+      </div>
+      <div class="foot-bottom">&copy; 2026 MrPlay. All rights reserved.</div>
+    </div>
+  </footer>
+
+</body>
+</html>

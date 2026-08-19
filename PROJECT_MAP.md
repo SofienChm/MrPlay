@@ -61,6 +61,29 @@ MrPlay - Project Map
 >   iPad requires a non-null `sharePositionOrigin` (popover) or the share
 >   sheet is silently dropped; URL falls back videoUrl → YouTube id → current
 >   URL.
+> - Fixes 2026-08-13 (2): full player "down" button now enters PiP on collapse.
+>   Collapsing the full player straight back to the native page left the
+>   in-page `<video>` black (frames only render in the PiP pipeline on iOS).
+>   The down button now calls `enterPiP()` before `minimize()` — matching the
+>   swipe-down gesture — so the video stays visible in its floating window
+>   instead of a black inline frame. `enterPiP`/`exitPiP`/`togglePictureInPicture`
+>   also now target the actively-playing `<video>`.
+> - Android support (2026-08-15): generated a full `android/` folder
+>   (package `com.mrplay.app`, minSdk 29 = Android 10+). Native `MainActivity.kt`
+>   implements the `com.mrplay/media` channel with a `MediaSession` so lock-screen /
+>   notification / headset controls (play, pause, ±15s skip, seek, artwork) work
+>   on Android. Background audio reuses the `audioplayers` silent keep-alive plus
+>   an Android-appropriate `audio_session` config (`main.dart` now branches on
+>   platform; the `av*` fields are iOS-only). Home widget: `HomeWidgetProvider`
+>   (RemoteViews) lists the last 3 watched videos and deep-links via
+>   `mrplay://open?url=…`; `RecentActivityService` branches iOS (app group) vs
+>   Android (provider class name). Share intents (`SEND text/*` + `*/*`) and the
+>   AdMob test `GADApplicationIdentifier` are wired in `AndroidManifest.xml`. The
+>   WebView user agent is now platform-specific (Chrome Android UA) so the YouTube
+>   mobile site uses the standard PiP/media APIs. Spotlight indexing is iOS-only
+>   (gracefully no-ops on Android). `gradle.properties` sets
+>   `kotlin.jvm.target.validation.mode=warning` to tolerate plugins with mixed
+>   Java 8/17 targets.
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.

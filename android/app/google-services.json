@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "790897139670",
+    "project_id": "mrplay-b86c3",
+    "storage_bucket": "mrplay-b86c3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:790897139670:android:13a7d99b0e483024acce77",
+        "android_client_info": {
+          "package_name": "com.mrplay.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBFWLYqcriDOPpof-2dqGQw1vOfy8ZExnI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_widget/home_widget.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'core/theme/app_theme.dart';
 import 'presentation/pages/hub_page.dart';
 import 'presentation/widgets/persistent_webview.dart';
@@ -11,6 +12,7 @@ import 'providers/player_provider.dart';
 import 'services/share_link_handler.dart';
 import 'services/spotlight_service.dart';
 import 'services/data_export_service.dart';
+import 'services/update_check_service.dart';
 import 'widgets/persistent_player_shell.dart';
 import 'widgets/unified_banner_ad_slot.dart';
 import 'widgets/link_resolver_sheet.dart';
@@ -20,6 +22,7 @@ class MrPlayApp extends StatefulWidget {
 
   static final GlobalKey<PersistentWebViewState> webViewKey = GlobalKey();
   static final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   @override
   State<MrPlayApp> createState() => _MrPlayAppState();
@@ -32,12 +35,53 @@ class _MrPlayAppState extends State<MrPlayApp> {
   void initState() {
     super.initState();
     _initNativeIntegrations();
+    _checkForUpdate();
   }
 
   @override
   void dispose() {
     _widgetClickedSub?.cancel();
     super.dispose();
+  }
+
+  Future<void> _checkForUpdate() async {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final update = await UpdateCheckService.instance.check();
+      if (update == null || !mounted) return;
+      _showUpdateDialog(update);
+    });
+  }
+
+  void _showUpdateDialog(AppUpdate update) {
+    final navigatorContext = MrPlayApp.navigatorKey.currentContext;
+    if (navigatorContext == null) return;
+    showDialog<void>(
+      context: navigatorContext,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Update available'),
+        content: const Text('A new version of MrPlay is available. Download it now?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Later'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _openUrl(update.downloadUrl);
+            },
+            child: const Text('Download'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   void _initNativeIntegrations() {
@@ -110,6 +154,7 @@ class _MrPlayAppState extends State<MrPlayApp> {
         return MaterialApp(
           title: 'MrPlay',
           debugShowCheckedModeBanner: false,
+          navigatorKey: MrPlayApp.navigatorKey,
           theme: AppTheme.lightTheme,
           darkTheme: AppTheme.darkTheme,
           themeMode: themeMode,

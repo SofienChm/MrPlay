@@ -33,6 +33,10 @@ class ContentBlockerJS {
         'ytd-banner-promo-renderer',
         'ytd-ad-slot-renderer',
         'ytd-in-feed-ad-layout-renderer',
+        'ytm-promoted-video-renderer',
+        'ytm-display-ad-renderer',
+        'ytm-companion-ad-renderer',
+        'ytm-ad-overlay',
         '.video-ads',
         '.ytp-ad-module',
         '.ytp-ad-overlay-container',
@@ -72,14 +76,52 @@ class ContentBlockerJS {
       }
 
       blockAds();
-      new MutationObserver(function() {
-        requestAnimationFrame(blockAds);
-      }).observe(document.documentElement, { childList: true, subtree: true });
 
+      // Debounced re-scan: YouTube Music (and other heavy SPAs) mutate the DOM
+      // constantly, and running the full selector sweep on every mutation
+      // requestAnimationFrame would otherwise choke the main thread. At most one
+      // blockAds() pass runs per animation frame, throttled to every 250ms.
+      var blockScheduled = false;
+      var lastBlockAt = 0;
+      function requestBlock() {
+        if (blockScheduled) return;
+        blockScheduled = true;
+        requestAnimationFrame(function() {
+          blockScheduled = false;
+          var now = Date.now();
+          if (now - lastBlockAt < 250) return;
+          lastBlockAt = now;
+          blockAds();
+        });
+      }
+
+      new MutationObserver(requestBlock)
+        .observe(document.documentElement, { childList: true, subtree: true });
+
+      // Auto-skip skippable ads and fast-forward unskippable ones (16x playback
+      // finishes a 30s ad in ~2s).
       setInterval(function() {
-        var btn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern');
-        if (btn) btn.click();
-      }, 500);
+        var btn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern, .ytp-ad-skip-button-container button, .ytm-skip-ad-button');
+        if (btn) { try { btn.click(); } catch (e) {} }
+
+        // YouTube Music uses an <audio> element and its player shares .ytp-*
+        // classes with the video player, so the fast-forward hack would falsely
+        // speed up music. Skip it there entirely.
+        if (location.hostname.indexOf('music.youtube') === 0) return;
+
+        var video = document.querySelector('video');
+        if (!video) return;
+        // Only speed up when a real video ad is active (YouTube adds the
+        // ad-showing / ad-interrupting class to the <video> element).
+        var adShowing = video.classList.contains('ad-showing') ||
+                        video.classList.contains('ad-interrupting') ||
+                        !!document.querySelector('.ytp-ad-player-overlay-layout');
+        if (adShowing) {
+          if (video.playbackRate !== 16) video.playbackRate = 16;
+        } else if (video.playbackRate === 16) {
+          video.playbackRate = 1;
+        }
+      }, 300);
     })();
   ''';
 }

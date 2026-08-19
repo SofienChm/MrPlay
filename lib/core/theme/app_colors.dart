@@ -9,11 +9,15 @@ class AppColors {
   static const Color textSecondary = Color(0xFF757575);
   static const Color error = Color(0xFFF44336);
   static const Color border = Color(0xFF2C2C2C);
+  static const Color cardDark = Color(0xFF1C1C1E);
 
   static const Color youtube = Color(0xFFFF0000);
   static const Color music = Color(0xFFFF0000);
   static const Color twitch = Color(0xFF9146FF);
+  static const Color kick = Color(0xFF53FC18);
   static const Color rumble = Color(0xFF85C742);
+  static const Color dailymotion = Color(0xFF0066DC);
+  static const Color vimeo = Color(0xFF1AB7EA);
   static const Color duolingo = Color(0xFF58CC02);
   static const Color busuu = Color(0xFFFF6B35);
   static const Color babbel = Color(0xFFE5004D);

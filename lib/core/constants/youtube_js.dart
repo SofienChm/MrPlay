@@ -2,6 +2,24 @@ class YouTubeJS {
   static const String visibilityKeepAliveScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
+      // YouTube Music plays audio and manages its own player/mini-player UI.
+      // The aggressive video-visibility forcing below is only for the regular
+      // YouTube video player; on Music it leaves a stuck overlay over the UI.
+      var isMusic = location.hostname.indexOf('music.youtube.com') !== -1;
+
+      // After a next/prev navigation the next video autoplays muted (no user
+      // gesture). The next/prev handler flags this via sessionStorage; while
+      // the window is open, any video that starts playing muted is unmuted
+      // (see prepareVideo below).
+      var shouldUnmute = false;
+      try {
+        if (sessionStorage.getItem('__mrplay_unmute') === '1') {
+          shouldUnmute = true;
+          sessionStorage.removeItem('__mrplay_unmute');
+          setTimeout(function() { shouldUnmute = false; }, 10000);
+        }
+      } catch (e) {}
+
       try {
         Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: false });
         Object.defineProperty(document, 'webkitHidden', { get: function() { return false; }, configurable: false });
@@ -10,9 +28,11 @@ class YouTubeJS {
 
         document.hasFocus = function() { return true; };
 
-        var style = document.createElement('style');
-        style.textContent = 'video { visibility: visible !important; opacity: 1 !important; }';
-        document.head.appendChild(style);
+        if (!isMusic) {
+          var style = document.createElement('style');
+          style.textContent = 'video { visibility: visible !important; opacity: 1 !important; }';
+          document.head.appendChild(style);
+        }
 
         var origAdd = EventTarget.prototype.addEventListener;
         EventTarget.prototype.addEventListener = function(type, fn, opts) {
@@ -54,6 +74,16 @@ class YouTubeJS {
         })();
 
         var lastReport = 0;
+
+        function unmute(el) {
+          try {
+            el.muted = false;
+            if (el.volume === 0) el.volume = 1;
+            var btn = document.querySelector('.ytp-mute-button');
+            if (btn) { try { btn.click(); } catch (e) {} }
+          } catch (e) {}
+        }
+
         function prepareVideo(v) {
           if (!_playsInlineSet.has(v)) {
             v.playsInline = true;
@@ -75,43 +105,52 @@ class YouTubeJS {
 
           v.addEventListener('playing', function() {
             var el = this;
-            el.style.setProperty('visibility', 'visible', 'important');
-            el.style.setProperty('opacity', '1', 'important');
-            el.style.removeProperty('display');
-            el.style.removeProperty('clip');
-            el.style.removeProperty('clip-path');
-            el.style.removeProperty('width');
-            el.style.removeProperty('height');
-            el.style.setProperty('object-fit', 'contain', 'important');
-            var player = el.closest('#movie_player');
-            if (player) {
-              var poster = player.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, .ytp-cued-thumbnail-overlay-image, [class*="thumbnail"][class*="overlay"]');
-              if (poster) poster.style.display = 'none';
-              var pipOverlay = player.querySelector('.ytp-pip-container');
-              if (pipOverlay) pipOverlay.style.display = 'none';
-            }
-            try {
-              if (el.webkitSetPresentationMode &&
-                  el.webkitPresentationMode === 'picture-in-picture' &&
-                  !document.pictureInPictureElement) {
-                el.webkitSetPresentationMode('inline');
-                // If the API call didn't work and the video is still stuck,
-                // force a DOM reinsertion which resets the iOS presentation
-                // pipeline — this is the only reliable escape from stuck mode.
-                if (el.webkitPresentationMode === 'picture-in-picture') {
-                  var parent = el.parentNode;
-                  if (parent) {
-                    var wasPlaying = !el.paused;
-                    var next = el.nextSibling;
-                    var ct = el.currentTime;
-                    parent.removeChild(el);
-                    parent.insertBefore(el, next);
-                    el.currentTime = ct;
-                    if (wasPlaying) el.play().catch(function(){});
+            if (shouldUnmute && el.muted) unmute(el);
+            if (!isMusic) {
+              el.style.setProperty('visibility', 'visible', 'important');
+              el.style.setProperty('opacity', '1', 'important');
+              el.style.removeProperty('display');
+              el.style.removeProperty('clip');
+              el.style.removeProperty('clip-path');
+              el.style.removeProperty('width');
+              el.style.removeProperty('height');
+              el.style.setProperty('object-fit', 'contain', 'important');
+              var player = el.closest('#movie_player');
+              if (player) {
+                var poster = player.querySelector('.ytp-cued-thumbnail-overlay, .ytp-poster, .ytp-cued-thumbnail-overlay-image, [class*="thumbnail"][class*="overlay"]');
+                if (poster) poster.style.display = 'none';
+                var pipOverlay = player.querySelector('.ytp-pip-container');
+                if (pipOverlay) pipOverlay.style.display = 'none';
+              }
+              try {
+                if (el.webkitSetPresentationMode &&
+                    el.webkitPresentationMode === 'picture-in-picture' &&
+                    !document.pictureInPictureElement) {
+                  el.webkitSetPresentationMode('inline');
+                  // If the API call didn't work and the video is still stuck,
+                  // force a DOM reinsertion which resets the iOS presentation
+                  // pipeline — this is the only reliable escape from stuck mode.
+                  if (el.webkitPresentationMode === 'picture-in-picture') {
+                    var parent = el.parentNode;
+                    if (parent) {
+                      var wasPlaying = !el.paused;
+                      var next = el.nextSibling;
+                      var ct = el.currentTime;
+                      parent.removeChild(el);
+                      parent.insertBefore(el, next);
+                      el.currentTime = ct;
+                      if (wasPlaying) el.play().catch(function(){});
+                    }
                   }
                 }
-              }
-            } catch (e) {}
+              } catch (e) {}
+            }
+          });
+
+          v.addEventListener('volumechange', function() {
+            if (shouldUnmute && this.muted && !this.paused && !this.ended) {
+              unmute(this);
+            }
           });
         }
 
@@ -147,6 +186,7 @@ class YouTubeJS {
 
         var _stuckCount = 0;
         setInterval(function() {
+          if (isMusic) return;
           document.querySelectorAll('video').forEach(function(v) {
             v.style.setProperty('visibility', 'visible', 'important');
             v.style.setProperty('opacity', '1', 'important');
@@ -207,36 +247,70 @@ class YouTubeJS {
   static const String appBannerRemoverScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
-      var selectors = [
+
+      // CSS shield: hides app-promo elements (case-insensitive attr match) even
+      // for localized text and elements added after page load. Kept alongside
+      // the DOM removal below for shadow-DOM / dynamic elements.
+      var style = document.createElement('style');
+      style.textContent = [
         '.ytp-open-app-button',
         'ytd-open-in-app-banner',
         'ytm-open-in-app-banner',
         'ytd-mobile-app-banner-renderer',
         'ytm-mobile-app-banner',
         'ytd-guide-entry-point',
+        'ytd-download-promo-renderer',
         '#open-in-app',
-        '.open-in-app'
-      ];
+        '.open-in-app',
+        '[data-open-in-app]',
+        '[aria-label*="open" i][aria-label*="app" i]',
+        '[aria-label*="open" i][aria-label*="youtube" i]',
+        '[aria-label*="get" i][aria-label*="app" i]',
+        '[aria-label*="get" i][aria-label*="youtube" i]'
+      ].join(',') + ' { display: none !important; visibility: hidden !important; height: 0 !important; }';
+      (document.head || document.documentElement).appendChild(style);
+
+      var linkSchemes = /^(youtube|vnd\\.youtube|yt|intent|market):/i;
+
+      function isAppPrompt(el) {
+        var t = (el.textContent || '').toLowerCase();
+        if (!t) {
+          var l = (el.getAttribute('aria-label') || '').toLowerCase();
+          t = l;
+        }
+        if (!t) return false;
+        return /open[^a-z0-9]{0,20}(the )?(youtube )?app/.test(t) ||
+               /(get|download|install)[^a-z0-9]{0,20}(the )?(youtube )?app/.test(t) ||
+               t.indexOf('get youtube') > -1;
+      }
 
       function removeAppUI() {
-        document.querySelectorAll('a[href^="youtube://"], a[href^="vnd.youtube://"], a[href^="yt://"]').forEach(function(a) {
-          a.remove();
+        document.querySelectorAll('a[href], button[data-url], [href]').forEach(function(el) {
+          var href = el.getAttribute('href') || el.getAttribute('data-url') || '';
+          if (linkSchemes.test(href)) el.remove();
         });
-        selectors.forEach(function(sel) {
-          document.querySelectorAll(sel).forEach(function(el) {
-            el.remove();
-          });
-        });
-        document.querySelectorAll('button, a, ytd-button-renderer, ytm-button-renderer').forEach(function(el) {
-          var t = (el.textContent || '').toLowerCase();
-          if (t.indexOf('open in the youtube app') > -1 || t.indexOf('open in youtube app') > -1 || t.indexOf('watch in the youtube app') > -1 || t.indexOf('get the youtube app') > -1) {
-            el.remove();
-          }
+        document.querySelectorAll('button, a, ytd-button-renderer, ytm-button-renderer, ytm-pivot-bar-item-renderer, ytd-compact-link-renderer, yt-chip-cloud-chip-renderer').forEach(function(el) {
+          if (isAppPrompt(el)) el.remove();
         });
       }
 
       removeAppUI();
-      new MutationObserver(removeAppUI).observe(document.documentElement, { childList: true, subtree: true });
+
+      // Debounce: removeAppUI() scans every element with an href/aria-label and
+      // reads textContent (forces layout). Running it synchronously on every DOM
+      // mutation freezes YouTube Music, whose SPA re-renders constantly.
+      var removeScheduled = false;
+      function requestRemove() {
+        if (removeScheduled) return;
+        removeScheduled = true;
+        requestAnimationFrame(function() {
+          removeScheduled = false;
+          removeAppUI();
+        });
+      }
+
+      new MutationObserver(requestRemove)
+        .observe(document.documentElement, { childList: true, subtree: true });
     })();
   ''';
 
@@ -248,7 +322,6 @@ class YouTubeJS {
 
       var ICONS = {
         cc: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M10 9.5a2 2 0 0 0-2.5 2.5A2 2 0 0 0 10 14.5"/><path d="M16 9.5a2 2 0 0 0-2.5 2.5 2 2 0 0 0 2.5 2.5"/></svg>',
-        pip: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="10" y="11" width="8" height="6"/></svg>',
         fs: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M8 3H3v5"/><path d="M21 8V3h-5"/><path d="M3 16v5h5"/><path d="M16 21h5v-5"/></svg>'
       };
 
@@ -284,7 +357,6 @@ class YouTubeJS {
         bar.style.cssText = 'position:absolute;top:10px;left:10px;z-index:100;display:flex;gap:6px;pointer-events:none;';
         var items = [
           { action: 'toggleCaptions', title: 'Captions', icon: ICONS.cc },
-          { action: 'pip', title: 'Picture in picture', icon: ICONS.pip },
           { action: 'fullscreen', title: 'Fullscreen', icon: ICONS.fs }
         ];
         for (var i = 0; i < items.length; i++) {
@@ -293,9 +365,18 @@ class YouTubeJS {
         player.appendChild(bar);
       }
 
-      new MutationObserver(function() {
-        ensureBar();
-      }).observe(document.documentElement, { childList: true, subtree: true });
+      var controlsScheduled = false;
+      function requestEnsureBar() {
+        if (controlsScheduled) return;
+        controlsScheduled = true;
+        requestAnimationFrame(function() {
+          controlsScheduled = false;
+          ensureBar();
+        });
+      }
+
+      new MutationObserver(requestEnsureBar)
+        .observe(document.documentElement, { childList: true, subtree: true });
 
       ensureBar();
     })();

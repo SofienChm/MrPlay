@@ -1,8 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../data/models/favorite_video.dart';
+import '../data/repositories/watch_history_repository.dart';
 import '../models/video.dart';
 import '../services/recent_activity_service.dart';
 import '../services/spotlight_service.dart';
 import '../services/playback_stats_service.dart';
+import '../services/analytics_service.dart';
 
 class PlayerState {
   final Video? currentVideo;
@@ -57,11 +60,22 @@ class PlayerNotifier extends Notifier<PlayerState> {
       duration: Duration.zero,
     );
     RecentActivityService.instance.recordVideo(video);
+    WatchHistoryRepository.add(
+      FavoriteVideo(
+        id: video.id.isEmpty ? video.videoUrl : video.id,
+        title: video.title,
+        channel: video.platform.isEmpty ? 'Web' : video.platform,
+        thumbnailUrl: video.thumbnailUrl,
+        platformUrl: video.videoUrl,
+        addedAt: DateTime.now(),
+      ),
+    );
     SpotlightService.index(
       title: video.title,
       subtitle: video.platform.isEmpty ? 'MrPlay' : video.platform,
       url: video.videoUrl,
     );
+    AnalyticsService.logVideoPlayed(video.platform);
   }
 
   void syncState({

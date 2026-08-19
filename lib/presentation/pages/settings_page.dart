@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../app.dart';
@@ -50,17 +52,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _changeTheme(String mode) async {
     await SettingsRepository.setThemeMode(mode);
+    if (_disposed || !mounted) return;
     setState(() => _themeMode = mode);
     MrPlayApp.themeModeNotifier.value = _currentThemeMode;
   }
 
   Future<void> _changeDefaultPlatform(String name) async {
     await SettingsRepository.setDefaultPlatform(name);
+    if (_disposed || !mounted) return;
     setState(() => _defaultPlatform = name);
   }
 
   Future<void> _clearCache() async {
     await SettingsRepository.clearCache();
+    if (_disposed || !mounted) return;
     setState(() {
       _themeMode = 'system';
       _defaultPlatform = 'YouTube';
@@ -79,6 +84,11 @@ class _SettingsPageState extends State<SettingsPage> {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
+
+  String get _storeUrl =>
+      Platform.isAndroid ? AppConstants.playStoreUrl : AppConstants.appStoreUrl;
+
+  String get _storeLabel => Platform.isAndroid ? 'Google Play' : 'the App Store';
 
   @override
   Widget build(BuildContext context) {
@@ -131,8 +141,8 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingsTile(
             icon: Icons.star_outline,
             title: 'Rate App',
-            subtitle: 'Rate us on the App Store',
-            onTap: () => _openUrl(AppConstants.appStoreUrl),
+            subtitle: 'Rate us on $_storeLabel',
+            onTap: () => _openUrl(_storeUrl),
           ),
           _SettingsTile(
             icon: Icons.share,
@@ -146,7 +156,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _shareApp() async {
-    final uri = Uri.parse(AppConstants.appStoreUrl);
+    final uri = Uri.parse(_storeUrl);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }

@@ -30,6 +30,10 @@ dependencies:
   home_widget: 0.7.0+1
   receive_sharing_intent: ^1.7.2
   fl_chart: ^1.2.0
+  firebase_core: ^3.8.0
+  firebase_remote_config: ^5.1.4
+  firebase_analytics: ^11.3.0
+  package_info_plus: ^8.0.2
 
 dev_dependencies:
   flutter_test:

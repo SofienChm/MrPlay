@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -13,6 +14,7 @@ class RecentActivityService {
   static const String _prefsKey = 'recent_videos';
   static const String _appGroupId = 'group.com.mrplay.shared';
   static const String _widgetKind = 'MrPlayRecentWidget';
+  static const String _androidWidgetProvider = 'HomeWidgetProvider';
   static const String _widgetDataKey = 'recent';
   static const int _maxEntries = 5;
 
@@ -20,7 +22,9 @@ class RecentActivityService {
 
   Future<void> _configureWidget() async {
     if (_groupConfigured) return;
-    await HomeWidget.setAppGroupId(_appGroupId);
+    if (Platform.isIOS) {
+      await HomeWidget.setAppGroupId(_appGroupId);
+    }
     _groupConfigured = true;
   }
 
@@ -68,7 +72,11 @@ class RecentActivityService {
     try {
       await _configureWidget();
       await HomeWidget.saveWidgetData(_widgetDataKey, jsonEncode(entries));
-      await HomeWidget.updateWidget(iOSName: _widgetKind);
+      if (Platform.isIOS) {
+        await HomeWidget.updateWidget(iOSName: _widgetKind);
+      } else {
+        await HomeWidget.updateWidget(androidName: _androidWidgetProvider);
+      }
     } catch (_) {}
   }
 }

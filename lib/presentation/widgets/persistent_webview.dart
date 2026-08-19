@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -7,6 +8,7 @@ import 'package:audio_session/audio_session.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/constants/youtube_js.dart';
 import '../../core/constants/content_blocker_js.dart';
+import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/background_audio_keep_alive.dart';
@@ -15,9 +17,11 @@ import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
 import '../../data/repositories/watch_later_repository.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../data/models/favorite_video.dart';
 import '../../presentation/pages/settings_page.dart';
 import '../../presentation/pages/favorites_page.dart';
+import '../../widgets/sleep_timer_sheet.dart';
 import 'error_widget.dart';
 
 class PersistentWebView extends ConsumerStatefulWidget {
@@ -47,8 +51,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _backgroundResumeAllowed = false;
   bool _userPausedInBackground = false;
   int _lastNowPlayingMs = 0;
+  bool? _lastReportedPlaying;
   Timer? _alignmentWatchdog;
   Timer? _statePoll;
+  bool _pollInFlight = false;
   // Whether the active PiP session was explicitly requested by the user (PiP
   // button / swipe-down-to-PiP). iOS can leave a video stuck in PiP
   // presentation mode after the PiP window is dismissed - the in-page player
@@ -58,27 +64,48 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _pipRequestedByUser = false;
   bool _lastReportedPip = false;
 
+  // When a "next/prev" remote command navigates to a new YouTube video, the
+  // video autoplays muted (no user gesture). These drive a short unmute retry
+  // loop after the new page loads.
+  bool _unmuteNextLoad = false;
+  Timer? _unmuteTimer;
+
   /// True when the video is actively in PiP (user or auto-background).
   bool get isInPictureInPicture => _pipRequestedByUser;
 
-  /// JS that resolves the actively-playing `<video>` (falling back to the
-  /// first one), so controls target the real playback element rather than a
-  /// stale/ad/preview video that `document.querySelector('video')` may hit.
+  /// JS that resolves the actively-playing `<video>`/`<audio>` (falling back
+  /// to the first one), so controls target the real playback element rather
+  /// than a stale/ad/preview element that `querySelector` may hit. Includes
+  /// `<audio>` so YouTube Music (which has no `<video>`) still works.
   static const String _activeVideoJs = '''
     (function() {
-      var videos = document.querySelectorAll('video');
-      for (var i = 0; i < videos.length; i++) {
-        if (!videos[i].paused && !videos[i].ended) return videos[i];
+      var els = document.querySelectorAll('video, audio');
+      for (var i = 0; i < els.length; i++) {
+        if (!els[i].paused && !els[i].ended) return els[i];
       }
-      return videos.length > 0 ? videos[0] : null;
+      return els.length > 0 ? els[0] : null;
     })()
   ''';
+
+  /// Platform-specific mobile user agent. The iOS UA makes the YouTube mobile
+  /// site serve iOS-only HTML/JS (webkit presentation modes); Android needs a
+  /// Chrome Android UA so the standard PiP API and media controls are used.
+  static String _userAgent() {
+    if (Platform.isAndroid) {
+      return 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+          '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
+    }
+    return 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) '
+        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 '
+        'Safari/604.1';
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
+    _restoreLastPlatform();
   }
 
   @override
@@ -88,6 +115,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _nowPlayingThrottle?.cancel();
     _alignmentWatchdog?.cancel();
     _statePoll?.cancel();
+    _unmuteTimer?.cancel();
     PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
@@ -104,7 +132,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _userPausedInBackground = false;
       _pipRequestedByUser = false;
       _lastReportedPip = false;
-      Future.delayed(const Duration(milliseconds: 3000), ensureVideoVisible);
+      if (Platform.isIOS) {
+        Future.delayed(const Duration(milliseconds: 3000), ensureVideoVisible);
+      }
     }
   }
 
@@ -112,6 +142,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _appIsBackgrounded = true;
     _backgroundResumeAllowed =
         ref.read(playerProvider).isPlaying && !_userPausedInBackground;
+    // The iOS-only PiP / audio-session work here is unnecessary on Android:
+    // the foreground service + allowBackgroundAudioPlaying handle it.
+    if (Platform.isAndroid) return;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
       BackgroundAudioKeepAlive.instance.start();
@@ -186,6 +219,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     if (mounted) setState(() => _isLoading = false);
     _handleWatchPage(controller, url.toString());
+    if (_unmuteNextLoad) {
+      _unmuteNextLoad = false;
+      _startUnmuteRetries();
+    }
+  }
+
+  /// YouTube autoplays a programmatically-navigated video muted (no user
+  /// gesture). Retry unmuting for a few seconds so it catches the video even
+  /// though YouTube applies the mute after the page finishes loading.
+  void _startUnmuteRetries() {
+    _unmuteTimer?.cancel();
+    var attempts = 0;
+    _unmuteTimer = Timer.periodic(const Duration(milliseconds: 800), (timer) {
+      attempts++;
+      if (!mounted || attempts > 8) {
+        timer.cancel();
+        _unmuteTimer = null;
+        return;
+      }
+      _webViewController?.evaluateJavascript(source: '''
+        (function() {
+          var v = document.querySelector('#movie_player video') || document.querySelector('video');
+          if (!v) return;
+          if (v.muted) {
+            var btn = document.querySelector('.ytp-mute-button');
+            if (btn) { try { btn.click(); } catch (e) {} }
+            v.muted = false;
+            if (v.volume === 0) v.volume = 1;
+          }
+        })();
+      ''');
+    });
   }
 
   /// YouTube mobile is a single-page app: tapping a video navigates to /watch
@@ -214,16 +279,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           if (!mounted) return;
           await controller.evaluateJavascript(source: '''
             (function() {
-              var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
+              var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1, ytmusic-player-bar .title, ytmusic-player-bar yt-formatted-string.title, ytmusic-player-queue-item[selected] .song-title');
               var videoId = window.location.search.match(/[?&]v=([^&]+)/);
               var title = titleEl ? titleEl.textContent.trim().substring(0, 200) : '';
+              if (!title) title = (document.title || '').replace(/ - YouTube Music\$| - YouTube\$/, '');
+              var platform = window.location.hostname.indexOf('music.youtube') === 0 ? 'Music' : 'YouTube';
               if (title && window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
                 window.flutter_inappwebview.callHandler('playerInfo', {
                   id: videoId ? videoId[1] : '',
                   title: title,
                   thumbnailUrl: videoId ? 'https://i.ytimg.com/vi/' + videoId[1] + '/hqdefault.jpg' : '',
                   videoUrl: window.location.href,
-                  platform: 'YouTube'
+                  platform: platform
                 });
               }
             })();
@@ -245,7 +312,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 _resumeSeekDone = true;
                 await controller.evaluateJavascript(source: '''
                   (function() {
-                    var v = document.querySelector('video');
+                    var v = document.querySelector('video, audio');
                     if (v && v.duration > 10 && isFinite(v.duration)) {
                       v.currentTime = $resumeMs;
                     }
@@ -291,7 +358,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           // Same video already tracked (fallback placeholder created it):
           // upgrade its metadata to the real title/thumbnail.
           final current = ref.read(playerProvider).currentVideo;
-          if (current != null && current.title == 'YouTube video') {
+          if (current != null &&
+              (current.title == 'YouTube video' ||
+                  current.title == 'Playing video')) {
             ref.read(playerProvider.notifier).updateMetadata(video);
           }
         }
@@ -388,20 +457,52 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (existing != null) return existing;
     final url = _currentUrl ?? '';
     final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
-    if (idMatch == null) return null;
-    final videoId = idMatch.group(1)!;
+    final String videoId;
+    final String thumbnailUrl;
+    final String platform;
+    if (idMatch != null) {
+      videoId = idMatch.group(1)!;
+      thumbnailUrl = 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg';
+      platform = 'YouTube';
+    } else {
+      final uri = Uri.tryParse(url);
+      if (uri == null || uri.host.isEmpty) return null;
+      videoId = url;
+      thumbnailUrl = '';
+      platform = _platformNameFromUrl(uri.host);
+    }
     final video = Video(
       id: videoId,
-      title: 'YouTube video',
-      thumbnailUrl: 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+      title: 'Playing video',
+      thumbnailUrl: thumbnailUrl,
       videoUrl: url,
-      platform: 'YouTube',
+      platform: platform,
     );
     ref.read(playerProvider.notifier).play(video);
+    MediaControlsService.instance.updateNowPlaying(
+      title: video.title,
+      artist: video.platform.isEmpty ? 'Web' : video.platform,
+      position: Duration.zero,
+      duration: Duration.zero,
+      isPlaying: true,
+      artworkUrl: video.thumbnailUrl,
+    );
     _userPausedInBackground = false;
     _pipRequestedByUser = false;
     _lastReportedPip = false;
     return video;
+  }
+
+  String _platformNameFromUrl(String host) {
+    var h = host;
+    if (h.startsWith('m.')) {
+      h = h.substring(2);
+    } else if (h.startsWith('www.')) {
+      h = h.substring(4);
+    }
+    final first = h.split('.').first;
+    if (first.isEmpty) return 'Web';
+    return '${first[0].toUpperCase()}${first.substring(1)}';
   }
 
   void _updateNowPlayingThrottled({
@@ -409,8 +510,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     required int durationMs,
     required bool playing,
   }) {
-    if (positionMs - _lastNowPlayingMs < 1000) return;
+    // Throttle position-only updates to ~1s, but push a play/pause change
+    // immediately: otherwise the notification stays on the "pause" icon and
+    // keeps advancing the timer while the media is actually paused.
+    final playingChanged = playing != _lastReportedPlaying;
+    if (positionMs - _lastNowPlayingMs < 1000 && !playingChanged) return;
     _lastNowPlayingMs = positionMs;
+    _lastReportedPlaying = playing;
     MediaControlsService.instance.updateProgress(
       position: Duration(milliseconds: positionMs),
       duration: Duration(milliseconds: durationMs),
@@ -438,6 +544,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _backgroundResumeAllowed = true;
         _userPausedInBackground = false;
         notifier.resume();
+        _lastReportedPlaying = true;
+        MediaControlsService.instance.setPlaying(true);
         controlVideo('play');
         break;
       case 'pause':
@@ -450,19 +558,20 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _backgroundResumeAllowed = true;
           _userPausedInBackground = false;
           notifier.resume();
+          _lastReportedPlaying = true;
+          MediaControlsService.instance.setPlaying(true);
           controlVideo('play');
         }
         break;
       case 'skipForward':
-        final next = state.position + const Duration(seconds: 15);
-        notifier.seekTo(next);
-        controlVideo('seek', position: next.inMilliseconds / 1000.0);
+        // Next video: trigger the in-page "next" button (playlist / queue) so
+        // the player advances to the next track instead of just seeking.
+        _unmuteNextLoad = true;
+        controlVideo('next');
         break;
       case 'skipBackward':
-        final prev = state.position - const Duration(seconds: 15);
-        final clamped = prev.isNegative ? Duration.zero : prev;
-        notifier.seekTo(clamped);
-        controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
+        _unmuteNextLoad = true;
+        controlVideo('prev');
         break;
       case 'seek':
         if (positionMs > 0) {
@@ -481,6 +590,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _backgroundResumeAllowed = false;
     if (_appIsBackgrounded) _userPausedInBackground = true;
     ref.read(playerProvider.notifier).pause();
+    _lastReportedPlaying = false;
+    MediaControlsService.instance.setPlaying(false);
     controlVideo('pause');
   }
 
@@ -503,6 +614,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       barrierColor: Colors.black54,
       isScrollControlled: true,
       builder: (sheetContext) {
+        final maxHeight = MediaQuery.of(sheetContext).size.height * 0.85;
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Container(
@@ -510,165 +622,156 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               color: Color(0xFF1C1C1E),
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
+            constraints: BoxConstraints(maxHeight: maxHeight),
             child: SafeArea(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(top: 12),
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 12),
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  _SheetMenuItem(
-                    icon: Icons.picture_in_picture_alt,
-                    label: 'Picture in Picture',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      togglePictureInPicture();
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.bookmark_border,
-                    label: 'Add to Bookmarks',
-                    onTap: () async {
-                      Navigator.pop(sheetContext);
-                      if (video == null) return;
-                      final already =
-                          await WatchLaterRepository.isQueued(video.id);
-                      if (already) {
+                    const SizedBox(height: 8),
+                    _SheetMenuItem(
+                      icon: Icons.bookmark_border,
+                      label: 'Add to Bookmarks',
+                      onTap: () async {
+                        Navigator.pop(sheetContext);
+                        if (video == null) return;
+                        final already =
+                            await WatchLaterRepository.isQueued(video.id);
+                        if (already) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Already in bookmarks'),
+                                  duration: Duration(seconds: 1)),
+                            );
+                          }
+                          return;
+                        }
+                        await WatchLaterRepository.add(FavoriteVideo(
+                          id: video.id,
+                          title: video.title,
+                          channel: video.platform.isEmpty
+                              ? 'YouTube'
+                              : video.platform,
+                          thumbnailUrl: video.thumbnailUrl,
+                          platformUrl: video.videoUrl,
+                          addedAt: DateTime.now(),
+                        ));
                         if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(
-                                content: Text('Already in bookmarks'),
+                                content: Text('Added to bookmarks'),
                                 duration: Duration(seconds: 1)),
                           );
                         }
-                        return;
-                      }
-                      await WatchLaterRepository.add(FavoriteVideo(
-                        id: video.id,
-                        title: video.title,
-                        channel:
-                            video.platform.isEmpty ? 'YouTube' : video.platform,
-                        thumbnailUrl: video.thumbnailUrl,
-                        platformUrl: video.videoUrl,
-                        addedAt: DateTime.now(),
-                      ));
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                              content: Text('Added to bookmarks'),
-                              duration: Duration(seconds: 1)),
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.bookmarks,
+                      label: 'View Bookmarks',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const FavoritesPage()),
                         );
-                      }
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.bookmarks,
-                    label: 'View Bookmarks',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const FavoritesPage()),
-                      );
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.airplay,
-                    label: 'AirPlay',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _webViewController?.evaluateJavascript(source: '''
-                        (function(){
-                          var v=document.querySelector('video');
-                          if(v&&v.webkitShowPlaybackTargetPicker)
-                            v.webkitShowPlaybackTargetPicker();
-                        })();
-                      ''');
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.share,
-                    label: 'Share Link',
-                    onTap: () {
-                      var shareUrl = video?.videoUrl ?? '';
-                      if (shareUrl.isEmpty &&
-                          video != null &&
-                          video.id.isNotEmpty) {
-                        shareUrl =
-                            'https://www.youtube.com/watch?v=${video.id}';
-                      }
-                      if (shareUrl.isEmpty) shareUrl = _currentUrl ?? '';
-                      final shareTitle = video?.title ?? 'MrPlay Video';
-                      // iPad presents the share sheet as a popover and requires
-                      // a source rect, otherwise it silently drops the sheet.
-                      final origin = _sharePositionOrigin();
-                      Navigator.pop(sheetContext);
-                      // Defer Share.share until the bottom sheet's dismiss
-                      // animation completes. iOS silently drops a share sheet
-                      // presented on a controller mid-dismiss, which is why the
-                      // button appeared to do nothing.
-                      if (shareUrl.isNotEmpty) {
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.bedtime,
+                      label: 'Sleep Timer',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
                         Future.delayed(const Duration(milliseconds: 400), () {
-                          Share.share(
-                            shareUrl,
-                            subject: shareTitle,
-                            sharePositionOrigin: origin,
-                          );
+                          if (mounted) showSleepTimerSheet(context);
                         });
-                      }
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.settings,
-                    label: 'Settings',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const SettingsPage()),
-                      );
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.file_upload_outlined,
-                    label: 'Export Data',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      DataExportService.instance.exportToJson();
-                    },
-                  ),
-                  const Divider(color: Colors.white10, height: 1, indent: 56),
-                  _SheetMenuItem(
-                    icon: Icons.file_download_outlined,
-                    label: 'Import Data',
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                                'Share a .json or .csv file to MrPlay to import'),
-                            duration: Duration(seconds: 3),
-                          ),
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.share,
+                      label: 'Share Link',
+                      onTap: () {
+                        var shareUrl = video?.videoUrl ?? '';
+                        if (shareUrl.isEmpty &&
+                            video != null &&
+                            video.id.isNotEmpty) {
+                          shareUrl =
+                              'https://www.youtube.com/watch?v=${video.id}';
+                        }
+                        if (shareUrl.isEmpty) shareUrl = _currentUrl ?? '';
+                        final shareTitle = video?.title ?? 'MrPlay Video';
+                        // iPad presents the share sheet as a popover and requires
+                        // a source rect, otherwise it silently drops the sheet.
+                        final origin = _sharePositionOrigin();
+                        Navigator.pop(sheetContext);
+                        // Defer Share.share until the bottom sheet's dismiss
+                        // animation completes. iOS silently drops a share sheet
+                        // presented on a controller mid-dismiss, which is why the
+                        // button appeared to do nothing.
+                        if (shareUrl.isNotEmpty) {
+                          Future.delayed(const Duration(milliseconds: 400), () {
+                            Share.share(
+                              shareUrl,
+                              subject: shareTitle,
+                              sharePositionOrigin: origin,
+                            );
+                          });
+                        }
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.settings,
+                      label: 'Settings',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                              builder: (_) => const SettingsPage()),
                         );
-                      }
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                ],
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.file_upload_outlined,
+                      label: 'Export Data',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        DataExportService.instance.exportToJson();
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
+                      icon: Icons.file_download_outlined,
+                      label: 'Import Data',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                  'Share a .json or .csv file to MrPlay to import'),
+                              duration: Duration(seconds: 3),
+                            ),
+                          );
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
               ),
             ),
           ),
@@ -767,7 +870,138 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           })();
         ''');
         break;
+      case 'next':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var host = location.hostname;
+            var isMusic = host.indexOf('music.') !== -1;
+            var isYt = host.indexOf('youtube.com') !== -1 || host.indexOf('youtu.be') !== -1;
+
+            var direct = [
+              '.ytp-next-button',
+              'a.ytp-next-button',
+              '#next-button',
+              'ytmusic-player-bar #next-button',
+              'tp-yt-paper-icon-button.next-button',
+              'ytmusic-player-bar .next-button',
+              'ytmusic-player-bar [aria-label="Next"]',
+              '[aria-label="Next"]'
+            ];
+            for (var i = 0; i < direct.length; i++) {
+              try {
+                var el = document.querySelector(direct[i]);
+                if (el) { el.click(); return; }
+              } catch (e) {}
+            }
+            // Shadow-DOM fallback (YouTube Music renders player controls in a
+            // shadow root, so plain querySelector can't reach them).
+            if (isMusic) {
+              var stack = [document];
+              var guard = 0;
+              while (stack.length && guard < 20000) {
+                var root = stack.pop();
+                var all = root.querySelectorAll('*');
+                for (var j = 0; j < all.length; j++) {
+                  if (++guard > 20000) break;
+                  var node = all[j];
+                  var nid = node.id || '';
+                  var cls = (node.getAttribute && node.getAttribute('class')) || '';
+                  var lbl = (node.getAttribute && node.getAttribute('aria-label')) || '';
+                  if (nid === 'next-button' || cls.indexOf('next-button') !== -1 ||
+                      lbl.toLowerCase() === 'next') {
+                    node.click();
+                    return;
+                  }
+                  if (node.shadowRoot) stack.push(node.shadowRoot);
+                }
+              }
+              return;
+            }
+            // YouTube (non-Music) has no next button in the mobile player:
+            // navigate to the "Up next" / first related video instead.
+            if (isYt) {
+              try { sessionStorage.setItem('__mrplay_unmute', '1'); } catch (e) {}
+              var links = document.querySelectorAll('a[href*="/watch?v="]');
+              var k, href;
+              for (k = 0; k < links.length; k++) {
+                href = links[k].getAttribute('href') || '';
+                if (!href || location.href.indexOf(href) !== -1) continue;
+                if (links[k].closest && links[k].closest('ytd-compact-autoplay-renderer')) {
+                  window.location.href = links[k].href;
+                  return;
+                }
+              }
+              for (k = 0; k < links.length; k++) {
+                href = links[k].getAttribute('href') || '';
+                if (!href || location.href.indexOf(href) !== -1) continue;
+                window.location.href = links[k].href;
+                return;
+              }
+            }
+          })();
+        ''');
+        break;
+      case 'prev':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var host = location.hostname;
+            var isMusic = host.indexOf('music.') !== -1;
+            var isYt = host.indexOf('youtube.com') !== -1 || host.indexOf('youtu.be') !== -1;
+
+            var direct = [
+              '.ytp-prev-button',
+              'a.ytp-prev-button',
+              '#previous-button',
+              'ytmusic-player-bar #previous-button',
+              'tp-yt-paper-icon-button.previous-button',
+              'ytmusic-player-bar .previous-button',
+              'ytmusic-player-bar [aria-label="Previous"]',
+              '[aria-label="Previous"]'
+            ];
+            for (var i = 0; i < direct.length; i++) {
+              try {
+                var el = document.querySelector(direct[i]);
+                if (el) { el.click(); return; }
+              } catch (e) {}
+            }
+            if (isMusic) {
+              var stack = [document];
+              var guard = 0;
+              while (stack.length && guard < 20000) {
+                var root = stack.pop();
+                var all = root.querySelectorAll('*');
+                for (var j = 0; j < all.length; j++) {
+                  if (++guard > 20000) break;
+                  var node = all[j];
+                  var nid = node.id || '';
+                  var cls = (node.getAttribute && node.getAttribute('class')) || '';
+                  var lbl = (node.getAttribute && node.getAttribute('aria-label')) || '';
+                  if (nid === 'previous-button' || cls.indexOf('previous-button') !== -1 ||
+                      lbl.toLowerCase() === 'previous') {
+                    node.click();
+                    return;
+                  }
+                  if (node.shadowRoot) stack.push(node.shadowRoot);
+                }
+              }
+              return;
+            }
+            // YouTube (non-Music): the mobile player has no previous button,
+            // so step back through the SPA navigation history (previous video).
+            if (isYt && location.href.indexOf('/watch') !== -1 && window.history.length > 1) {
+              try { sessionStorage.setItem('__mrplay_unmute', '1'); } catch (e) {}
+              window.history.back();
+            }
+          })();
+        ''');
+        break;
     }
+  }
+
+  Future<void> _restoreLastPlatform() async {
+    final url = await SettingsRepository.getLastPlatformUrl();
+    if (url == null || url.isEmpty || !mounted) return;
+    loadUrl(url);
   }
 
   void loadUrl(String url) {
@@ -826,7 +1060,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _pipRequestedByUser = true;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
-        var video = document.querySelector('video');
+        var video = $_activeVideoJs;
         if (!video) return;
         if (video.requestPictureInPicture) {
           if (document.pictureInPictureElement) return;
@@ -856,7 +1090,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _lastReportedPip = false;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
-        var video = document.querySelector('video');
+        var video = $_activeVideoJs;
         if (!video) return;
         if (document.exitPictureInPicture && document.pictureInPictureElement) {
           document.exitPictureInPicture().catch(function(){});
@@ -875,6 +1109,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// back forces iOS to reset the presentation pipeline, which is more
   /// reliable than the API call (which iOS can silently ignore).
   void ensureVideoVisible() {
+    // iOS-only PiP un-stick fix (heavy DOM manipulation). Android has no stuck
+    // PiP mode, so skip it and avoid the repeated evaluateJavascript churn.
+    if (Platform.isAndroid) return;
     _pipRequestedByUser = false;
     _lastReportedPip = false;
     _webViewController?.evaluateJavascript(source: '''
@@ -937,6 +1174,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void startVideoAlignmentWatchdog() {
+    if (Platform.isAndroid) return;
     _alignmentWatchdog?.cancel();
     var ticks = 0;
     _alignmentWatchdog = Timer.periodic(const Duration(milliseconds: 400), (t) {
@@ -970,17 +1208,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   Future<void> _pollVideoState() async {
+    if (_pollInFlight) return;
     final controller = _webViewController;
     if (controller == null) return;
+    _pollInFlight = true;
     try {
       final result = await controller.evaluateJavascript(source: '''
         (function() {
-          var videos = document.querySelectorAll('video');
+          var els = document.querySelectorAll('video, audio');
           var v = null;
-          for (var i = 0; i < videos.length; i++) {
-            if (!videos[i].paused && !videos[i].ended) { v = videos[i]; break; }
+          for (var i = 0; i < els.length; i++) {
+            if (!els[i].paused && !els[i].ended) { v = els[i]; break; }
           }
-          if (!v && videos.length > 0) v = videos[0];
+          if (!v && els.length > 0) v = els[0];
           if (!v) return null;
           var pipStuck = false;
           var pipActive = false;
@@ -1004,7 +1244,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (result is Map) {
         _onVideoState(Map<String, dynamic>.from(result));
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      _pollInFlight = false;
+    }
   }
 
   /// Forces the video back inline when the full player collapses to the mini
@@ -1012,6 +1255,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// the stuck-PiP case where the black in-page video only becomes visible
   /// again in the PiP window.
   void _unstickPiPIfUnrequested() {
+    if (Platform.isAndroid) return;
     if (_appIsBackgrounded) return;
     if (_pipRequestedByUser) return;
     ensureVideoVisible();
@@ -1027,7 +1271,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _pipRequestedByUser = !_lastReportedPip;
     _webViewController?.evaluateJavascript(source: '''
       (function() {
-        var video = document.querySelector('video');
+        var video = $_activeVideoJs;
         if (!video) return;
         if (video.requestPictureInPicture) {
           if (document.pictureInPictureElement) {
@@ -1052,6 +1296,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final videoAppeared =
           prev?.currentVideo == null && next.currentVideo != null;
       final videoGone = prev?.currentVideo != null && next.currentVideo == null;
+      // The Dart-side poll is the reliable source of position/duration on both
+      // platforms: the injected videoState heartbeat can silently fail on
+      // Android (e.g. if its DOM-hook setup aborts), which left the mini player
+      // and the notification stuck at 0.
       if (videoAppeared) _startStatePoll();
       if (videoGone) _stopStatePoll();
     });
@@ -1078,6 +1326,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 source: YouTubeJS.playerControlsScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
+              UserScript(
+                source: MediaObserverJS.genericObserverScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
             ]),
             initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
@@ -1087,8 +1339,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               allowsPictureInPictureMediaPlayback: true,
               allowsAirPlayForMediaPlayback: true,
               isFraudulentWebsiteWarningEnabled: false,
-              userAgent:
-                  'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
+              // Texture-layer rendering (instead of the VirtualDisplay used by
+              // hybrid composition). Required on Android so the WebView stays in
+              // the activity window and `allowBackgroundAudioPlaying` actually
+              // fires on backgrounding (in hybrid composition the WebView lives
+              // in a VirtualDisplay whose visibility never changes). Also lets
+              // Flutter draw the full/mini player over the WebView.
+              useHybridComposition: false,
+              userAgent: _userAgent(),
             ),
             onWebViewCreated: _onWebViewCreated,
             onLoadStart: _onLoadStart,
@@ -1106,13 +1364,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     scheme == 'file') {
                   return NavigationActionPolicy.ALLOW;
                 }
-                if (scheme == 'javascript' ||
-                    scheme == 'data' ||
-                    scheme == 'blob') {
-                  return NavigationActionPolicy.CANCEL;
-                }
+                // Block everything else (youtube://, vnd.youtube://, intent://,
+                // javascript:, data:, blob:, ...) so "Open in app" links stay
+                // inside MrPlay instead of bouncing to an external app.
               }
-              return NavigationActionPolicy.ALLOW;
+              return NavigationActionPolicy.CANCEL;
             },
             onCreateWindow: (controller, createWindowAction) async {
               // Open popup/new-window targets (e.g. OAuth "Continue with ...")
@@ -1156,7 +1412,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          bottom: 206,
+          bottom: 123,
           right: 16,
           child: GestureDetector(
             onTap: _showOptionsModal,
@@ -1166,40 +1422,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: const Icon(Icons.more_horiz,
-                  color: Colors.white, size: 24),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 164,
-          right: 16,
-          child: GestureDetector(
-            onTap: showMiniPlayer,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(Icons.play_circle_outline,
-                  color: Colors.white, size: 24),
-            ),
-          ),
-        ),
-        Positioned(
-          bottom: 122,
-          right: 16,
-          child: GestureDetector(
-            onTap: togglePictureInPicture,
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Icon(Icons.picture_in_picture_alt,
-                  color: Colors.white, size: 24),
+              child:
+                  const Icon(Icons.more_horiz, color: Colors.white, size: 24),
             ),
           ),
         ),

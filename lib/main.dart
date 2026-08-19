@@ -1,7 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'app.dart';
 import 'data/models/favorite_video.dart';
@@ -12,13 +15,28 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   final session = await AudioSession.instance;
-  await session.configure(const AudioSessionConfiguration(
-    avAudioSessionCategory: AVAudioSessionCategory.playback,
-    avAudioSessionMode: AVAudioSessionMode.moviePlayback,
-    avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
-  ));
+  // iOS needs a dedicated AVAudioSession so the WebView keeps playing audio
+  // in the background / on the lock screen. Android gets the music recipe
+  // (media content type + audio focus) instead; the `av*` fields are ignored.
+  await session.configure(
+    Platform.isIOS
+        ? const AudioSessionConfiguration(
+            avAudioSessionCategory: AVAudioSessionCategory.playback,
+            avAudioSessionMode: AVAudioSessionMode.moviePlayback,
+            avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
+          )
+        : const AudioSessionConfiguration.music(),
+  );
 
-  await MobileAds.instance.initialize();
+  // Firebase is optional until google-services.json is added; if it isn't
+  // configured the app simply skips update checks.
+  try {
+    await Firebase.initializeApp();
+  } catch (_) {}
+
+  try {
+    await MobileAds.instance.initialize();
+  } catch (_) {}
 
   await Hive.initFlutter();
   Hive.registerAdapter(FavoriteVideoAdapter());

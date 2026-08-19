@@ -42,10 +42,39 @@ class MediaControlsService {
     required bool isPlaying,
     String? artworkUrl,
   }) async {
-    String? artwork;
+    // Publish the metadata immediately so the lock-screen / notification title
+    // shows right away; the artwork is fetched afterwards and applied without
+    // blocking the first update (the fetch can take seconds or fail).
+    await _setNowPlaying(
+      title: title,
+      artist: artist,
+      position: position,
+      duration: duration,
+      isPlaying: isPlaying,
+    );
     if (artworkUrl != null && artworkUrl.isNotEmpty) {
-      artwork = await _fetchArtwork(artworkUrl);
+      final artwork = await _fetchArtwork(artworkUrl);
+      if (artwork != null) {
+        await _setNowPlaying(
+          title: title,
+          artist: artist,
+          position: position,
+          duration: duration,
+          isPlaying: isPlaying,
+          artwork: artwork,
+        );
+      }
     }
+  }
+
+  Future<void> _setNowPlaying({
+    required String title,
+    required String artist,
+    required Duration position,
+    required Duration duration,
+    required bool isPlaying,
+    String? artwork,
+  }) async {
     try {
       await _channel.invokeMethod('setNowPlaying', {
         'title': title,
