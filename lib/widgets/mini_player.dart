@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:video_player/video_player.dart';
 import '../providers/player_provider.dart';
-import '../services/native_youtube_player.dart';
 import '../app.dart';
 
 class MiniPlayerWidget extends ConsumerStatefulWidget {
@@ -61,7 +59,7 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
         child: GestureDetector(
           onTap: () {
             MrPlayApp.webViewKey.currentState?.exitPiP();
-            ref.read(playerProvider.notifier).expand();
+            MrPlayApp.webViewKey.currentState?.expandPlayer();
           },
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
@@ -128,34 +126,21 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
                           child: SizedBox(
                             width: 56,
                             height: 56,
-                            // Native playback renders the live AVPlayer layer
-                            // in the dock (keeps the layer in-window, which
-                            // also lets background PiP start); everything else
-                            // keeps the thumbnail.
-                            child: ValueListenableBuilder<VideoPlayerController?>(
-                              valueListenable:
-                                  NativeYoutubePlayer.instance.videoController,
-                              builder: (context, controller, _) {
-                                if (controller != null) {
-                                  return Container(
-                                    color: Colors.black,
-                                    child: VideoPlayer(controller),
-                                  );
-                                }
-                                return video.thumbnailUrl.isNotEmpty
-                                    ? CachedNetworkImage(
-                                        imageUrl: video.thumbnailUrl,
-                                        fit: BoxFit.cover,
-                                        placeholder: (_, __) => Container(
-                                            color: Colors.grey[800]),
-                                      )
-                                    : Container(
-                                        color: Colors.grey[800],
-                                        child: const Icon(Icons.music_note,
-                                            color: Colors.white38),
-                                      );
-                              },
-                            ),
+                            // The dock shows the thumbnail (not a live video
+                            // layer) so scrolling the page stays smooth; audio
+                            // comes from the native AVPlayer either way.
+                            child: video.thumbnailUrl.isNotEmpty
+                                ? CachedNetworkImage(
+                                    imageUrl: video.thumbnailUrl,
+                                    fit: BoxFit.cover,
+                                    placeholder: (_, __) =>
+                                        Container(color: Colors.grey[800]),
+                                  )
+                                : Container(
+                                    color: Colors.grey[800],
+                                    child: const Icon(Icons.music_note,
+                                        color: Colors.white38),
+                                  ),
                           ),
                         ),
                         const SizedBox(width: 12),

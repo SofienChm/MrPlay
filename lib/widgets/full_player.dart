@@ -11,6 +11,7 @@ import '../data/repositories/watch_later_repository.dart';
 import '../data/repositories/queue_repository.dart';
 import '../services/sleep_timer_service.dart';
 import '../services/native_youtube_player.dart';
+import '../services/pip_service.dart';
 import 'sleep_timer_sheet.dart';
 import '../presentation/pages/queue_page.dart';
 import '../presentation/widgets/error_widget.dart';
@@ -49,6 +50,12 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         ref.read(playerProvider.notifier).minimize();
         _slideController.reset();
       }
+    });
+    // Once the expanded native page mounts its small surface (the AVPlayerLayer),
+    // arm automatic PiP so a home-screen swipe hands off to a floating window.
+    Future.delayed(const Duration(milliseconds: 350), () {
+      if (!mounted || !NativeYoutubePlayer.instance.isActive) return;
+      PiPService.instance.prepare();
     });
   }
 
@@ -154,6 +161,13 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     final state = ref.watch(playerProvider);
     final video = state.currentVideo;
     if (video == null || state.isMinimized) return const SizedBox.shrink();
+
+    // Option A ("the page is the player"): for native AVPlayer playback the
+    // expanded state lets the WebView watch page show through — the page's own
+    // (muted) video is the visual — and floats a slim control card over it.
+    if (NativeYoutubePlayer.instance.isActive) {
+      return _buildNativePageMode(video);
+    }
 
     final screenHeight = MediaQuery.of(context).size.height;
     final topPadding = MediaQuery.of(context).padding.top;
@@ -591,6 +605,272 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
             errorWidget: (_, __, ___) => Container(color: Colors.grey[900]),
           )
         : Container(color: Colors.grey[900]);
+  }
+
+  /// Option A layout for native playback: the WebView watch page IS the player.
+  /// Only the floating controls show — everything else is transparent and
+  /// passes touches through to the page.
+  Widget _buildNativePageMode(Video video) {
+    final state = ref.watch(playerProvider);
+    final topPadding = MediaQuery.of(context).padding.top;
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Page shows through; touches fall through to the WebView.
+        const IgnorePointer(child: SizedBox.expand()),
+        Positioned(
+          top: topPadding + 4,
+          left: 12,
+          child: IconButton(
+            iconSize: 30,
+            style: IconButton.styleFrom(
+              backgroundColor: Colors.black.withValues(alpha: 0.55),
+            ),
+            icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
+            tooltip: 'Minimize',
+            onPressed: () => ref.read(playerProvider.notifier).minimize(),
+          ),
+        ),
+        Positioned(
+          top: topPadding + 4,
+          right: 16,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Row(
+                children: [
+                  const _SleepTimerButton(),
+                  _WatchLaterButton(
+                    key: ValueKey('wl_${video.id}'),
+                    video: video,
+                  ),
+                  _FavoriteButton(
+                    key: ValueKey(video.id),
+                    video: video,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54),
+                    tooltip: 'Close',
+                    onPressed: () {
+                      MrPlayApp.webViewKey.currentState?.closePlayer();
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        Align(
+          alignment: Alignment.bottomCenter,
+          child: SafeArea(
+            top: false,
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.85),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      // Small live native surface: PiP source + sync reference.
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          width: 88,
+                          height: 50,
+                          child: ValueListenableBuilder<VideoPlayerController?>(
+                            valueListenable:
+                                NativeYoutubePlayer.instance.videoController,
+                            builder: (context, controller, _) {
+                              if (controller == null) {
+                                return Container(
+                                  color: Colors.grey[900],
+                                  child: const Center(
+                                    child: Icon(Icons.music_note,
+                                        size: 16, color: Colors.white38),
+                                  ),
+                                );
+                              }
+                              return GestureDetector(
+                                onTap: () => MrPlayApp.webViewKey.currentState
+                                    ?.togglePictureInPicture(),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    Container(
+                                      color: Colors.black,
+                                      child: VideoPlayer(controller),
+                                    ),
+                                    const Align(
+                                      alignment: Alignment.bottomRight,
+                                      child: Padding(
+                                        padding: EdgeInsets.all(3),
+                                        child: Icon(
+                                            Icons.picture_in_picture_alt,
+                                            color: Colors.white70,
+                                            size: 14),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              video.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              video.platform.isNotEmpty
+                                  ? video.platform
+                                  : 'YouTube',
+                              maxLines: 1,
+                              style: const TextStyle(
+                                  color: Colors.grey, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  SliderTheme(
+                    data: SliderThemeData(
+                      activeTrackColor: Colors.red,
+                      inactiveTrackColor: Colors.white24,
+                      thumbColor: Colors.red,
+                      overlayColor: Colors.red.withValues(alpha: 0.2),
+                      trackHeight: 4,
+                    ),
+                    child: Slider(
+                      value: state.duration.inMilliseconds > 0
+                          ? (state.position.inMilliseconds /
+                                  state.duration.inMilliseconds)
+                              .clamp(0.0, 1.0)
+                          : 0,
+                      onChanged: (value) {
+                        final pos = Duration(
+                          milliseconds:
+                              (value * state.duration.inMilliseconds).round(),
+                        );
+                        ref.read(playerProvider.notifier).seekTo(pos);
+                      },
+                      onChangeEnd: (value) {
+                        final pos = Duration(
+                          milliseconds:
+                              (value * state.duration.inMilliseconds).round(),
+                        );
+                        ref.read(playerProvider.notifier).seekTo(pos);
+                        MrPlayApp.webViewKey.currentState?.controlVideo(
+                          'seek',
+                          position: pos.inMilliseconds / 1000.0,
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _formatDuration(state.position),
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                        Text(
+                          _formatDuration(state.duration),
+                          style:
+                              const TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        iconSize: 40,
+                        icon: const Icon(Icons.replay_10,
+                            color: Colors.white),
+                        tooltip: 'Back 10 seconds',
+                        onPressed: () => _seekBy(-10),
+                      ),
+                      IconButton(
+                        iconSize: 56,
+                        icon: Icon(
+                          state.isPlaying
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
+                          color: Colors.white,
+                        ),
+                        tooltip: state.isPlaying ? 'Pause' : 'Play',
+                        onPressed: _togglePlayPause,
+                      ),
+                      IconButton(
+                        iconSize: 40,
+                        icon: const Icon(Icons.forward_10,
+                            color: Colors.white),
+                        tooltip: 'Forward 10 seconds',
+                        onPressed: () => _seekBy(10),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _OverlayButton(
+                        icon: Icons.picture_in_picture_alt,
+                        tooltip: 'Picture in picture',
+                        onTap: () => MrPlayApp.webViewKey.currentState
+                            ?.togglePictureInPicture(),
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton(
+                        icon: const Icon(Icons.playlist_play,
+                            color: Colors.white70),
+                        tooltip: 'Play next',
+                        onPressed: _playNext,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.playlist_add,
+                            color: Colors.white70),
+                        tooltip: 'Add to queue',
+                        onPressed: _addToQueue,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.queue_music,
+                            color: Colors.white70),
+                        tooltip: 'Open queue',
+                        onPressed: _openQueue,
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   String _formatDuration(Duration d) {

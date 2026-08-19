@@ -47,7 +47,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _appIsBackgrounded = false;
   int _lastNowPlayingMs = 0;
   Timer? _statePoll;
-  Timer? _silenceWebViewTimer;
+  Timer? _muteWebViewTimer;
 
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
@@ -86,7 +86,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     _statePoll?.cancel();
-    _silenceWebViewTimer?.cancel();
+    _muteWebViewTimer?.cancel();
     PlaybackStatsService.instance.flush();
     super.dispose();
   }
@@ -227,20 +227,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (urlStr.contains('/watch')) {
         Future.delayed(const Duration(milliseconds: 1500), () async {
           if (!mounted) return;
-          // Native playback keeps the watch page visible, so silence the
-          // in-page player again once it has rendered (autoplay retries).
-          if (NativeYoutubePlayer.instance.isActive) {
-            await controller.evaluateJavascript(source: '''
-              (function() {
-                try {
-                  var vs = document.querySelectorAll('video');
-                  for (var i = 0; i < vs.length; i++) {
-                    if (!vs[i].paused) vs[i].pause();
-                  }
-                } catch (e) {}
-              })();
-            ''');
-          }
           await controller.evaluateJavascript(source: '''
             (function() {
               var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
@@ -785,6 +771,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       PiPService.instance.exitPiP();
       PiPService.instance.clear();
       NativeYoutubePlayer.instance.close();
+      _stopWebViewVideoSilence();
       _stopStatePoll();
       _loadingTimer?.cancel();
       _loadingTimer = null;
@@ -809,18 +796,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void controlVideo(String action, {double? position}) {
     final native = NativeYoutubePlayer.instance;
     if (native.isActive) {
+      // Option A: drive AVPlayer AND mirror the muted page video so the on-page
+      // visuals stay roughly in step with the native audio.
       switch (action) {
         case 'play':
           native.play();
+          _runOnPageVideo(v: "if (v.paused) v.play().catch(function(){});");
           break;
         case 'pause':
           native.pause();
+          _runOnPageVideo(v: 'if (!v.paused) v.pause();');
           break;
         case 'seek':
           if (position != null) {
             native.seekTo(
               Duration(milliseconds: (position * 1000).round()),
             );
+            final secs = position.toStringAsFixed(3);
+            _runOnPageVideo(v: 'if (v && v.duration) v.currentTime = $secs;');
           }
           break;
         case 'toggleCaptions':
@@ -894,6 +887,26 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
+  /// Runs [_v] (a JS statement referencing `v`, the actively-playing page
+  /// video) in the WebView so the muted visual player follows the native
+  /// engine (play/pause/seek mirroring for Option A).
+  void _runOnPageVideo({required String v}) {
+    _webViewController?.evaluateJavascript(source: '''
+      (function() {
+        var vs = document.querySelectorAll('video');
+        var vid = null;
+        for (var i = 0; i < vs.length; i++) {
+          if (!vs[i].paused && !vs[i].ended) { vid = vs[i]; break; }
+        }
+        if (!vid && vs.length > 0) vid = vs[0];
+        if (vid) {
+          var v = vid;
+          $v
+        }
+      })();
+    ''');
+  }
+
   Future<void> _restoreLastPlatform() async {
     final url = await SettingsRepository.getLastPlatformUrl();
     if (url == null || url.isEmpty || !mounted) return;
@@ -909,6 +922,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     // Switching back to the WebView: stop any native playback first.
     NativeYoutubePlayer.instance.close();
     PiPService.instance.clear();
+    _stopWebViewVideoSilence();
     _loadingTimer?.cancel();
     _pendingUrl = url;
     if (_webViewController != null) {
@@ -927,39 +941,82 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
   }
 
-  /// Routes a YouTube video URL to the native AVPlayer. The WebView stays on
-  /// its current page (watch page / other site) so browsing keeps working; any
-  /// in-page `<video>` is paused so it can't double-play audio underneath.
+  /// Routes a YouTube video URL to the native AVPlayer (Option A: the page IS
+  /// the player). The WebView watch page stays visible and interactive; its
+  /// `<video>` is MUTED (not paused) so it keeps providing the visuals while
+  /// the native AVPlayer is the only source of audio.
   void _startNativePlayback(String url) {
-    _silenceWebViewVideo();
+    _keepWebViewVideoSilent();
     NativeYoutubePlayer.instance.load(url);
     if (mounted && _loadError != null) setState(() => _loadError = null);
   }
 
-  /// Pauses any `<video>` currently rendering in the WebView so the native
-  /// AVPlayer is the only source of audio. The page may still be navigating or
-  /// autoplay after render, so short retries cover the article and the SPA
-  /// watch page settling.
-  void _silenceWebViewVideo() {
+  /// Mutes every in-page `<video>` and hides the page's own player chrome so
+  /// the native AVPlayer is the only audible engine. The muted page video keeps
+  /// playing for visuals, exactly like Video Lite; a periodic re-mute covers
+  /// SPA re-renders while native playback is active.
+  void _keepWebViewVideoSilent() {
     final controller = _webViewController;
     if (controller == null) return;
-    const pauseScript = '''
+    controller.evaluateJavascript(source: _mutePageVideosJs);
+    _muteWebViewTimer?.cancel();
+    _muteWebViewTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
+      if (!mounted || !NativeYoutubePlayer.instance.isActive) return;
+      _webViewController?.evaluateJavascript(source: _mutePageVideosJs);
+    });
+  }
+
+  /// Stops silencing and pauses the page's muted video so it doesn't keep
+  /// decoding after native playback ends.
+  void _stopWebViewVideoSilence() {
+    _muteWebViewTimer?.cancel();
+    _muteWebViewTimer = null;
+    _webViewController?.evaluateJavascript(source: '''
       (function() {
         try {
           var vs = document.querySelectorAll('video');
-          for (var i = 0; i < vs.length; i++) {
-            if (!vs[i].paused) vs[i].pause();
-          }
+          for (var i = 0; i < vs.length; i++) vs[i].pause();
         } catch (e) {}
       })();
-    ''';
-    controller.evaluateJavascript(source: pauseScript);
-    _silenceWebViewTimer?.cancel();
-    final timer = Timer(const Duration(milliseconds: 1200), () {
-      if (!mounted || !NativeYoutubePlayer.instance.isActive) return;
-      _webViewController?.evaluateJavascript(source: pauseScript);
-    });
-    _silenceWebViewTimer = timer;
+    ''');
+  }
+
+  static const String _mutePageVideosJs = '''
+    (function() {
+      try {
+        var pid = 'mrplay-native-player';
+        var style = document.getElementById(pid);
+        if (!style) {
+          style = document.createElement('style');
+          style.id = pid;
+          style.textContent =
+            '.ytp-chrome-top, .ytp-chrome-bottom, .ytp-title, ' +
+            '.ytp-gradient-top, .ytp-gradient-bottom, .ytp-tooltip ' +
+            '{ display: none !important; }';
+          (document.head || document.documentElement).appendChild(style);
+        }
+        var vs = document.querySelectorAll('video');
+        for (var i = 0; i < vs.length; i++) {
+          vs[i].muted = true;
+          vs[i].defaultMuted = true;
+        }
+      } catch (e) {}
+    })();
+  ''';
+
+  /// Expands the native player back into the page (Option A). If the WebView
+  /// has drifted to another page while the mini player was docked, navigate it
+  /// back to the playing video's watch page — native playback is deduped by
+  /// activeUrl, so this never restarts the stream.
+  void expandPlayer() {
+    final native = NativeYoutubePlayer.instance;
+    final activeUrl = native.activeUrl;
+    if (native.isActive && activeUrl != null && _currentUrl != activeUrl) {
+      _webViewController?.loadUrl(
+        urlRequest: URLRequest(url: WebUri(activeUrl)),
+      );
+    }
+    ref.read(playerProvider.notifier).expand();
   }
 
   Future<void> skipNativePlayback() async {
@@ -967,6 +1024,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final items = await QueueRepository.getAll();
     NativeYoutubePlayer.instance.close();
     PiPService.instance.clear();
+    _stopWebViewVideoSilence();
     ref.read(playerProvider.notifier).dismiss();
     if (items.isNotEmpty) {
       final next = items.first;
