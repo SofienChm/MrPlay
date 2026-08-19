@@ -17,13 +17,22 @@ class PersistentPlayerShell extends ConsumerWidget {
     // Video-tab playback: the tab's webview IS the full player. Only the
     // collapsed mini bar is rendered by Flutter (when the user minimizes the
     // tab); expanding just reveals the webview again. It floats just above
-    // YouTube's own bottom navigation bar (~50px) instead of covering it, so
-    // the feed stays fully usable while the tab is collapsed.
+    // YouTube's own bottom navigation bar instead of covering it, so the feed
+    // stays fully usable while the tab is collapsed.
+    //
+    // The webview fills to the physical screen bottom (SafeArea bottom:false),
+    // and m.youtube.com already accounts for the home indicator itself, so the
+    // top edge of its nav bar sits at navHeight + bottom safe inset. Mirror
+    // that here so the mini bar never overlaps the nav on any device.
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    const double bottomNavHeight = 52;
+    final double totalBottomOffset = bottomNavHeight + bottomPadding;
+
     if (state.isVideoTab) {
       return Positioned(
         left: 0,
         right: 0,
-        bottom: 52,
+        bottom: totalBottomOffset,
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 280),
           switchInCurve: Curves.easeIn,
