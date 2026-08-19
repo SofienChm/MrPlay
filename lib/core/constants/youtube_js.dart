@@ -214,8 +214,7 @@ class YouTubeJS {
 
       var ICONS = {
         cc: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z"/><path d="M10 9.5a2 2 0 0 0-2.5 2.5A2 2 0 0 0 10 14.5"/><path d="M16 9.5a2 2 0 0 0-2.5 2.5 2 2 0 0 0 2.5 2.5"/></svg>',
-        pip: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="10" y="11" width="8" height="6"/></svg>',
-        fs: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M8 3H3v5"/><path d="M21 8V3h-5"/><path d="M3 16v5h5"/><path d="M16 21h5v-5"/></svg>'
+        pip: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><rect x="10" y="11" width="8" height="6"/></svg>'
       };
 
       function makeButton(action, title, icon) {
@@ -250,8 +249,7 @@ class YouTubeJS {
         bar.style.cssText = 'position:absolute;top:10px;left:10px;z-index:100;display:flex;gap:6px;pointer-events:none;';
         var items = [
           { action: 'toggleCaptions', title: 'Captions', icon: ICONS.cc },
-          { action: 'pip', title: 'Picture in picture', icon: ICONS.pip },
-          { action: 'fullscreen', title: 'Fullscreen', icon: ICONS.fs }
+          { action: 'pip', title: 'Picture in picture', icon: ICONS.pip }
         ];
         for (var i = 0; i < items.length; i++) {
           bar.appendChild(makeButton(items[i].action, items[i].title, items[i].icon));
