@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import Flutter
+import Foundation
 import UIKit
 
 /// Attaches an AVPictureInPictureController to the AVPlayerLayer rendered by
@@ -12,6 +13,9 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
   private var channel: FlutterMethodChannel?
   private var pipController: AVPictureInPictureController?
   private var playerLayer: AVPlayerLayer?
+  private var pipReadyObservation: NSKeyValueObservation?
+  private var reportedReady = false
+  private var prepareRetries = 0
 
   func attach(channel: FlutterMethodChannel) {
     self.channel = channel
@@ -45,6 +49,9 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
 
   /// Releases the retained layer so PiP stops when the video is closed.
   func clear() {
+    pipReadyObservation = nil
+    reportedReady = false
+    prepareRetries = 0
     pipController = nil
     playerLayer = nil
   }
@@ -52,11 +59,23 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
   /// Links an [AVPictureInPictureController] to the current AVPlayerLayer
   /// WITHOUT starting PiP, and opts into automatic PiP when the app
   /// backgrounds. iOS then presents the floating window on home-screen
-  /// swipe-off by itself — no synthetic commands needed. The layer must be
-  /// in a window for the link to succeed (it is: the mini/full player keeps
-  /// the native surface mounted while playback is active).
+  /// swipe-off by itself — no synthetic commands needed.
+  ///
+  /// The layer lives in an always-mounted 1x1 host surface (so it survives the
+  /// full/mini swap), but Flutter's platform view can take a layout pass before
+  /// it exists, so this self-retries until the layer is found. Readiness is
+  /// then reported to Dart through a KVO on `isPictureInPicturePossible`
+  /// instead of a guessed delay.
   func prepare() {
-    guard let layer = findPlayerLayer() else { return }
+    guard let layer = findPlayerLayer() else {
+      prepareRetries += 1
+      if prepareRetries > 40 { prepareRetries = 0; return }
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        self?.prepare()
+      }
+      return
+    }
+    prepareRetries = 0
     if pipController == nil || pipController?.playerLayer !== layer {
       let controller = AVPictureInPictureController(playerLayer: layer)
       controller?.delegate = self
@@ -69,6 +88,21 @@ class PiPBridge: NSObject, AVPictureInPictureControllerDelegate {
     } else if #available(iOS 15.0, *) {
       pipController?.canStartPictureInPictureAutomaticallyFromInline = true
     }
+    reportedReady = false
+    pipReadyObservation = pipController?.observe(
+      \.isPictureInPicturePossible, options: [.new]
+    ) { [weak self] controller, _ in
+      guard let self else { return }
+      if controller.isPictureInPicturePossible {
+        DispatchQueue.main.async { self.reportReadyOnce() }
+      }
+    }
+  }
+
+  private func reportReadyOnce() {
+    guard !reportedReady else { return }
+    reportedReady = true
+    channel?.invokeMethod("pipReady", arguments: nil)
   }
 
   private func findPlayerLayer() -> AVPlayerLayer? {

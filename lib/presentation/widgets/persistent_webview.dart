@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:youtube_explode_dart/youtube_explode_dart.dart'
+    show VideoId;
 import '../../core/constants/youtube_js.dart';
 import '../../core/constants/content_blocker_js.dart';
 import '../../core/constants/media_observer_js.dart';
@@ -47,7 +49,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _appIsBackgrounded = false;
   int _lastNowPlayingMs = 0;
   Timer? _statePoll;
-  Timer? _muteWebViewTimer;
+  PlayerNotifier? _playerNotifier;
 
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
@@ -77,16 +79,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     native.onVideoState = _onNativeVideoState;
     native.onPlayerInfo = _onNativePlayerInfo;
     native.onLoadFailed = _onNativeLoadFailed;
+    // Single seek path (P0-04): PlayerNotifier.seekTo is the only entry point
+    // every UI control reaches; it fans out here to the active engine.
+    final notifier = ref.read(playerProvider.notifier);
+    _playerNotifier = notifier;
+    notifier.onSeek =
+        (pos) => controlVideo('seek', position: pos.inMilliseconds / 1000.0);
     _restoreLastPlatform();
   }
 
   @override
   void dispose() {
+    _playerNotifier?.onSeek = null;
     WidgetsBinding.instance.removeObserver(this);
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     _statePoll?.cancel();
-    _muteWebViewTimer?.cancel();
     PlaybackStatsService.instance.flush();
     super.dispose();
   }
@@ -188,6 +196,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       InAppWebViewController controller, WebUri? url) async {
     _loadingTimer?.cancel();
     if (mounted) setState(() => _isLoading = false);
+    // A full page load (pull-to-refresh, SPA re-render, navigation) rebuilds
+    // the DOM and clears window state — re-install the mute guard for the
+    // actively-playing native video. Idempotent.
+    if (NativeYoutubePlayer.instance.isActive) {
+      _keepWebViewVideoSilent();
+    }
     _handleWatchPage(controller, url.toString());
   }
 
@@ -445,14 +459,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!NativeYoutubePlayer.instance.isActive) return;
     ref.read(playerProvider.notifier).clearError();
     _onPlayerInfo(data);
-    // Arm automatic PiP on the home-screen swipe: link the native PiP
-    // controller to the AVPlayerLayer once playback starts. The surface must
-    // have mounted first (mini/full player keeps the layer in a window), so
-    // wait a beat before the bridge searches for it.
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (!NativeYoutubePlayer.instance.isActive) return;
-      PiPService.instance.prepare();
-    });
+    // Arm automatic PiP on the home-screen swipe. The bridge self-retries until
+    // the AVPlayerLayer is attached and KVO-reports readiness, so no magic
+    // delay is needed here.
+    unawaited(PiPService.instance.prepare());
   }
 
   void _onNativeLoadFailed(YoutubeStreamException error) {
@@ -508,19 +518,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       case 'skipForward':
         final next = state.position + const Duration(seconds: 15);
         notifier.seekTo(next);
-        controlVideo('seek', position: next.inMilliseconds / 1000.0);
         break;
       case 'skipBackward':
         final prev = state.position - const Duration(seconds: 15);
         final clamped = prev.isNegative ? Duration.zero : prev;
         notifier.seekTo(clamped);
-        controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
         break;
       case 'seek':
         if (positionMs > 0) {
-          final target = Duration(milliseconds: positionMs);
-          notifier.seekTo(target);
-          controlVideo('seek', position: target.inMilliseconds / 1000.0);
+          notifier.seekTo(Duration(milliseconds: positionMs));
         }
         break;
     }
@@ -944,50 +950,62 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Routes a YouTube video URL to the native AVPlayer (Option A: the page IS
   /// the player). The WebView watch page stays visible and interactive; its
   /// `<video>` is MUTED (not paused) so it keeps providing the visuals while
-  /// the native AVPlayer is the only source of audio.
-  void _startNativePlayback(String url) {
-    _keepWebViewVideoSilent();
+  /// the native AVPlayer is the only source of audio. The mute observer is
+  /// installed and awaited BEFORE native playback starts, so autoplay can never
+  /// emit audible frames ahead of it.
+  Future<void> _startNativePlayback(String url) async {
+    final controller = _webViewController;
+    if (controller != null) {
+      try {
+        await controller.evaluateJavascript(source: _mutePageVideosJs);
+      } catch (_) {}
+    }
     NativeYoutubePlayer.instance.load(url);
     if (mounted && _loadError != null) setState(() => _loadError = null);
   }
 
-  /// Mutes every in-page `<video>` and hides the page's own player chrome so
-  /// the native AVPlayer is the only audible engine. The muted page video keeps
-  /// playing for visuals, exactly like Video Lite; a periodic re-mute covers
-  /// SPA re-renders while native playback is active.
+  /// Installs an event-driven mute guard (no polling): a one-shot MutationObserver
+  /// mutes any <video> — including ones injected later by SPA nav or by ads —
+  /// and per-video volumechange/play/loadedmetadata listeners re-force
+  /// muted=true/volume=0 synchronously the instant anything changes. The same
+  /// script also hides the page's own player chrome while native playback is
+  /// active. Idempotent, so it can be re-injected on every page load safely.
   void _keepWebViewVideoSilent() {
-    final controller = _webViewController;
-    if (controller == null) return;
-    controller.evaluateJavascript(source: _mutePageVideosJs);
-    _muteWebViewTimer?.cancel();
-    _muteWebViewTimer = Timer.periodic(const Duration(milliseconds: 1000), (_) {
-      if (!mounted || !NativeYoutubePlayer.instance.isActive) return;
-      _webViewController?.evaluateJavascript(source: _mutePageVideosJs);
-    });
+    _webViewController?.evaluateJavascript(source: _mutePageVideosJs);
   }
 
-  /// Stops silencing and pauses the page's muted video so it doesn't keep
-  /// decoding after native playback ends.
+  /// Tears the mute guard down: disconnects the observer, removes the per-video
+  /// listeners, drops the chrome-hiding style, and pauses the page's muted
+  /// video so it doesn't keep decoding after native playback ends. Called from
+  /// closePlayer, skipNativePlayback and the non-YouTube loadUrl branch, so no
+  /// observer outlives its page across SPA navigations.
   void _stopWebViewVideoSilence() {
-    _muteWebViewTimer?.cancel();
-    _muteWebViewTimer = null;
-    _webViewController?.evaluateJavascript(source: '''
-      (function() {
-        try {
-          var vs = document.querySelectorAll('video');
-          for (var i = 0; i < vs.length; i++) vs[i].pause();
-        } catch (e) {}
-      })();
-    ''');
+    _webViewController?.evaluateJavascript(source: _stopMuteJs);
   }
 
   static const String _mutePageVideosJs = '''
     (function() {
       try {
-        var pid = 'mrplay-native-player';
-        var style = document.getElementById(pid);
-        if (!style) {
-          style = document.createElement('style');
+        function forceMute(v) {
+          try {
+            if (!v.muted) v.muted = true;
+            v.defaultMuted = true;
+            if (v.volume !== 0) v.volume = 0;
+          } catch (e) {}
+        }
+        function bind(v) {
+          if (!v) return;
+          forceMute(v);
+          if (v.__mrplayMuted) return;
+          v.__mrplayMuted = true;
+          v.__mrplayForceMute = function() { forceMute(v); };
+          v.addEventListener('volumechange', v.__mrplayForceMute);
+          v.addEventListener('loadedmetadata', v.__mrplayForceMute);
+          v.addEventListener('play', v.__mrplayForceMute);
+        }
+        var pid = 'mrplay-mute-style';
+        if (!document.getElementById(pid)) {
+          var style = document.createElement('style');
           style.id = pid;
           style.textContent =
             '.ytp-chrome-top, .ytp-chrome-bottom, .ytp-title, ' +
@@ -995,11 +1013,54 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             '{ display: none !important; }';
           (document.head || document.documentElement).appendChild(style);
         }
-        var vs = document.querySelectorAll('video');
-        for (var i = 0; i < vs.length; i++) {
-          vs[i].muted = true;
-          vs[i].defaultMuted = true;
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) bind(videos[i]);
+        if (window.__mrplayMuteObserver) return;
+        window.__mrplayMuteObserver = new MutationObserver(function(muts) {
+          for (var m = 0; m < muts.length; m++) {
+            var nodes = muts[m].addedNodes;
+            for (var n = 0; n < nodes.length; n++) {
+              var node = nodes[n];
+              if (!node || node.nodeType !== 1) continue;
+              if (node.tagName === 'VIDEO') { bind(node); continue; }
+              var nested = null;
+              try { nested = node.querySelectorAll('video'); } catch (e) {}
+              if (nested) {
+                for (var k = 0; k < nested.length; k++) bind(nested[k]);
+              }
+            }
+          }
+        });
+        window.__mrplayMuteObserver.observe(
+          document.documentElement, { childList: true, subtree: true });
+      } catch (e) {}
+    })();
+  ''';
+
+  static const String _stopMuteJs = '''
+    (function() {
+      try {
+        if (window.__mrplayMuteObserver) {
+          window.__mrplayMuteObserver.disconnect();
+          window.__mrplayMuteObserver = null;
         }
+        var style = document.getElementById('mrplay-mute-style');
+        if (style && style.parentNode) style.parentNode.removeChild(style);
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          try { videos[i].pause(); } catch (e) {}
+          if (videos[i].__mrplayMuted &&
+              videos[i].__mrplayForceMute) {
+            videos[i].removeEventListener(
+                'volumechange', videos[i].__mrplayForceMute);
+            videos[i].removeEventListener(
+                'loadedmetadata', videos[i].__mrplayForceMute);
+            videos[i].removeEventListener(
+                'play', videos[i].__mrplayForceMute);
+            videos[i].__mrplayMuted = false;
+          }
+        }
+        window.__mrplayMuteInstalled = false;
       } catch (e) {}
     })();
   ''';
@@ -1007,11 +1068,20 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Expands the native player back into the page (Option A). If the WebView
   /// has drifted to another page while the mini player was docked, navigate it
   /// back to the playing video's watch page — native playback is deduped by
-  /// activeUrl, so this never restarts the stream.
+  /// activeUrl, so this never restarts the stream. Videos are compared by their
+  /// parsed ID (tracking params / ordering in the URL never count as "another
+  /// page"), so the watch page isn't reloaded pointlessly.
   void expandPlayer() {
     final native = NativeYoutubePlayer.instance;
     final activeUrl = native.activeUrl;
-    if (native.isActive && activeUrl != null && _currentUrl != activeUrl) {
+    final activeId =
+        activeUrl == null ? null : VideoId.parseVideoId(activeUrl);
+    final currentId =
+        _currentUrl == null ? null : VideoId.parseVideoId(_currentUrl!);
+    if (native.isActive &&
+        activeId != null &&
+        activeId != currentId &&
+        activeUrl != null) {
       _webViewController?.loadUrl(
         urlRequest: URLRequest(url: WebUri(activeUrl)),
       );
@@ -1155,21 +1225,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
-  /// Requests native PiP. The AVPlayerLayer only exists while the full player
-  /// is mounted, so a minimized player is expanded first.
+  /// Requests native PiP. The AVPlayerLayer lives in an always-mounted host
+  /// surface (persistent_player_shell.dart), so it is alive whether the player
+  /// is expanded or docked — no need to expand first and wait for layout.
   void _nativeEnterPiP() {
-    final state = ref.read(playerProvider);
-    if (state.isMinimized) {
-      ref.read(playerProvider.notifier).expand();
-      Future.delayed(const Duration(milliseconds: 400), () {
-        if (!mounted) return;
-        if (NativeYoutubePlayer.instance.isActive) {
-          PiPService.instance.enterPiP();
-        }
-      });
-    } else {
-      PiPService.instance.enterPiP();
-    }
+    if (!NativeYoutubePlayer.instance.isActive) return;
+    PiPService.instance.enterPiP();
   }
 
   void _onPipStateChanged(String state) {

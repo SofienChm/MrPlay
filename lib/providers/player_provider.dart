@@ -53,6 +53,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   static const Duration _seekGrace = Duration(milliseconds: 1200);
 
+  /// Registered by [PersistentWebViewState]: forwards a seek toward the active
+  /// engine (native AVPlayer + muted page-video mirror, or the WebView page
+  /// video). All UI entry points call [seekTo] and nothing else, so there is
+  /// exactly one place a seek can reach playback.
+  void Function(Duration position)? onSeek;
+
   @override
   PlayerState build() => const PlayerState();
 
@@ -118,6 +124,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   void seekTo(Duration position) {
     _lastSeekAt = DateTime.now();
     state = state.copyWith(position: position);
+    onSeek?.call(position);
   }
 
   void minimize() => state = state.copyWith(isMinimized: true);

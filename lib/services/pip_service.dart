@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 /// Bridges to the native `com.mrplay/pip` channel (iOS only).
@@ -14,11 +16,22 @@ class PiPService {
   /// Notified with `started`, `stopped` or `restoreUI`.
   void Function(String state)? onStateChanged;
 
+  /// Completes when the native layer is ready for PiP (`pipReady`). Reset on
+  /// every [prepare].
+  Completer<void>? _readyCompleter;
+
   void init() {
     _channel.setMethodCallHandler((call) async {
-      if (call.method != 'pipStateChanged') return;
-      final args = call.arguments;
-      if (args is String) onStateChanged?.call(args);
+      switch (call.method) {
+        case 'pipStateChanged':
+          final args = call.arguments;
+          if (args is String) onStateChanged?.call(args);
+          break;
+        case 'pipReady':
+          final c = _readyCompleter;
+          if (c != null && !c.isCompleted) c.complete();
+          break;
+      }
     });
   }
 
@@ -39,16 +52,25 @@ class PiPService {
   }
 
   /// Links the native PiP controller to the playing surface without opening a
-  /// PiP window, and enables automatic PiP when the app backgrounds. Call once
-  /// playback starts so a home-screen swipe hands off to PiP seamlessly.
+  /// PiP window, and enables automatic PiP when the app backgrounds. Instead of
+  /// guessing at a delay, this returns when the bridge KVO-reports that
+  /// `isPictureInPicturePossible` flipped on (with a hard timeout as a safety
+  /// net), so a home-screen swipe hands off to PiP seamlessly.
   Future<void> prepare() async {
+    _readyCompleter = Completer<void>();
     try {
       await _channel.invokeMethod('prepare');
     } catch (_) {}
+    await _readyCompleter!.future.timeout(
+      const Duration(seconds: 3),
+      onTimeout: () {},
+    );
+    _readyCompleter = null;
   }
 
   /// Releases the native PiP controller / retained layer.
   Future<void> clear() async {
+    _readyCompleter = null;
     try {
       await _channel.invokeMethod('clear');
     } catch (_) {}

@@ -11,7 +11,6 @@ import '../data/repositories/watch_later_repository.dart';
 import '../data/repositories/queue_repository.dart';
 import '../services/sleep_timer_service.dart';
 import '../services/native_youtube_player.dart';
-import '../services/pip_service.dart';
 import 'sleep_timer_sheet.dart';
 import '../presentation/pages/queue_page.dart';
 import '../presentation/widgets/error_widget.dart';
@@ -50,12 +49,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         ref.read(playerProvider.notifier).minimize();
         _slideController.reset();
       }
-    });
-    // Once the expanded native page mounts its small surface (the AVPlayerLayer),
-    // arm automatic PiP so a home-screen swipe hands off to a floating window.
-    Future.delayed(const Duration(milliseconds: 350), () {
-      if (!mounted || !NativeYoutubePlayer.instance.isActive) return;
-      PiPService.instance.prepare();
     });
   }
 
@@ -144,11 +137,8 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         : (current.duration > Duration.zero && target > current.duration
             ? current.duration
             : target);
+    // Single seek path: seekTo fans out to the active engine.
     ref.read(playerProvider.notifier).seekTo(clamped);
-    MrPlayApp.webViewKey.currentState?.controlVideo(
-      'seek',
-      position: clamped.inMilliseconds / 1000.0,
-    );
   }
 
   void _toggleCaptions() {
@@ -451,11 +441,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                             .round(),
                                   );
                                   ref.read(playerProvider.notifier).seekTo(pos);
-                                  MrPlayApp.webViewKey.currentState
-                                      ?.controlVideo(
-                                    'seek',
-                                    position: pos.inMilliseconds / 1000.0,
-                                  );
                                 },
                               ),
                             ),
@@ -677,49 +662,34 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                 children: [
                   Row(
                     children: [
-                      // Small live native surface: PiP source + sync reference.
+                      // PiP source preview. The single live AVPlayerLayer lives
+                      // in the always-mounted host surface (persistent_player_shell
+                      // .dart) so it survives minimize; tapping this static card
+                      // preview still toggles Picture in Picture.
                       ClipRRect(
                         borderRadius: BorderRadius.circular(6),
                         child: SizedBox(
                           width: 88,
                           height: 50,
-                          child: ValueListenableBuilder<VideoPlayerController?>(
-                            valueListenable:
-                                NativeYoutubePlayer.instance.videoController,
-                            builder: (context, controller, _) {
-                              if (controller == null) {
-                                return Container(
-                                  color: Colors.grey[900],
-                                  child: const Center(
-                                    child: Icon(Icons.music_note,
-                                        size: 16, color: Colors.white38),
+                          child: GestureDetector(
+                            onTap: () => MrPlayApp.webViewKey.currentState
+                                ?.togglePictureInPicture(),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                _buildThumbnail(video),
+                                const Align(
+                                  alignment: Alignment.bottomRight,
+                                  child: Padding(
+                                    padding: EdgeInsets.all(3),
+                                    child: Icon(
+                                        Icons.picture_in_picture_alt,
+                                        color: Colors.white70,
+                                        size: 14),
                                   ),
-                                );
-                              }
-                              return GestureDetector(
-                                onTap: () => MrPlayApp.webViewKey.currentState
-                                    ?.togglePictureInPicture(),
-                                child: Stack(
-                                  fit: StackFit.expand,
-                                  children: [
-                                    Container(
-                                      color: Colors.black,
-                                      child: VideoPlayer(controller),
-                                    ),
-                                    const Align(
-                                      alignment: Alignment.bottomRight,
-                                      child: Padding(
-                                        padding: EdgeInsets.all(3),
-                                        child: Icon(
-                                            Icons.picture_in_picture_alt,
-                                            color: Colors.white70,
-                                            size: 14),
-                                      ),
-                                    ),
-                                  ],
                                 ),
-                              );
-                            },
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -779,10 +749,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                               (value * state.duration.inMilliseconds).round(),
                         );
                         ref.read(playerProvider.notifier).seekTo(pos);
-                        MrPlayApp.webViewKey.currentState?.controlVideo(
-                          'seek',
-                          position: pos.inMilliseconds / 1000.0,
-                        );
                       },
                     ),
                   ),

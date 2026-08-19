@@ -37,9 +37,8 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
     final pos = Duration(
       milliseconds: (fraction * duration.inMilliseconds).round(),
     );
+    // Single seek path: seekTo fans out to the active engine.
     ref.read(playerProvider.notifier).seekTo(pos);
-    MrPlayApp.webViewKey.currentState
-        ?.controlVideo('seek', position: pos.inMilliseconds / 1000.0);
   }
 
   @override
