@@ -299,20 +299,37 @@ class VideoTabJS {
     })();
   ''';
 
-  /// Collapses the video tab when the user drags straight down while the page
-  /// is at the very top (scrollY === 0). WKWebView handles its own touches
-  /// natively, so Flutter gestures can't reach it — this JS detects the swipe
-  /// inside the page and notifies Dart via the `videoTabSwipe` bridge, which
-  /// runs the same minimize path as the arrow button.
+  /// Handles downward drags inside the video tab. WKWebView processes its own
+  /// touches natively, so Flutter gestures never see them — this JS detects
+  /// the swipe inside the page and notifies Dart via the bridge.
+  ///
+  /// Two behaviors:
+  /// * Swipe that starts on the video player  -> fullscreen video.
+  /// * Swipe elsewhere while the page is at the top -> collapse the tab
+  ///   (same minimize path as the arrow button).
   static const String swipeCollapseScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
       var startY = null;
       var startX = null;
+      var startTarget = null;
       var fired = false;
+      function isVideoTarget(el) {
+        while (el && el !== document.documentElement) {
+          if (el.tagName === 'VIDEO') return true;
+          if (el.classList &&
+              (el.classList.contains('html5-video-container') ||
+               el.classList.contains('html5-video-player') ||
+               el.classList.contains('video-stream') ||
+               el.id === 'movie_player')) return true;
+          el = el.parentElement;
+        }
+        return false;
+      }
       document.addEventListener('touchstart', function(e) {
         startY = e.touches[0].clientY;
         startX = e.touches[0].clientX;
+        startTarget = e.target;
         fired = false;
       }, { passive: true });
       document.addEventListener('touchmove', function(e) {
@@ -320,10 +337,14 @@ class VideoTabJS {
         var dy = e.touches[0].clientY - startY;
         var dx = Math.abs(e.touches[0].clientX - startX);
         var scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
-        if (dy > 60 && dx < 40 && scrollTop <= 2) {
+        if (dy > 50 && dx < 40) {
           fired = true;
           if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-            window.flutter_inappwebview.callHandler('videoTabSwipe');
+            if (isVideoTarget(startTarget)) {
+              window.flutter_inappwebview.callHandler('playerControl', { action: 'fullscreen' });
+            } else if (scrollTop <= 2) {
+              window.flutter_inappwebview.callHandler('videoTabSwipe');
+            }
           }
           startY = null;
           startX = null;
