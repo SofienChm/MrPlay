@@ -56,6 +56,11 @@ class _QueueListViewState extends State<QueueListView> {
 
   Future<void> _playItem(QueueItem item) async {
     await QueueRepository.remove(item.id);
+    if (!mounted) return;
+    // Pop any full-screen route so the app's home Stack (webview + video tab)
+    // is visible, then open/play the video in the second tab.
+    Navigator.of(context, rootNavigator: true)
+        .popUntil((route) => route.isFirst);
     MrPlayApp.webViewKey.currentState?.loadUrl(item.platformUrl);
     _load();
   }

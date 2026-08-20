@@ -159,7 +159,7 @@ class _VideoListTabState extends State<_VideoListTab>
                   },
                 ),
                 onTap: () {
-                  MrPlayApp.webViewKey.currentState?.loadUrl(video.platformUrl);
+                  _playBookmark(video.platformUrl);
                 },
               );
             },
@@ -167,5 +167,13 @@ class _VideoListTabState extends State<_VideoListTab>
         ),
       ],
     );
+  }
+
+  /// Pops the Library route so the app's home Stack (webview + video tab)
+  /// becomes visible again, then opens/plays the video in the second tab.
+  void _playBookmark(String url) {
+    Navigator.of(context, rootNavigator: true)
+        .popUntil((route) => route.isFirst);
+    MrPlayApp.webViewKey.currentState?.loadUrl(url);
   }
 }

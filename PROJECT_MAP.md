@@ -61,6 +61,13 @@ MrPlay - Project Map
 >   iPad requires a non-null `sharePositionOrigin` (popover) or the share
 >   sheet is silently dropped; URL falls back videoUrl → YouTube id → current
 >   URL.
+> - Fixes 2026-08-13 (2): full player "down" button now enters PiP on collapse.
+>   Collapsing the full player straight back to the native page left the
+>   in-page `<video>` black (frames only render in the PiP pipeline on iOS).
+>   The down button now calls `enterPiP()` before `minimize()` — matching the
+>   swipe-down gesture — so the video stays visible in its floating window
+>   instead of a black inline frame. `enterPiP`/`exitPiP`/`togglePictureInPicture`
+>   also now target the actively-playing `<video>`.
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.

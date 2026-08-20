@@ -4,6 +4,7 @@ import '../../app.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/constants/app_constants.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../../services/remote_config_service.dart';
 import 'stats_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -35,8 +36,10 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
-    final adBlock = await SettingsRepository.getAdBlockEnabled();
-    final backgroundAudio = await SettingsRepository.getBackgroundAudioEnabled();
+    final adBlock =
+        await SettingsRepository.getEffectiveAdBlockEnabled();
+    final backgroundAudio =
+        await SettingsRepository.getEffectiveBackgroundAudioEnabled();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
@@ -66,11 +69,15 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _changeAdBlock(bool enabled) async {
+  final override = RemoteConfigService.instance.adBlockOverride;
+  if (override != RemoteOverride.followUser) return;
     await SettingsRepository.setAdBlockEnabled(enabled);
     setState(() => _adBlockEnabled = enabled);
   }
 
   Future<void> _changeBackgroundAudio(bool enabled) async {
+  final override = RemoteConfigService.instance.backgroundAudioOverride;
+  if (override != RemoteOverride.followUser) return;
     await SettingsRepository.setBackgroundAudioEnabled(enabled);
     setState(() => _backgroundAudioEnabled = enabled);
   }
@@ -142,7 +149,10 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Off by default',
             trailing: Switch(
               value: _adBlockEnabled,
-              onChanged: (value) => _changeAdBlock(value),
+              onChanged: RemoteConfigService.instance.adBlockOverride ==
+                      RemoteOverride.followUser
+                  ? (value) => _changeAdBlock(value)
+                  : null,
             ),
           ),
           _SettingsTile(
@@ -151,7 +161,10 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Keep playing when app is closed',
             trailing: Switch(
               value: _backgroundAudioEnabled,
-              onChanged: (value) => _changeBackgroundAudio(value),
+              onChanged: RemoteConfigService.instance.backgroundAudioOverride ==
+                      RemoteOverride.followUser
+                  ? (value) => _changeBackgroundAudio(value)
+                  : null,
             ),
           ),
           const _SectionHeader(title: 'About'),

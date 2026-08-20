@@ -83,7 +83,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// so the app presents as a plain browser to App Review; the user can opt in
   /// from Settings at any time.
   Future<void> _loadAdBlockSetting() async {
-    final enabled = await SettingsRepository.getAdBlockEnabled();
+    final enabled = await SettingsRepository.getEffectiveAdBlockEnabled();
     if (mounted && enabled != _adBlockEnabled) {
       setState(() => _adBlockEnabled = enabled);
     }
@@ -93,7 +93,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// audio when backgrounded (standard browser behavior). When enabled, the
   /// phantom-PiP keep-alive keeps playback alive in the background.
   Future<void> _loadBackgroundAudioSetting() async {
-    final enabled = await SettingsRepository.getBackgroundAudioEnabled();
+    final enabled =
+        await SettingsRepository.getEffectiveBackgroundAudioEnabled();
     if (mounted && enabled != _backgroundAudioEnabled) {
       setState(() => _backgroundAudioEnabled = enabled);
     }
@@ -1316,6 +1317,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         playerState.isVideoTab &&
         playerState.isMinimized;
 
+    // The collapsed video tab is a 64px Flutter mini bar sitting at the same
+    // height as YouTube's bottom nav (52 + home indicator). When it's visible,
+    // lift the bottom-right floating buttons so they sit exactly above that
+    // bar instead of overlapping it.
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    const double bottomNavHeight = 52;
+    const double miniBarHeight = 64;
+    final double buttonsBottomBase = videoTabCollapsed
+        ? bottomNavHeight + bottomPadding + miniBarHeight + 12
+        : 80;
+
     return Stack(
       children: [
         Positioned.fill(
@@ -1563,7 +1575,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ),
           ),
         Positioned(
-          bottom: 206,
+          bottom: buttonsBottomBase + 126,
           right: 16,
           child: GestureDetector(
             onTap: _showOptionsModal,
@@ -1573,13 +1585,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 color: const Color(0xFF2D2D2D).withValues(alpha: 0.75),
                 borderRadius: BorderRadius.circular(20),
               ),
-              child:
-                  const Icon(Icons.more_horiz, color: Colors.white, size: 24),
+              child: const Icon(Icons.more_horiz,
+                  color: Colors.white, size: 24),
             ),
           ),
         ),
         Positioned(
-          bottom: 164,
+          bottom: buttonsBottomBase + 84,
           right: 16,
           child: GestureDetector(
             onTap: showMiniPlayer,
@@ -1595,7 +1607,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 122,
+          bottom: buttonsBottomBase + 42,
           right: 16,
           child: GestureDetector(
             onTap: togglePictureInPicture,
@@ -1611,7 +1623,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           ),
         ),
         Positioned(
-          bottom: 80,
+          bottom: buttonsBottomBase,
           right: 16,
           child: GestureDetector(
             onTap: _goToHub,

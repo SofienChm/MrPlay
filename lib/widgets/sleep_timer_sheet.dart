@@ -15,9 +15,17 @@ const List<Duration?> _sleepTimerOptions = <Duration?>[
 String _sleepTimerLabel(Duration? d) =>
     d == null ? 'Off' : '${d.inMinutes} min';
 
+String _formatRemaining(Duration d) {
+  final minutes = d.inMinutes;
+  final seconds = d.inSeconds % 60;
+  if (minutes > 0) return '$minutes min $seconds sec';
+  return '$seconds sec';
+}
+
 bool _isActiveOption(Duration? option, Duration? remaining) {
   if (option == null) return remaining == null;
-  return remaining != null && option.inMinutes == remaining.inMinutes;
+  if (remaining == null) return false;
+  return option.inMinutes == (remaining.inSeconds / 60).ceil();
 }
 
 /// Shows the sleep timer picker as a bottom sheet. Shared by the full player's
@@ -45,6 +53,18 @@ Future<void> showSleepTimerSheet(BuildContext context) {
                     ),
                   ),
                 ),
+                if (remaining != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    '${_formatRemaining(remaining)} left',
+                    style: const TextStyle(
+                      color: Colors.amber,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 for (final option in _sleepTimerOptions)
                   ListTile(
                     title: Text(
