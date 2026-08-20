@@ -5,13 +5,19 @@ import '../ad_config.dart';
 import '../core/theme/app_colors.dart';
 
 class UnifiedBannerAdSlot extends StatefulWidget {
+  final String adUnitId;
+  final AdSize adSize;
   final Color backgroundColor;
   final bool isVisible;
+  final bool showDismissButton;
 
   const UnifiedBannerAdSlot({
     super.key,
+    this.adUnitId = AdConfig.bannerAdUnitId,
+    this.adSize = AdSize.largeBanner,
     this.backgroundColor = AppColors.surface,
     this.isVisible = true,
+    this.showDismissButton = true,
   });
 
   @override
@@ -25,7 +31,6 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   bool _adLoaded = false;
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
-  Timer? _reappearTimer;
   Timer? _retryTimer;
 
   @override
@@ -45,8 +50,8 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
 
   void _loadBannerAd() {
     _bannerAd = BannerAd(
-      adUnitId: AdConfig.bannerAdUnitId,
-      size: AdSize.largeBanner,
+      adUnitId: widget.adUnitId,
+      size: widget.adSize,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -58,7 +63,8 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
           ad.dispose();
           // Logged so Xcode/Console shows WHY the banner is missing
           // (no-fill, wrong app id, offline...). Retry every 30s.
-          debugPrint('MrPlay banner failed to load: '
+          debugPrint('MrPlay banner failed to load '
+              '(${widget.adUnitId}): '
               'code=${error.code} domain=${error.domain} message=${error.message}');
           if (!mounted) return;
           setState(() => _bannerAd = null);
@@ -72,21 +78,16 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   }
 
   void _handleDismiss() {
+    // Session-scoped dismissal: the banner stays hidden for the rest of the
+    // app session (across both tabs) instead of auto-reappearing after a
+    // few minutes. Re-presenting an ad the user explicitly closed during the
+    // same session is the pattern AdMob flags as intrusive.
     setState(() => _isDismissed = true);
-    _reappearTimer?.cancel();
-    _reappearTimer = Timer(
-      const Duration(minutes: 5),
-      () {
-        if (!mounted) return;
-        setState(() => _isDismissed = false);
-      },
-    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _reappearTimer?.cancel();
     _retryTimer?.cancel();
     _bannerAd?.dispose();
     super.dispose();
@@ -102,51 +103,46 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       return const SizedBox.shrink();
     }
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: SizedBox(
-            width: 320,
-            height: 100,
-            child: Stack(
-              children: [
-                Positioned.fill(
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 320,
+        height: widget.adSize.height.toDouble(),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: Container(
+                color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
+                child: Center(child: _adWidget!),
+              ),
+            ),
+            if (widget.showDismissButton)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: GestureDetector(
+                  onTap: _handleDismiss,
+                  behavior: HitTestBehavior.opaque,
                   child: Container(
-                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
-                    child: Center(child: _adWidget!),
-                  ),
-                ),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: GestureDetector(
-                    onTap: _handleDismiss,
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          width: 1,
-                        ),
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        width: 1,
                       ),
-                      child: const Icon(
-                        Icons.close,
-                        size: 16,
-                        color: Colors.white70,
-                      ),
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      size: 16,
+                      color: Colors.white70,
                     ),
                   ),
                 ),
-              ],
-            ),
-          ),
+              ),
+          ],
         ),
       ),
     );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../data/models/custom_bookmark.dart';
@@ -10,6 +11,8 @@ import '../pages/search_page.dart';
 import 'favorites_page.dart';
 import 'settings_page.dart';
 import '../../app.dart';
+import '../../ad_config.dart';
+import '../../widgets/unified_banner_ad_slot.dart';
 
 class HubPage extends StatefulWidget {
   const HubPage({super.key});
@@ -260,6 +263,14 @@ class _HubPageState extends State<HubPage> {
                 ),
               ),
               const SizedBox(height: 24),
+              Center(
+                child: UnifiedBannerAdSlot(
+                  adUnitId: AdConfig.hubBannerAdUnitId,
+                  adSize: AdSize.banner,
+                  showDismissButton: false,
+                ),
+              ),
+              const SizedBox(height: 16),
               Expanded(
                 child: _showResults && _filteredPlatforms.isEmpty
                     ? Center(

@@ -40,6 +40,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _videoTabIntro = false;
   bool _unmuteDone = false;
   bool isReady = false;
+
+  /// True while the hub page is the visible layer (webview not ready / not
+  /// covering it). The app's Stack watches this so the floating banner hides
+  /// while the hub shows its own ad slot.
+  static final ValueNotifier<bool> hubVisible = ValueNotifier(true);
   bool _isLoading = false;
   bool _adBlockEnabled = false;
   bool _backgroundAudioEnabled = false;
@@ -1007,6 +1012,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       isReady = true;
       _isLoading = true;
     });
+    PersistentWebViewState.hubVisible.value = false;
     _endedHandled = false;
     _resumeSeekDone = false;
     _loadingTimer = Timer(const Duration(seconds: 3), () {
@@ -1670,6 +1676,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _loadError = null;
       });
     }
+    PersistentWebViewState.hubVisible.value = true;
   }
 
   void _minimizeVideoTab() {

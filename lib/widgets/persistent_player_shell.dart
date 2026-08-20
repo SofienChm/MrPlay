@@ -12,6 +12,21 @@ class PersistentPlayerShell extends ConsumerWidget {
     final state = ref.watch(playerProvider);
     final hasVideo = state.currentVideo != null;
 
+    // Rotated the phone to landscape while the video tab was collapsed ->
+    // bring the tab back to fullscreen so the video fills the rotated screen.
+    // Only fires on the portrait->landscape edge, so there's no feedback loop
+    // (landscape->portrait leaves the tab untouched; the user can collapse
+    // again with the down gesture). Deferred to a post-frame callback so the
+    // notifier isn't mutated during the build itself.
+    if (hasVideo &&
+        state.isVideoTab &&
+        state.isMinimized &&
+        MediaQuery.orientationOf(context) == Orientation.landscape) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(playerProvider.notifier).expand();
+      });
+    }
+
     if (!hasVideo) return const SizedBox.shrink();
 
     // Video-tab playback: the tab's webview IS the full player. Only the

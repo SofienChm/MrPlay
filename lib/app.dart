@@ -134,7 +134,16 @@ class _MrPlayAppState extends State<MrPlayApp> {
                       // Don't float the banner over the fullscreen player.
                       final hide =
                           state.currentVideo != null && !state.isMinimized;
-                      return UnifiedBannerAdSlot(isVisible: !hide);
+                      // The hub shows its own small ad slot, so keep the
+                      // floating banner hidden while the hub is visible.
+                      return ValueListenableBuilder<bool>(
+                        valueListenable: PersistentWebViewState.hubVisible,
+                        builder: (context, hubVisible, _) {
+                          return UnifiedBannerAdSlot(
+                            isVisible: !hubVisible && !hide,
+                          );
+                        },
+                      );
                     },
                   ),
                 ),
