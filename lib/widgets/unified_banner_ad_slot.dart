@@ -103,46 +103,52 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       return const SizedBox.shrink();
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      child: SizedBox(
-        width: 320,
-        height: widget.adSize.height.toDouble(),
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: Container(
-                color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
-                child: Center(child: _adWidget!),
-              ),
-            ),
-            if (widget.showDismissButton)
-              Positioned(
-                top: 4,
-                right: 4,
-                child: GestureDetector(
-                  onTap: _handleDismiss,
-                  behavior: HitTestBehavior.opaque,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: SizedBox(
+            width: 320,
+            height: widget.adSize.height.toDouble(),
+            child: Stack(
+              children: [
+                Positioned.fill(
                   child: Container(
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        width: 1,
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.close,
-                      size: 16,
-                      color: Colors.white70,
-                    ),
+                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.92),
+                    child: Center(child: _adWidget!),
                   ),
                 ),
-              ),
-          ],
+                if (widget.showDismissButton)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      onTap: _handleDismiss,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            width: 1,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
