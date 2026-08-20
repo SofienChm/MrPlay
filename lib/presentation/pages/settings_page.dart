@@ -17,6 +17,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _themeMode = 'system';
   String _defaultPlatform = 'YouTube';
   bool _adBlockEnabled = false;
+  bool _backgroundAudioEnabled = false;
   bool _disposed = false;
 
   @override
@@ -35,11 +36,13 @@ class _SettingsPageState extends State<SettingsPage> {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
     final adBlock = await SettingsRepository.getAdBlockEnabled();
+    final backgroundAudio = await SettingsRepository.getBackgroundAudioEnabled();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
       _adBlockEnabled = adBlock;
+      _backgroundAudioEnabled = backgroundAudio;
     });
   }
 
@@ -67,11 +70,18 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _adBlockEnabled = enabled);
   }
 
+  Future<void> _changeBackgroundAudio(bool enabled) async {
+    await SettingsRepository.setBackgroundAudioEnabled(enabled);
+    setState(() => _backgroundAudioEnabled = enabled);
+  }
+
   Future<void> _clearCache() async {
     await SettingsRepository.clearCache();
     setState(() {
       _themeMode = 'system';
       _defaultPlatform = 'YouTube';
+      _adBlockEnabled = false;
+      _backgroundAudioEnabled = false;
     });
     MrPlayApp.themeModeNotifier.value = ThemeMode.system;
     if (mounted) {
@@ -133,6 +143,15 @@ class _SettingsPageState extends State<SettingsPage> {
             trailing: Switch(
               value: _adBlockEnabled,
               onChanged: (value) => _changeAdBlock(value),
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.audiotrack_outlined,
+            title: 'Background audio',
+            subtitle: 'Keep playing when app is closed',
+            trailing: Switch(
+              value: _backgroundAudioEnabled,
+              onChanged: (value) => _changeBackgroundAudio(value),
             ),
           ),
           const _SectionHeader(title: 'About'),

@@ -42,6 +42,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool isReady = false;
   bool _isLoading = false;
   bool _adBlockEnabled = false;
+  bool _backgroundAudioEnabled = false;
   String? _pendingUrl;
   String? _currentUrl;
   String? _loadError;
@@ -75,6 +76,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _restoreLastPlatform();
     _subscribeToAudioInterruptions();
     _loadAdBlockSetting();
+    _loadBackgroundAudioSetting();
   }
 
   /// Reads the "Block ads & trackers" preference from Settings. Off by default
@@ -84,6 +86,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final enabled = await SettingsRepository.getAdBlockEnabled();
     if (mounted && enabled != _adBlockEnabled) {
       setState(() => _adBlockEnabled = enabled);
+    }
+  }
+
+  /// Reads the "Background audio" preference. Off by default: the app stops
+  /// audio when backgrounded (standard browser behavior). When enabled, the
+  /// phantom-PiP keep-alive keeps playback alive in the background.
+  Future<void> _loadBackgroundAudioSetting() async {
+    final enabled = await SettingsRepository.getBackgroundAudioEnabled();
+    if (mounted && enabled != _backgroundAudioEnabled) {
+      setState(() => _backgroundAudioEnabled = enabled);
     }
   }
 
@@ -141,7 +153,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _appIsBackgrounded = true;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
-      _enterPhantomPiP();
+      // Background audio is opt-in. When disabled, behave like a normal
+      // browser: pause and let iOS stop audio on background (no phantom-PiP
+      // keep-alive). When enabled, enter the phantom-PiP keep-alive so
+      // playback continues in the background.
+      if (_backgroundAudioEnabled) {
+        _enterPhantomPiP();
+      } else {
+        ref.read(playerProvider.notifier).pause();
+        MediaControlsService.instance.setPlaying(false);
+        controlVideo('pause');
+      }
     }
   }
 
@@ -1325,8 +1347,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               javaScriptEnabled: true,
               allowsInlineMediaPlayback: true,
               mediaPlaybackRequiresUserGesture: false,
-              allowBackgroundAudioPlaying: true,
-              allowsPictureInPictureMediaPlayback: true,
+              allowBackgroundAudioPlaying: _backgroundAudioEnabled,
+              allowsPictureInPictureMediaPlayback: _backgroundAudioEnabled,
               allowsAirPlayForMediaPlayback: true,
               isFraudulentWebsiteWarningEnabled: false,
               userAgent:
@@ -1425,8 +1447,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       javaScriptEnabled: true,
                       allowsInlineMediaPlayback: true,
                       mediaPlaybackRequiresUserGesture: false,
-                      allowBackgroundAudioPlaying: true,
-                      allowsPictureInPictureMediaPlayback: true,
+                      allowBackgroundAudioPlaying: _backgroundAudioEnabled,
+                      allowsPictureInPictureMediaPlayback:
+                          _backgroundAudioEnabled,
                       allowsAirPlayForMediaPlayback: true,
                       isFraudulentWebsiteWarningEnabled: false,
                       userAgent:

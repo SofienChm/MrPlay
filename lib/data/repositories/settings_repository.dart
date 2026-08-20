@@ -5,6 +5,7 @@ class SettingsRepository {
   static const String _defaultPlatformKey = 'default_platform';
   static const String _lastPlatformUrlKey = 'last_platform_url';
   static const String _adBlockKey = 'ad_block_enabled';
+  static const String _backgroundAudioKey = 'background_audio_enabled';
 
   static Future<SharedPreferences> get _prefs =>
       SharedPreferences.getInstance();
@@ -49,11 +50,22 @@ class SettingsRepository {
     await prefs.setBool(_adBlockKey, enabled);
   }
 
+  static Future<bool> getBackgroundAudioEnabled() async {
+    final prefs = await _prefs;
+    return prefs.getBool(_backgroundAudioKey) ?? false;
+  }
+
+  static Future<void> setBackgroundAudioEnabled(bool enabled) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_backgroundAudioKey, enabled);
+  }
+
   static Future<void> clearCache() async {
     final prefs = await _prefs;
     await prefs.remove(_themeKey);
     await prefs.remove(_defaultPlatformKey);
     await prefs.remove(_lastPlatformUrlKey);
     await prefs.remove(_adBlockKey);
+    await prefs.remove(_backgroundAudioKey);
   }
 }
