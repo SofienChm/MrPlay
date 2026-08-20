@@ -412,9 +412,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
       // YouTube starts some videos muted (or the user previously muted); once
       // the video is actually playing, force-unmute it so audio is audible.
+      // `_unmuteDone` is set to true only once unmuting is *confirmed* (the
+      // active element is audible), otherwise the next report retries. This
+      // fixes videos that open muted because the first unmute attempt ran
+      // before the element was ready and was never retried.
       if (playing && !ended && !_unmuteDone) {
-        _unmuteDone = true;
-        _unmuteVideo();
+        _unmuteVideo().then((audible) {
+          if (mounted && audible) _unmuteDone = true;
+        });
       }
       var video = ref.read(playerProvider).currentVideo;
       // Fallback: if the video is actually playing but the `playerInfo` JS
@@ -909,21 +914,40 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Un-mutes the actively playing video. YouTube sometimes starts playback
   /// muted (or the user previously muted it), and the "tap to unmute" overlay
   /// needs a tap. We bypass the UI by directly clearing `muted` on the video
-  /// element(s) and restoring volume, once per video.
-  void _unmuteVideo() {
-    _activeController?.evaluateJavascript(source: '''
-      (function() {
-        var videos = document.querySelectorAll('video');
-        for (var i = 0; i < videos.length; i++) {
-          var v = videos[i];
-          if (v.muted || v.volume === 0) {
-            v.muted = false;
-            v.defaultMuted = false;
-            v.volume = 1;
-          }
-        }
-      })();
-    ''');
+  /// element(s) and restoring volume. Returns whether the active video is now
+  /// audible, so callers can retry until it is (a single fire-and-forget shot
+  /// leaves some videos muted when the element wasn't ready yet).
+  Future<bool> _unmuteVideo() async {
+    final controller = _activeController;
+    if (controller == null) return false;
+    try {
+      final result = await controller.callAsyncJavaScript(
+        functionBody: '''
+          (function() {
+            var videos = document.querySelectorAll('video');
+            var main = null;
+            for (var i = 0; i < videos.length; i++) {
+              if (!videos[i].paused && !videos[i].ended) {
+                main = videos[i];
+                break;
+              }
+            }
+            if (!main && videos.length > 0) main = videos[0];
+            if (!main) return { audible: false };
+            if (main.muted || main.volume === 0) {
+              main.muted = false;
+              main.defaultMuted = false;
+              main.volume = 1;
+            }
+            return { audible: !main.muted && main.volume > 0 };
+          })();
+        ''',
+      );
+      final value = result?.value;
+      return value is Map && value['audible'] == true;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _restoreLastPlatform() async {
