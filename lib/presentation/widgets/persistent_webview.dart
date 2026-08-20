@@ -1232,6 +1232,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final videoGone = prev?.currentVideo != null && next.currentVideo == null;
       if (videoAppeared) _startStatePoll();
       if (videoGone) _stopStatePoll();
+      // Collapsed -> expanded: re-attach the JS swipe listeners. After a
+      // collapse cycle WKWebView can detach/reset its touch handlers, so the
+      // custom user script alone is no longer enough — re-inject it (it
+      // cleans up its own previous listeners, so it's safe to run repeatedly).
+      final reExpanded = prev?.isVideoTab == true &&
+          prev?.isMinimized == true &&
+          next.isVideoTab &&
+          next.isMinimized == false;
+      if (reExpanded) {
+        Future.delayed(const Duration(milliseconds: 400), () {
+          if (!mounted) return;
+          try {
+            _videoWebViewController?.evaluateJavascript(
+              source: VideoTabJS.swipeCollapseScript,
+            );
+          } catch (_) {}
+        });
+      }
     });
     if (!isReady) return const SizedBox.shrink();
 

@@ -307,13 +307,22 @@ class VideoTabJS {
   /// the page isn't necessarily scrolled back to the top). Swipes elsewhere
   /// only collapse when the page is at the very top, so scrolling through the
   /// description/comments keeps working.
+  ///
+  /// The script re-installs cleanly on every invocation (and is re-injected
+  /// by Dart whenever the tab re-expands): old listeners are removed first,
+  /// and listeners are attached in CAPTURE phase so YouTube's own touch
+  /// handlers (wherever they attach) can't swallow the events after SPA
+  /// re-renders.
   static const String swipeCollapseScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
+      if (window.__mrSwipeCleanup) { try { window.__mrSwipeCleanup(); } catch (e) {} }
+
       var startY = null;
       var startX = null;
       var startTarget = null;
       var fired = false;
+
       function isVideoTarget(el) {
         while (el && el !== document.documentElement) {
           if (el.tagName === 'VIDEO') return true;
@@ -326,14 +335,18 @@ class VideoTabJS {
         }
         return false;
       }
-      document.addEventListener('touchstart', function(e) {
+
+      function onTouchStart(e) {
+        if (!e.touches || !e.touches[0]) return;
         startY = e.touches[0].clientY;
         startX = e.touches[0].clientX;
         startTarget = e.target;
         fired = false;
-      }, { passive: true });
-      document.addEventListener('touchmove', function(e) {
+      }
+
+      function onTouchMove(e) {
         if (startY === null || fired) return;
+        if (!e.touches || !e.touches[0]) return;
         var dy = e.touches[0].clientY - startY;
         var dx = Math.abs(e.touches[0].clientX - startX);
         var scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
@@ -345,7 +358,16 @@ class VideoTabJS {
           startY = null;
           startX = null;
         }
-      }, { passive: true });
+      }
+
+      function cleanup() {
+        document.removeEventListener('touchstart', onTouchStart, true);
+        document.removeEventListener('touchmove', onTouchMove, true);
+      }
+
+      document.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
+      document.addEventListener('touchmove', onTouchMove, { passive: true, capture: true });
+      window.__mrSwipeCleanup = cleanup;
     })();
   ''';
 }
