@@ -4,6 +4,7 @@ class SettingsRepository {
   static const String _themeKey = 'theme_mode';
   static const String _defaultPlatformKey = 'default_platform';
   static const String _lastPlatformUrlKey = 'last_platform_url';
+  static const String _adBlockKey = 'ad_block_enabled';
 
   static Future<SharedPreferences> get _prefs =>
       SharedPreferences.getInstance();
@@ -38,10 +39,21 @@ class SettingsRepository {
     await prefs.setString(_lastPlatformUrlKey, url);
   }
 
+  static Future<bool> getAdBlockEnabled() async {
+    final prefs = await _prefs;
+    return prefs.getBool(_adBlockKey) ?? false;
+  }
+
+  static Future<void> setAdBlockEnabled(bool enabled) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_adBlockKey, enabled);
+  }
+
   static Future<void> clearCache() async {
     final prefs = await _prefs;
     await prefs.remove(_themeKey);
     await prefs.remove(_defaultPlatformKey);
     await prefs.remove(_lastPlatformUrlKey);
+    await prefs.remove(_adBlockKey);
   }
 }

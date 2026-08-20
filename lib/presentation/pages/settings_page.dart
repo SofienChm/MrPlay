@@ -16,6 +16,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String _themeMode = 'system';
   String _defaultPlatform = 'YouTube';
+  bool _adBlockEnabled = false;
   bool _disposed = false;
 
   @override
@@ -33,10 +34,12 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
+    final adBlock = await SettingsRepository.getAdBlockEnabled();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
+      _adBlockEnabled = adBlock;
     });
   }
 
@@ -57,6 +60,11 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _changeDefaultPlatform(String name) async {
     await SettingsRepository.setDefaultPlatform(name);
     setState(() => _defaultPlatform = name);
+  }
+
+  Future<void> _changeAdBlock(bool enabled) async {
+    await SettingsRepository.setAdBlockEnabled(enabled);
+    setState(() => _adBlockEnabled = enabled);
   }
 
   Future<void> _clearCache() async {
@@ -114,6 +122,18 @@ class _SettingsPageState extends State<SettingsPage> {
             title: 'Clear Cache',
             subtitle: 'Reset all settings to default',
             onTap: _clearCache,
+          ),
+          _SectionHeader(
+            title: 'Privacy',
+          ),
+          _SettingsTile(
+            icon: Icons.block,
+            title: 'Block ads & trackers',
+            subtitle: 'Off by default',
+            trailing: Switch(
+              value: _adBlockEnabled,
+              onChanged: (value) => _changeAdBlock(value),
+            ),
           ),
           const _SectionHeader(title: 'About'),
           _SettingsTile(
@@ -237,13 +257,15 @@ class _SettingsTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final Widget? trailing;
 
   const _SettingsTile({
     required this.icon,
     required this.title,
     required this.subtitle,
-    required this.onTap,
+    this.onTap,
+    this.trailing,
   });
 
   @override
@@ -252,7 +274,7 @@ class _SettingsTile extends StatelessWidget {
       leading: Icon(icon),
       title: Text(title),
       subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: trailing ?? const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }

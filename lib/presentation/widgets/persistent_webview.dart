@@ -41,6 +41,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _unmuteDone = false;
   bool isReady = false;
   bool _isLoading = false;
+  bool _adBlockEnabled = false;
   String? _pendingUrl;
   String? _currentUrl;
   String? _loadError;
@@ -73,6 +74,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
     _restoreLastPlatform();
     _subscribeToAudioInterruptions();
+    _loadAdBlockSetting();
+  }
+
+  /// Reads the "Block ads & trackers" preference from Settings. Off by default
+  /// so the app presents as a plain browser to App Review; the user can opt in
+  /// from Settings at any time.
+  Future<void> _loadAdBlockSetting() async {
+    final enabled = await SettingsRepository.getAdBlockEnabled();
+    if (mounted && enabled != _adBlockEnabled) {
+      setState(() => _adBlockEnabled = enabled);
+    }
   }
 
   /// Another app (TikTok, Spotify, a call...) has taken the audio session -
@@ -1287,10 +1299,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         Positioned.fill(
           child: InAppWebView(
             initialUserScripts: UnmodifiableListView([
-              UserScript(
-                source: ContentBlockerJS.genericAdBlockerScript,
-                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-              ),
+              if (_adBlockEnabled)
+                UserScript(
+                  source: ContentBlockerJS.genericAdBlockerScript,
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                ),
               UserScript(
                 source: YouTubeJS.visibilityKeepAliveScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -1377,10 +1390,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     key: const ValueKey('video-tab'),
                     initialUrlRequest: URLRequest(url: WebUri(_videoTabUrl!)),
                     initialUserScripts: UnmodifiableListView([
-                      UserScript(
-                        source: ContentBlockerJS.genericAdBlockerScript,
-                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                      ),
+                      if (_adBlockEnabled)
+                        UserScript(
+                          source: ContentBlockerJS.genericAdBlockerScript,
+                          injectionTime:
+                              UserScriptInjectionTime.AT_DOCUMENT_START,
+                        ),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
