@@ -125,8 +125,7 @@ import MediaPlayer
             if let id = item["id"] as? String,
                let title = item["title"] as? String,
                let url = item["url"] as? String {
-              self.makeActivity(id: id, title: title, url: url,
-                                phrase: item["phrase"] as? String)
+              self.makeActivity(id: id, title: title, url: url)
             }
           }
         }
@@ -135,7 +134,7 @@ import MediaPlayer
         if let args = call.arguments as? [String: Any],
            let name = args["name"] as? String,
            let url = args["url"] as? String {
-          self.makeActivity(id: "current", title: "Open \(name)", url: url, phrase: nil)
+          self.makeActivity(id: "current", title: "Open \(name)", url: url)
         }
         result(nil)
       case "consumePending":
@@ -150,16 +149,13 @@ import MediaPlayer
     }
   }
 
-  private func makeActivity(id: String, title: String, url: String, phrase: String?) {
+  private func makeActivity(id: String, title: String, url: String) {
     let activity = NSUserActivity(activityType: "com.mrplay.app.openPlatform")
     activity.persistentIdentifier = id
     activity.title = title
     activity.userInfo = ["url": url]
     activity.isEligibleForSearch = true
     activity.isEligibleForPrediction = true
-    if let phrase, !phrase.isEmpty {
-      activity.suggestedInvocationPhrase = phrase
-    }
     shortcutActivities[id] = activity
     activity.becomeCurrent()
   }

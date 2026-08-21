@@ -47,16 +47,14 @@ class SiriShortcutsService {
     await registerPlatformShortcuts();
   }
 
-  /// Advertises one shortcut per platform so users can record phrases like
-  /// "Hey Siri, open YouTube" via Settings → Siri & Search, and so the
-  /// actions appear in the Shortcuts app and Siri Suggestions.
+  /// Advertises one shortcut per platform so the actions appear in the
+  /// Shortcuts app, in Settings → Siri & Search, and in Siri Suggestions.
   Future<void> registerPlatformShortcuts() async {
     final shortcuts = PlatformConstants.platforms.take(8).map((platform) {
       return <String, String>{
         'id': 'platform-${platform.name.toLowerCase()}',
         'title': 'Open ${platform.name}',
         'url': platform.url,
-        'phrase': 'Open ${platform.name} in MrPlay',
       };
     }).toList();
     if (shortcuts.isEmpty) return;
