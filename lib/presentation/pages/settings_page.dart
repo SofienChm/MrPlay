@@ -194,7 +194,7 @@ class _SettingsPageState extends State<SettingsPage> {
             title: 'Watch Stats',
             subtitle: 'Your watch time and usage',
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const StatsPage()),
+              MaterialPageRoute(builder: (_) => StatsPage()),
             ),
           ),
           _SettingsTile(
@@ -209,7 +209,7 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Watch history records',
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const HistoryPage()),
+              MaterialPageRoute(builder: (_) => HistoryPage()),
             ),
           ),
           _SectionHeader(
