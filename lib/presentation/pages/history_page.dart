@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
+import '../../app.dart';
 import '../../services/recent_activity_service.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -38,11 +38,12 @@ class _HistoryPageState extends State<HistoryPage> {
     }
   }
 
-  void _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+  /// Pops back to the home stack (webview + player) and plays the video
+  /// inside the app instead of handing it to the native platform app.
+  void _openInApp(String url) {
+    Navigator.of(context, rootNavigator: true)
+        .popUntil((route) => route.isFirst);
+    MrPlayApp.webViewKey.currentState?.loadUrl(url);
   }
 
   String _formatDate(int ms) {
@@ -111,7 +112,7 @@ class _HistoryPageState extends State<HistoryPage> {
                             onTap: () {
                               final url = entry['url'] as String?;
                               if (url != null && url.isNotEmpty) {
-                                _openUrl(url);
+                                _openInApp(url);
                               }
                             },
                           ),

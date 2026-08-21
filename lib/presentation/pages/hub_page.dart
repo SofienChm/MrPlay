@@ -177,7 +177,7 @@ class _HubPageState extends State<HubPage> {
 
   void _onBottomNavTap(int index) {
     final pages = [
-      () => const StatsPage(),
+      () => const FavoritesPage(),
       () => HistoryPage(),
       () => const StatsPage(),
       () => const SettingsPage(),
@@ -196,8 +196,8 @@ class _HubPageState extends State<HubPage> {
         onTap: _onBottomNavTap,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.schedule_outlined),
-            label: 'Watch Time',
+            icon: Icon(Icons.video_library_outlined),
+            label: 'Library',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),

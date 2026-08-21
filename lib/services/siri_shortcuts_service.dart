@@ -53,7 +53,7 @@ class SiriShortcutsService {
     final shortcuts = PlatformConstants.platforms.take(8).map((platform) {
       return <String, String>{
         'id': 'platform-${platform.name.toLowerCase()}',
-        'title': 'Open ${platform.name}',
+        'title': 'Open ${platform.name} in MrPlay',
         'url': platform.url,
       };
     }).toList();

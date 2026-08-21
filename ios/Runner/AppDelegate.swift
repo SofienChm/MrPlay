@@ -134,7 +134,7 @@ import MediaPlayer
         if let args = call.arguments as? [String: Any],
            let name = args["name"] as? String,
            let url = args["url"] as? String {
-          self.makeActivity(id: "current", title: "Open \(name)", url: url)
+          self.makeActivity(id: "current", title: "Open \(name) in MrPlay", url: url)
         }
         result(nil)
       case "consumePending":
