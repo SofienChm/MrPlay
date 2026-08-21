@@ -97,17 +97,32 @@ jobs:
           </plist>
           EOF
 
-      - name: Build and sign IPA
+      - name: Configure manual signing for Runner target
         env:
           TEAM_ID: ${{ secrets.TEAM_ID }}
-          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
-          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          sudo gem install xcodeproj --no-document
+          ruby <<'EOF'
+          require "xcodeproj"
+          project = Xcodeproj::Project.open("ios/Runner.xcodeproj")
+          target = project.targets.find { |t| t.name == "Runner" }
+          abort "Runner target not found" unless target
+          target.build_configurations.each do |config|
+            next unless config.name == "Release"
+            config.build_settings["CODE_SIGN_STYLE"] = "Manual"
+            config.build_settings["DEVELOPMENT_TEAM"] = ENV["TEAM_ID"]
+            config.build_settings["CODE_SIGN_IDENTITY"] = "Apple Distribution"
+            config.build_settings["PROVISIONING_PROFILE_SPECIFIER"] = ENV["PROFILE_UUID"]
+          end
+          project.save
+          EOF
+
+      - name: Build and sign IPA
         run: |
           BUILD_NUM=$((GITHUB_RUN_NUMBER + 100))
           ARCHIVE_PATH=$RUNNER_TEMP/Runner.xcarchive
           EXPORT_PATH=$RUNNER_TEMP/export
-          KEY_PATH=$HOME/.appstoreconnect/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
-          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -destination generic/platform=iOS -archivePath $ARCHIVE_PATH archive -allowProvisioningUpdates -authenticationKeyPath "$KEY_PATH" -authenticationKeyID "$APPSTORE_KEY_ID" -authenticationKeyIssuerID "$APPSTORE_ISSUER_ID" DEVELOPMENT_TEAM=$TEAM_ID CURRENT_PROJECT_VERSION=$BUILD_NUM
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release -destination generic/platform=iOS -archivePath $ARCHIVE_PATH archive CURRENT_PROJECT_VERSION=$BUILD_NUM
           xcodebuild -exportArchive -archivePath $ARCHIVE_PATH -exportPath $EXPORT_PATH -exportOptionsPlist $RUNNER_TEMP/ExportOptions.plist
           mkdir -p build/ios/ipa
           cp $EXPORT_PATH/*.ipa build/ios/ipa/
