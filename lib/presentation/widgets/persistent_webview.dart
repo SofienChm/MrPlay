@@ -78,7 +78,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
-    _restoreLastPlatform();
     _subscribeToAudioInterruptions();
     _loadAdBlockSetting();
     _loadBackgroundAudioSetting();
@@ -255,6 +254,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   InAppWebViewController? get _activeController =>
       _videoWebViewController ?? _webViewController;
 
+  /// Only m.youtube.com watch pages get routed into the dedicated video tab.
+  /// YouTube Music keeps playing inline in its own tab by design, so
+  /// music.youtube.com watch URLs are excluded.
+  bool _routesToVideoTab(String url) {
+    if (!url.contains('/watch')) return false;
+    if (url.contains('music.youtube.com')) return false;
+    return url.contains('youtube.com');
+  }
+
   void _onLoadStart(InAppWebViewController controller, WebUri? url) {
     _currentUrl = url?.toString();
     if (mounted) setState(() => _isLoading = true);
@@ -270,7 +278,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     if (mounted) setState(() => _isLoading = false);
     final urlStr = url.toString();
-    if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
+    if (_routesToVideoTab(urlStr)) {
       if (_videoTabUrl != null && _videoTabUrl == urlStr) {
         _handleWatchPage(controller, urlStr);
         return;
@@ -295,7 +303,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final urlStr = url?.toString();
     if (urlStr == null) return;
     _currentUrl = urlStr;
-    if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
+    if (_routesToVideoTab(urlStr)) {
       _openVideoTab(urlStr);
       // YouTube uses pushState, so stepping back returns to the feed while the
       // new tab keeps the watch page alive. Guard against re-entry so a queued
@@ -990,14 +998,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  Future<void> _restoreLastPlatform() async {
-    final url = await SettingsRepository.getLastPlatformUrl();
-    if (url == null || url.isEmpty || !mounted) return;
-    loadUrl(url);
-  }
-
   void loadUrl(String url) {
-    if (url.contains('youtube.com') && url.contains('/watch')) {
+    if (_routesToVideoTab(url)) {
+      // Playing a saved/history video from an overlay page: reveal the webview
+      // layer BEFORE opening the video tab, or it loads behind the hub.
+      PersistentWebViewState.hubVisible.value = false;
       _openVideoTab(url);
       return;
     }

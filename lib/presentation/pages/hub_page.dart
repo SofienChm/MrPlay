@@ -167,7 +167,6 @@ class _HubPageState extends State<HubPage> {
   }
 
   void _onPlatformTap(PlatformModel platform) {
-    SettingsRepository.setLastPlatformUrl(platform.url);
     SiriShortcutsService.instance.setCurrent(
       name: platform.name,
       url: platform.url,

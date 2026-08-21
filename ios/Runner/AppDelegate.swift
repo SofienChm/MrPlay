@@ -12,6 +12,7 @@ import MediaPlayer
   private var mediaChannel: FlutterMethodChannel?
   private var siriChannel: FlutterMethodChannel?
   private var shortcutActivities: [String: NSUserActivity] = [:]
+  private var routeChangeObserver: NSObjectProtocol?
 
   override func application(
     _ application: UIApplication,
@@ -24,12 +25,33 @@ import MediaPlayer
       print("MrPlay: AVAudioSession error: \(error)")
     }
 
+    observeAudioRouteChanges()
+
     setupSpotlightChannel()
     setupMediaChannel()
     setupSiriChannel()
 
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  /// When the user disconnects the Bluetooth device (or unplugs headphones),
+  /// stop playback instead of blasting audio from the speaker. Reuses the
+  /// remote-command pipeline so player state and Now Playing stay in sync.
+  private func observeAudioRouteChanges() {
+    routeChangeObserver = NotificationCenter.default.addObserver(
+      forName: AVAudioSession.routeChangeNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] notification in
+      guard let info = notification.userInfo,
+            let reasonRaw = (info[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue,
+            reasonRaw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else {
+        return
+      }
+      guard MPNowPlayingInfoCenter.default().nowPlayingInfo != nil else { return }
+      self?.sendRemoteCommand("pause")
+    }
   }
 
   private func setupSpotlightChannel() {
