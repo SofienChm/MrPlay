@@ -184,32 +184,30 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     );
   }
 
-  Widget _emptyState(ThemeData theme) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: Center,
-        children: [
-          Icon(
-            Icons.history_rounded,
-            size: 64,
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+Widget _emptyState(ThemeData theme) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          Icons.history_rounded,
+          size: 64,
+          color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'No watch history yet',
+          style: theme.textTheme.titleMedium?.copyWith(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
           ),
-          const SizedBox(height: 16),
-          Text(
-            'No watch history yet',
-            style: theme.textTheme.titleMedium?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-            ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Videos you watch will appear here',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Videos you watch will appear here',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
