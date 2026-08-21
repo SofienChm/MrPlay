@@ -124,7 +124,7 @@ jobs:
 
       - name: Build and sign IPA
         run: |
-          BUILD_NUM=$((GITHUB_RUN_NUMBER + 100))
+          BUILD_NUM=$((GITHUB_RUN_NUMBER + 200))
           echo "FLUTTER_BUILD_NUMBER=$BUILD_NUM" >> ios/Flutter/Generated.xcconfig
           ARCHIVE_PATH=$RUNNER_TEMP/Runner.xcarchive
           EXPORT_PATH=$RUNNER_TEMP/export
