@@ -10,6 +10,7 @@ import 'presentation/widgets/persistent_webview.dart';
 import 'providers/player_provider.dart';
 import 'services/share_link_handler.dart';
 import 'services/spotlight_service.dart';
+import 'services/siri_shortcuts_service.dart';
 import 'services/data_export_service.dart';
 import 'widgets/persistent_player_shell.dart';
 import 'widgets/unified_banner_ad_slot.dart';
@@ -42,12 +43,25 @@ class _MrPlayAppState extends State<MrPlayApp> {
 
   void _initNativeIntegrations() {
     SpotlightService.setOpenHandler(_openExternalUrl);
+    SiriShortcutsService.instance.setOpenHandler(_openWhenReady);
+    SiriShortcutsService.instance.init();
     ShareLinkHandler.instance.init(
       onLink: _handleSharedLink,
       onImport: _handleImport,
     );
     _widgetClickedSub = HomeWidget.widgetClicked.listen(_openFromWidget);
     HomeWidget.initiallyLaunchedFromHomeWidget().then(_openFromWidget);
+  }
+
+  Future<void> _openWhenReady(String url) async {
+    for (var i = 0; i < 20; i++) {
+      final controller = MrPlayApp.webViewKey.currentState;
+      if (controller != null) {
+        controller.loadUrl(url);
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
   }
 
   void _openExternalUrl(String url) {

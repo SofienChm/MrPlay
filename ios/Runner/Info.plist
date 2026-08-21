@@ -26,6 +26,10 @@
 		<true/>
 		<key>ITSAppUsesNonExemptEncryption</key>
 		<false/>
+		<key>NSUserActivityTypes</key>
+		<array>
+			<string>com.mrplay.app.openPlatform</string>
+		</array>
 		<key>UILaunchStoryboardName</key>
 		<string>LaunchScreen</string>
 		<key>UIMainStoryboardFile</key>

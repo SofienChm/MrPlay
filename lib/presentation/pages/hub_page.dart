@@ -6,6 +6,7 @@ import '../../data/models/custom_bookmark.dart';
 import '../../data/models/platform_model.dart';
 import '../../data/repositories/custom_bookmarks_repository.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../../services/siri_shortcuts_service.dart';
 import '../widgets/platform_card.dart';
 import '../pages/search_page.dart';
 import 'favorites_page.dart';
@@ -167,6 +168,10 @@ class _HubPageState extends State<HubPage> {
 
   void _onPlatformTap(PlatformModel platform) {
     SettingsRepository.setLastPlatformUrl(platform.url);
+    SiriShortcutsService.instance.setCurrent(
+      name: platform.name,
+      url: platform.url,
+    );
     MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
   }
 

@@ -10,6 +10,8 @@ import MediaPlayer
 @objc class AppDelegate: FlutterAppDelegate {
   private var spotlightChannel: FlutterMethodChannel?
   private var mediaChannel: FlutterMethodChannel?
+  private var siriChannel: FlutterMethodChannel?
+  private var shortcutActivities: [String: NSUserActivity] = [:]
 
   override func application(
     _ application: UIApplication,
@@ -24,6 +26,7 @@ import MediaPlayer
 
     setupSpotlightChannel()
     setupMediaChannel()
+    setupSiriChannel()
 
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
@@ -70,6 +73,10 @@ import MediaPlayer
       let url = identifier.hasPrefix("mrplay:") ? String(identifier.dropFirst("mrplay:".count)) : identifier
       spotlightChannel?.invokeMethod("open", arguments: url)
     }
+    if userActivity.activityType == "com.mrplay.app.openPlatform",
+       let url = userActivity.userInfo?["url"] as? String {
+      handleShortcutUrl(url)
+    }
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler)
   }
 
@@ -97,6 +104,69 @@ import MediaPlayer
 
   private func clearSpotlight() {
     CSSearchableIndex.default().deleteAllSearchableItems { _ in }
+  }
+
+  // MARK: - Siri shortcuts (NSUserActivity)
+
+  private func setupSiriChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else { return }
+    let channel = FlutterMethodChannel(name: "com.mrplay/siri", binaryMessenger: controller.binaryMessenger)
+    siriChannel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(nil)
+        return
+      }
+      switch call.method {
+      case "register":
+        if let args = call.arguments as? [String: Any],
+           let list = args["shortcuts"] as? [[String: Any]] {
+          for item in list {
+            if let id = item["id"] as? String,
+               let title = item["title"] as? String,
+               let url = item["url"] as? String {
+              self.makeActivity(id: id, title: title, url: url,
+                                phrase: item["phrase"] as? String)
+            }
+          }
+        }
+        result(nil)
+      case "setCurrent":
+        if let args = call.arguments as? [String: Any],
+           let name = args["name"] as? String,
+           let url = args["url"] as? String {
+          self.makeActivity(id: "current", title: "Open \(name)", url: url, phrase: nil)
+        }
+        result(nil)
+      case "consumePending":
+        let pending = UserDefaults.standard.string(forKey: "pendingShortcutUrl")
+        if pending != nil {
+          UserDefaults.standard.removeObject(forKey: "pendingShortcutUrl")
+        }
+        result(pending)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  private func makeActivity(id: String, title: String, url: String, phrase: String?) {
+    let activity = NSUserActivity(activityType: "com.mrplay.app.openPlatform")
+    activity.persistentIdentifier = id
+    activity.title = title
+    activity.userInfo = ["url": url]
+    activity.isEligibleForSearch = true
+    activity.isEligibleForPrediction = true
+    if let phrase, !phrase.isEmpty {
+      activity.suggestedInvocationPhrase = phrase
+    }
+    shortcutActivities[id] = activity
+    activity.becomeCurrent()
+  }
+
+  private func handleShortcutUrl(_ url: String) {
+    UserDefaults.standard.set(url, forKey: "pendingShortcutUrl")
+    siriChannel?.invokeMethod("onShortcut", arguments: ["url": url])
   }
 
   // MARK: - Media controls (Control Center / Lock Screen)
