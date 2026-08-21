@@ -164,11 +164,11 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
   Widget _platformIcon(String platform, ThemeData theme) {
     final icons = {
       'YouTube': Icons.play_arrow_rounded,
-      'Music': Icons.music_rounded,
+      'Music': Icons.music_note_rounded,
       'DailyMotion': Icons.videocam_rounded,
       'Twitch': Icons.cloud_download_rounded,
       'Kick': Icons.notifications_rounded,
-      '9Gag': Icons.fun_foreground_rounded,
+      '9Gag': Icons.emoji_events_rounded,
       'iFunny': Icons.sentiment_very_satisfied_rounded,
       'Rumble': Icons.pan_tool_rounded,
       'Web': Icons.link_rounded,
