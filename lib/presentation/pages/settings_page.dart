@@ -123,31 +123,6 @@ class _SettingsPageState extends State<SettingsPage> {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _showPlatformPicker(),
           ),
-          const _SectionHeader(title: 'Privacy & Security'),
-          _SettingsTile(
-            icon: Icons.toggle_on_outlined,
-            title: 'Toggles',
-            subtitle: 'Ad blocking & background audio switches',
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const TogglesPage()),
-            ),
-          ),
-          _SettingsTile(
-            icon: Icons.history,
-            title: 'Enable Watch History',
-            subtitle: _historyEnabled ? 'On' : 'Off',
-            trailing: Switch(
-              value: _historyEnabled,
-              onChanged: (value) => _changeHistory(value),
-            ),
-          ),
-          _SettingsTile(
-            icon: Icons.delete_outline,
-            title: 'Clear History',
-            subtitle: 'Clear watched videos record',
-            onTap: () => _showClearHistoryDialog(),
-          ),
           const _SectionHeader(title: 'Data'),
           _SettingsTile(
             icon: Icons.bar_chart,
@@ -213,6 +188,31 @@ class _SettingsPageState extends State<SettingsPage> {
               MaterialPageRoute(builder: (_) => const FaqPage()),
             ),
           ),
+          const _SectionHeader(title: 'Privacy & Security'),
+          _SettingsTile(
+            icon: Icons.toggle_on_outlined,
+            title: 'Toggles',
+            subtitle: 'Playback & content switches',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TogglesPage()),
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.history,
+            title: 'Enable Watch History',
+            subtitle: _historyEnabled ? 'On' : 'Off',
+            trailing: Switch(
+              value: _historyEnabled,
+              onChanged: (value) => _changeHistory(value),
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.delete_outline,
+            title: 'Clear History',
+            subtitle: 'Clear watched videos record',
+            onTap: () => _showClearHistoryDialog(),
+          ),
           const _SectionHeader(title: 'Contact Us'),
           _SettingsTile(
             icon: Icons.bug_report_outlined,
@@ -259,7 +259,7 @@ class _SettingsPageState extends State<SettingsPage> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Mrplay'),
+        title: const Center(child: Text('Mrplay')),
         content: const Column(
           mainAxisSize: MainAxisSize.min,
           children: [

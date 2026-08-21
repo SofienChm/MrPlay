@@ -10,6 +10,8 @@ import '../widgets/platform_card.dart';
 import '../pages/search_page.dart';
 import 'favorites_page.dart';
 import 'settings_page.dart';
+import 'stats_page.dart';
+import 'history_page.dart';
 import '../../app.dart';
 import '../../ad_config.dart';
 import '../../widgets/unified_banner_ad_slot.dart';
@@ -168,9 +170,44 @@ class _HubPageState extends State<HubPage> {
     MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
   }
 
+  void _onBottomNavTap(int index) {
+    final pages = [
+      () => const StatsPage(),
+      () => HistoryPage(),
+      () => const StatsPage(),
+      () => const SettingsPage(),
+    ];
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => pages[index]()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      bottomNavigationBar: BottomNavigationBar(
+        type: BottomNavigationBarType.fixed,
+        currentIndex: 0,
+        onTap: _onBottomNavTap,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.schedule_outlined),
+            label: 'Watch Time',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.history),
+            label: 'Watch History',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bar_chart),
+            label: 'Stats',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.settings_outlined),
+            label: 'Settings',
+          ),
+        ],
+      ),
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(

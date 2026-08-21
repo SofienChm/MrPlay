@@ -69,33 +69,6 @@ class _TogglesPageState extends State<TogglesPage> {
       body: ListView(
         children: [
           ListTile(
-            leading: const Icon(Icons.block),
-            title: const Text('Block ads & trackers'),
-            subtitle:
-                const Text('Off by default. Removes ads when enabled.'),
-            trailing: Switch(
-              value: _adBlockEnabled,
-              onChanged: RemoteConfigService.instance.adBlockOverride ==
-                      RemoteOverride.followUser
-                  ? (value) => _changeAdBlock(value)
-                  : null,
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.audiotrack_outlined),
-            title: const Text('Background audio'),
-            subtitle: const Text('Keep playing when app is in background'),
-            trailing: Switch(
-              value: _backgroundAudioEnabled,
-              onChanged:
-                  RemoteConfigService.instance.backgroundAudioOverride ==
-                          RemoteOverride.followUser
-                      ? (value) => _changeBackgroundAudio(value)
-                      : null,
-            ),
-          ),
-          const Divider(),
-          ListTile(
             leading: const Icon(Icons.movie_filter_outlined),
             title: const Text('Show shorts'),
             subtitle: const Text('Display shorts content in the hub'),
@@ -122,6 +95,33 @@ class _TogglesPageState extends State<TogglesPage> {
               value: _fullscreenOnRotation,
               onChanged: (value) =>
                   setState(() => _fullscreenOnRotation = value),
+            ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.block),
+            title: const Text('Block ads & trackers'),
+            subtitle:
+                const Text('Off by default. Removes ads when enabled.'),
+            trailing: Switch(
+              value: _adBlockEnabled,
+              onChanged: RemoteConfigService.instance.adBlockOverride ==
+                      RemoteOverride.followUser
+                  ? (value) => _changeAdBlock(value)
+                  : null,
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.audiotrack_outlined),
+            title: const Text('Background audio'),
+            subtitle: const Text('Keep playing when app is in background'),
+            trailing: Switch(
+              value: _backgroundAudioEnabled,
+              onChanged:
+                  RemoteConfigService.instance.backgroundAudioOverride ==
+                          RemoteOverride.followUser
+                      ? (value) => _changeBackgroundAudio(value)
+                      : null,
             ),
           ),
         ],
