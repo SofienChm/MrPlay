@@ -8,6 +8,7 @@ class SettingsRepository {
   static const String _adBlockKey = 'ad_block_enabled';
   static const String _backgroundAudioKey = 'background_audio_enabled';
   static const String _historyKey = 'history_enabled';
+  static const String _accentColorKey = 'accent_color';
 
   static Future<SharedPreferences> get _prefs =>
       SharedPreferences.getInstance();
@@ -91,6 +92,7 @@ class SettingsRepository {
     await prefs.remove(_lastPlatformUrlKey);
     await prefs.remove(_adBlockKey);
     await prefs.remove(_backgroundAudioKey);
+    await prefs.remove(_accentColorKey);
   }
 
   static Future<bool> getHistoryEnabled() async {
@@ -101,5 +103,17 @@ class SettingsRepository {
   static Future<void> setHistoryEnabled(bool enabled) async {
     final prefs = await _prefs;
     await prefs.setBool(_historyKey, enabled);
+  }
+
+  static const int defaultAccentColor = 0xFF2196F3;
+
+  static Future<int> getAccentColor() async {
+    final prefs = await _prefs;
+    return prefs.getInt(_accentColorKey) ?? defaultAccentColor;
+  }
+
+  static Future<void> setAccentColor(int value) async {
+    final prefs = await _prefs;
+    await prefs.setInt(_accentColorKey, value);
   }
 }

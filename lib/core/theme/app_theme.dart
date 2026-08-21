@@ -3,14 +3,19 @@ import 'package:google_fonts/google_fonts.dart';
 import 'app_colors.dart';
 
 class AppTheme {
-  static ThemeData get lightTheme {
+  static ThemeData lightTheme(Color accent) {
     return ThemeData(
       brightness: Brightness.light,
-      primaryColor: AppColors.primary,
+      primaryColor: accent,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: accent,
+        primary: accent,
+        brightness: Brightness.light,
+      ),
       scaffoldBackgroundColor: AppColors.background,
       textTheme: GoogleFonts.poppinsTextTheme(),
       appBarTheme: AppBarTheme(
-        backgroundColor: AppColors.primary,
+        backgroundColor: accent,
         foregroundColor: Colors.white,
         elevation: 0,
       ),
@@ -21,10 +26,15 @@ class AppTheme {
     );
   }
 
-  static ThemeData get darkTheme {
+  static ThemeData darkTheme(Color accent) {
     return ThemeData(
       brightness: Brightness.dark,
-      primaryColor: AppColors.primary,
+      primaryColor: accent,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: accent,
+        primary: accent,
+        brightness: Brightness.dark,
+      ),
       scaffoldBackgroundColor: const Color(0xFF121212),
       textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
       appBarTheme: const AppBarTheme(

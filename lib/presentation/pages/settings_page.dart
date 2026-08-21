@@ -9,6 +9,7 @@ import 'stats_page.dart';
 import 'history_page.dart';
 import 'toggles_page.dart';
 import 'faq_page.dart';
+import 'in_app_browser_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -21,7 +22,19 @@ class _SettingsPageState extends State<SettingsPage> {
   String _themeMode = 'system';
   String _defaultPlatform = 'YouTube';
   bool _historyEnabled = true;
+  int _accent = SettingsRepository.defaultAccentColor;
   bool _disposed = false;
+
+  static const List<Color> _accentChoices = [
+    Color(0xFF2196F3),
+    Color(0xFF3F51B5),
+    Color(0xFF9C27B0),
+    Color(0xFFE91E63),
+    Color(0xFFF44336),
+    Color(0xFFFF9800),
+    Color(0xFF4CAF50),
+    Color(0xFF009688),
+  ];
 
   @override
   void initState() {
@@ -39,11 +52,13 @@ class _SettingsPageState extends State<SettingsPage> {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
     final history = await SettingsRepository.getHistoryEnabled();
+    final accent = await SettingsRepository.getAccentColor();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
       _historyEnabled = history;
+      _accent = accent;
     });
   }
 
@@ -71,14 +86,23 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _historyEnabled = enabled);
   }
 
+  Future<void> _changeAccent(Color color) async {
+    await SettingsRepository.setAccentColor(color.toARGB32());
+    setState(() => _accent = color.toARGB32());
+    MrPlayApp.accentColorNotifier.value = color;
+  }
+
   Future<void> _clearCache() async {
     await SettingsRepository.clearCache();
     setState(() {
       _themeMode = 'system';
       _defaultPlatform = 'YouTube';
       _historyEnabled = true;
+      _accent = SettingsRepository.defaultAccentColor;
     });
     MrPlayApp.themeModeNotifier.value = ThemeMode.system;
+    MrPlayApp.accentColorNotifier.value =
+        const Color(SettingsRepository.defaultAccentColor);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cache cleared')),
@@ -114,6 +138,16 @@ class _SettingsPageState extends State<SettingsPage> {
             title: 'Theme Mode',
             subtitle: _themeMode.toUpperCase(),
             onTap: () => _showThemePicker(),
+          ),
+          _SettingsTile(
+            icon: Icons.palette_outlined,
+            title: 'Accent Color',
+            subtitle: 'Pick your highlight color',
+            trailing: CircleAvatar(
+              radius: 10,
+              backgroundColor: Color(_accent),
+            ),
+            onTap: () => _showAccentPicker(),
           ),
           const _SectionHeader(title: 'Manage Apps'),
           _SettingsTile(
@@ -160,7 +194,14 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.privacy_tip_outlined,
             title: 'Privacy Policy',
             subtitle: 'How we handle your data',
-            onTap: () => _openUrl('https://mrplay.app-miniminds.com/'),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const InAppBrowserPage(
+                  url: 'https://mrplay.app-miniminds.com/',
+                  title: 'Privacy Policy',
+                ),
+              ),
+            ),
           ),
           _SettingsTile(
             icon: Icons.info_outline,
@@ -337,6 +378,60 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () { _changeTheme('system'); Navigator.pop(context); },
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showAccentPicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Accent Color',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Wrap(
+                spacing: 18,
+                runSpacing: 18,
+                children: _accentChoices.map((color) {
+                  final selected = color.toARGB32() == _accent;
+                  return GestureDetector(
+                    onTap: () {
+                      _changeAccent(color);
+                      Navigator.pop(context);
+                    },
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: selected
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Colors.transparent,
+                          width: 3,
+                        ),
+                      ),
+                      child: selected
+                          ? const Icon(Icons.check,
+                              color: Colors.white, size: 22)
+                          : null,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
         ),
       ),
     );

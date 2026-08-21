@@ -1679,6 +1679,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     PersistentWebViewState.hubVisible.value = true;
   }
 
+  /// Public session reset for the app shell (e.g. backgrounded session
+  /// expiry). Returns the user to the hub with all playback torn down.
+  void resetToHub() => _goToHub();
+
   void _minimizeVideoTab() {
     if (_videoTabUrl == null) return;
     _tabSwipeOffset = 0;

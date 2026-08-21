@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_widget/home_widget.dart';
 import 'core/theme/app_theme.dart';
+import 'data/repositories/settings_repository.dart';
 import 'presentation/pages/hub_page.dart';
 import 'presentation/widgets/persistent_webview.dart';
 import 'providers/player_provider.dart';
@@ -21,24 +22,58 @@ class MrPlayApp extends StatefulWidget {
 
   static final GlobalKey<PersistentWebViewState> webViewKey = GlobalKey();
   static final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
+  static final ValueNotifier<Color> accentColorNotifier =
+      ValueNotifier(const Color(SettingsRepository.defaultAccentColor));
+
+  /// A backgrounded session older than this is reset when the app resumes.
+  static const Duration _sessionTimeout = Duration(hours: 1);
 
   @override
   State<MrPlayApp> createState() => _MrPlayAppState();
 }
 
-class _MrPlayAppState extends State<MrPlayApp> {
+class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
   StreamSubscription<Uri?>? _widgetClickedSub;
+  DateTime? _pausedAt;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadAccent();
     _initNativeIntegrations();
+  }
+
+  Future<void> _loadAccent() async {
+    final value = await SettingsRepository.getAccentColor();
+    MrPlayApp.accentColorNotifier.value = Color(value);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _widgetClickedSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.paused:
+        _pausedAt ??= DateTime.now();
+        break;
+      case AppLifecycleState.resumed:
+        final pausedAt = _pausedAt;
+        if (pausedAt != null) {
+          _pausedAt = null;
+          if (DateTime.now().difference(pausedAt) >= MrPlayApp._sessionTimeout) {
+            MrPlayApp.webViewKey.currentState?.resetToHub();
+          }
+        }
+        break;
+      default:
+        break;
+    }
   }
 
   void _initNativeIntegrations() {
@@ -121,13 +156,16 @@ class _MrPlayAppState extends State<MrPlayApp> {
             statusBarIconBrightness: Brightness.light,
           ),
         );
-        return MaterialApp(
-          title: 'MrPlay',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
-          themeMode: themeMode,
-          home: Scaffold(
+        return ValueListenableBuilder<Color>(
+          valueListenable: MrPlayApp.accentColorNotifier,
+          builder: (context, accent, _) {
+            return MaterialApp(
+              title: 'MrPlay',
+              debugShowCheckedModeBanner: false,
+              theme: AppTheme.lightTheme(accent),
+              darkTheme: AppTheme.darkTheme(accent),
+              themeMode: themeMode,
+              home: Scaffold(
             body: Stack(
               children: [
                 const HubPage(),
@@ -164,7 +202,9 @@ class _MrPlayAppState extends State<MrPlayApp> {
                 ),
               ],
             ),
-          ),
+            ),
+          );
+          },
         );
       },
     );
