@@ -141,6 +141,7 @@ class _MrPlayAppState extends State<MrPlayApp> {
                         builder: (context, hubVisible, _) {
                           return UnifiedBannerAdSlot(
                             isVisible: !hubVisible && !hide,
+                            alignment: Alignment.centerLeft,
                           );
                         },
                       );

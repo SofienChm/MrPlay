@@ -15,6 +15,9 @@ class TogglesPage extends StatefulWidget {
 class _TogglesPageState extends State<TogglesPage> {
   bool _adBlockEnabled = false;
   bool _backgroundAudioEnabled = false;
+  bool _showShorts = true;
+  bool _showPosts = true;
+  bool _fullscreenOnRotation = false;
   bool _disposed = false;
 
   @override
@@ -89,6 +92,36 @@ class _TogglesPageState extends State<TogglesPage> {
                           RemoteOverride.followUser
                       ? (value) => _changeBackgroundAudio(value)
                       : null,
+            ),
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.movie_filter_outlined),
+            title: const Text('Show shorts'),
+            subtitle: const Text('Display shorts content in the hub'),
+            trailing: Switch(
+              value: _showShorts,
+              onChanged: (value) => setState(() => _showShorts = value),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.article_outlined),
+            title: const Text('Show posts'),
+            subtitle: const Text('Display posts content in the hub'),
+            trailing: Switch(
+              value: _showPosts,
+              onChanged: (value) => setState(() => _showPosts = value),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.screen_rotation_outlined),
+            title: const Text('Enter fullscreen on device rotation'),
+            subtitle:
+                const Text('Rotate your device to watch in fullscreen'),
+            trailing: Switch(
+              value: _fullscreenOnRotation,
+              onChanged: (value) =>
+                  setState(() => _fullscreenOnRotation = value),
             ),
           ),
         ],

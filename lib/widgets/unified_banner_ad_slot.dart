@@ -10,6 +10,7 @@ class UnifiedBannerAdSlot extends StatefulWidget {
   final Color backgroundColor;
   final bool isVisible;
   final bool showDismissButton;
+  final Alignment alignment;
 
   const UnifiedBannerAdSlot({
     super.key,
@@ -18,6 +19,7 @@ class UnifiedBannerAdSlot extends StatefulWidget {
     this.backgroundColor = AppColors.surface,
     this.isVisible = true,
     this.showDismissButton = true,
+    this.alignment = Alignment.center,
   });
 
   @override
@@ -106,7 +108,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Align(
-        alignment: Alignment.center,
+        alignment: widget.alignment,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: SizedBox(

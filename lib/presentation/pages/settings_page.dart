@@ -8,6 +8,7 @@ import '../../services/recent_activity_service.dart';
 import 'stats_page.dart';
 import 'history_page.dart';
 import 'toggles_page.dart';
+import 'faq_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -187,6 +188,12 @@ class _SettingsPageState extends State<SettingsPage> {
             onTap: () => _openUrl('https://mrplay.app-miniminds.com/'),
           ),
           _SettingsTile(
+            icon: Icons.info_outline,
+            title: 'About MrPlay',
+            subtitle: 'Learn more about the app',
+            onTap: () => _showAboutMrPlayDialog(),
+          ),
+          _SettingsTile(
             icon: Icons.star_outline,
             title: 'Rate App',
             subtitle: 'Rate us on the App Store',
@@ -198,6 +205,27 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Tell your friends about MrPlay',
             onTap: () => _shareApp(),
           ),
+          _SettingsTile(
+            icon: Icons.quiz_outlined,
+            title: 'FAQ',
+            subtitle: 'Frequently asked questions',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const FaqPage()),
+            ),
+          ),
+          const _SectionHeader(title: 'Contact Us'),
+          _SettingsTile(
+            icon: Icons.bug_report_outlined,
+            title: 'Report a Bug',
+            subtitle: 'Something not working? Tell us',
+            onTap: () => _sendEmail('MrPlay - Bug Report'),
+          ),
+          _SettingsTile(
+            icon: Icons.lightbulb_outline,
+            title: 'Suggest New Features',
+            subtitle: 'Share your ideas with us',
+            onTap: () => _sendEmail('MrPlay - Feature Suggestion'),
+          ),
         ],
       ),
     );
@@ -208,6 +236,53 @@ class _SettingsPageState extends State<SettingsPage> {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+
+  Future<void> _sendEmail(String subject) async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'mrplayapp@gmail.com',
+      queryParameters: {'subject': subject},
+    );
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open your email app')),
+        );
+      }
+    }
+  }
+
+  void _showAboutMrPlayDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Mrplay'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Your all-in-one video hub',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Text('Version ${AppConstants.appVersion}'),
+            SizedBox(height: 8),
+            Text('©2026 sofien'),
+            SizedBox(height: 8),
+            Text('Made with love in Tunisia 🇹🇳'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Dismiss'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showClearHistoryDialog() {
