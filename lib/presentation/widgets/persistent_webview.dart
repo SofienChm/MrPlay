@@ -1000,8 +1000,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void loadUrl(String url) {
     if (_routesToVideoTab(url)) {
-      // Playing a saved/history video from an overlay page: reveal the webview
-      // layer BEFORE opening the video tab, or it loads behind the hub.
+      // Playing a saved/history video from an overlay page (Library,
+      // Watch History): reveal the webview layer BEFORE opening the video
+      // tab. isReady gates this whole widget's render, so without it the
+      // video tab would be built invisibly behind the hub.
+      _loadingTimer?.cancel();
+      setState(() {
+        isReady = true;
+        _isLoading = false;
+      });
       PersistentWebViewState.hubVisible.value = false;
       _openVideoTab(url);
       return;
