@@ -55,9 +55,18 @@ jobs:
         run: |
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
           echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o $PP_PATH
-          UUID=$(security cms -D -i $PP_PATH 2>/dev/null | plutil -extract UUID xml1 -o - - | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
+          file $PP_PATH
+          UUID=$(security cms -D -i "$PP_PATH" 2>/dev/null | plutil -extract UUID raw -o - - 2>/dev/null)
+          if [ -z "$UUID" ]; then
+            UUID=$(security cms -D -i "$PP_PATH" 2>/dev/null | grep -aA1 '<key>UUID</key>' | tail -1 | sed -E 's/.*<string>(.*)<\/string>.*/\1/')
+          fi
+          echo "Profile UUID: $UUID"
+          if [ -z "$UUID" ]; then
+            echo "::error::Could not extract UUID from provisioning profile"
+            exit 1
+          fi
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
+          cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
           echo "PROFILE_UUID=$UUID" >> $GITHUB_ENV
 
       - name: Generate ExportOptions.plist
