@@ -7,6 +7,7 @@ class SettingsRepository {
   static const String _lastPlatformUrlKey = 'last_platform_url';
   static const String _adBlockKey = 'ad_block_enabled';
   static const String _backgroundAudioKey = 'background_audio_enabled';
+  static const String _historyKey = 'history_enabled';
 
   static Future<SharedPreferences> get _prefs =>
       SharedPreferences.getInstance();
@@ -90,5 +91,20 @@ class SettingsRepository {
     await prefs.remove(_lastPlatformUrlKey);
     await prefs.remove(_adBlockKey);
     await prefs.remove(_backgroundAudioKey);
+  }
+
+  static Future<bool> getHistoryEnabled() async {
+    final prefs = await _prefs;
+    return prefs.getBool(_historyKey) ?? true;
+  }
+
+  static Future<void> setHistoryEnabled(bool enabled) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_historyKey, enabled);
+  }
+
+  static Future<void> clearHistory() async {
+    final prefs = await _prefs;
+    await prefs.remove(_historyKey);
   }
 }

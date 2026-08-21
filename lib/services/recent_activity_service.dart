@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -14,7 +15,7 @@ class RecentActivityService {
   static const String _appGroupId = 'group.com.mrplay.shared';
   static const String _widgetKind = 'MrPlayRecentWidget';
   static const String _widgetDataKey = 'recent';
-  static const int _maxEntries = 5;
+  static const int _maxEntries = 50;
 
   bool _groupConfigured = false;
 
@@ -24,7 +25,7 @@ class RecentActivityService {
     _groupConfigured = true;
   }
 
-  Future<List<Map<String, String>>> load() async {
+  Future<List<Map<String, dynamic>>> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
     if (raw == null || raw.isEmpty) return const [];
@@ -32,26 +33,33 @@ class RecentActivityService {
       final decoded = jsonDecode(raw) as List<dynamic>;
       return decoded.map((dynamic item) {
         final map = item as Map<String, dynamic>;
-        return <String, String>{
-          'title': (map['title'] as String?) ?? '',
-          'url': (map['url'] as String?) ?? '',
-          'platform': (map['platform'] as String?) ?? '',
+        return <String, dynamic>{
+          'title': map['title'] as String?,
+          'url': map['url'] as String?,
+          'platform': map['platform'] as String?,
+          'date': map['date'] as int? ?? 0,
         };
-      }).toList();
+      }).toList()
+        ..sort((a, b) => b['date'].compareTo(a['date']));
     } catch (_) {
       return const [];
     }
   }
 
   Future<void> recordVideo(Video video) async {
-    final entry = <String, String>{
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final entry = <String, dynamic>{
       'title': video.title,
       'url': video.videoUrl,
       'platform': video.platform.isEmpty ? 'Web' : video.platform,
+      'date': now,
     };
     final entries = await load();
     entries.removeWhere((e) => e['url'] == video.videoUrl);
     entries.insert(0, entry);
+    // Keep only entries from last 15 days (15 * 24 * 60 * 60 * 1000 = 1,296,000,000 ms)
+    final fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
+    entries.removeWhere((e) => now - e['date'] > fifteenDaysMs);
     if (entries.length > _maxEntries) {
       entries.removeRange(_maxEntries, entries.length);
     }
@@ -62,7 +70,7 @@ class RecentActivityService {
     await _persist(const []);
   }
 
-  Future<void> _persist(List<Map<String, String>> entries) async {
+  Future<void> _persist(List<Map<String, dynamic>> entries) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_prefsKey, jsonEncode(entries));
     try {

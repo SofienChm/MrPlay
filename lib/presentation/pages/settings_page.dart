@@ -19,6 +19,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _defaultPlatform = 'YouTube';
   bool _adBlockEnabled = false;
   bool _backgroundAudioEnabled = false;
+  bool _historyEnabled = true;
   bool _disposed = false;
 
   @override
@@ -40,12 +41,14 @@ class _SettingsPageState extends State<SettingsPage> {
         await SettingsRepository.getEffectiveAdBlockEnabled();
     final backgroundAudio =
         await SettingsRepository.getEffectiveBackgroundAudioEnabled();
+    final history = await SettingsRepository.getHistoryEnabled();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
       _adBlockEnabled = adBlock;
       _backgroundAudioEnabled = backgroundAudio;
+      _historyEnabled = history;
     });
   }
 
@@ -69,17 +72,22 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _changeAdBlock(bool enabled) async {
-  final override = RemoteConfigService.instance.adBlockOverride;
-  if (override != RemoteOverride.followUser) return;
+    final override = RemoteConfigService.instance.adBlockOverride;
+    if (override != RemoteOverride.followUser) return;
     await SettingsRepository.setAdBlockEnabled(enabled);
     setState(() => _adBlockEnabled = enabled);
   }
 
   Future<void> _changeBackgroundAudio(bool enabled) async {
-  final override = RemoteConfigService.instance.backgroundAudioOverride;
-  if (override != RemoteOverride.followUser) return;
+    final override = RemoteConfigService.instance.backgroundAudioOverride;
+    if (override != RemoteOverride.followUser) return;
     await SettingsRepository.setBackgroundAudioEnabled(enabled);
     setState(() => _backgroundAudioEnabled = enabled);
+  }
+
+  Future<void> _changeHistory(bool enabled) async {
+    await SettingsRepository.setHistoryEnabled(enabled);
+    setState(() => _historyEnabled = enabled);
   }
 
   Future<void> _clearCache() async {
@@ -89,11 +97,21 @@ class _SettingsPageState extends State<SettingsPage> {
       _defaultPlatform = 'YouTube';
       _adBlockEnabled = false;
       _backgroundAudioEnabled = false;
+      _historyEnabled = true;
     });
     MrPlayApp.themeModeNotifier.value = ThemeMode.system;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cache cleared')),
+      );
+    }
+  }
+
+  Future<void> _clearHistory() async {
+    await SettingsRepository.clearHistory();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('History cleared')),
       );
     }
   }
@@ -118,12 +136,57 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: _themeMode.toUpperCase(),
             onTap: () => _showThemePicker(),
           ),
-          const _SectionHeader(title: 'Platforms'),
+          const _SectionHeader(title: 'Manage Apps'),
           _SettingsTile(
-            icon: Icons.home,
-            title: 'Default Platform',
-            subtitle: _defaultPlatform,
+            icon: Icons.apps,
+            title: 'Choose Platforms',
+            subtitle: 'Select which platforms appear in your hub',
+            trailing: const Icon(Icons.chevron_right),
             onTap: () => _showPlatformPicker(),
+          ),
+          const _SectionHeader(title: 'Privacy & Security'),
+          _SettingsTile(
+            icon: Icons.block,
+            title: 'Block ads & trackers',
+            subtitle: 'Off by default. Removes ads when enabled.',
+            trailing: Switch(
+              value: _adBlockEnabled,
+              onChanged: RemoteConfigService.instance.adBlockOverride ==
+                      RemoteOverride.followUser
+                  ? (value) => _changeAdBlock(value)
+                  : null,
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.audiotrack_outlined,
+            title: 'Background audio',
+            subtitle: 'Keep playing when app is in background',
+            trailing: Switch(
+              value: _backgroundAudioEnabled,
+              onChanged: RemoteConfigService.instance.backgroundAudioOverride ==
+                      RemoteOverride.followUser
+                  ? (value) => _changeBackgroundAudio(value)
+                  : null,
+            ),
+          ),
+          _SectionHeader(
+            title: 'Watch History',
+          ),
+          _SettingsTile(
+            icon: Icons.history,
+            title: 'Enable Watch History',
+            subtitle: _historyEnabled ? 'On' : 'Off',
+            trailing: Switch(
+              value: _historyEnabled,
+              onChanged: (value) => _changeHistory(value),
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.delete_outline,
+            title: 'Clear History',
+            subtitle: 'Clear watched videos record',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showClearHistoryDialog(),
           ),
           const _SectionHeader(title: 'Data'),
           _SettingsTile(
@@ -140,34 +203,18 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Reset all settings to default',
             onTap: _clearCache,
           ),
+          _SettingsTile(
+            icon: Icons.history,
+            title: 'View History',
+            subtitle: 'Watch history records',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const HistoryPage()),
+            ),
+          ),
           _SectionHeader(
-            title: 'Privacy',
+            title: 'About',
           ),
-          _SettingsTile(
-            icon: Icons.block,
-            title: 'Block ads & trackers',
-            subtitle: 'Off by default',
-            trailing: Switch(
-              value: _adBlockEnabled,
-              onChanged: RemoteConfigService.instance.adBlockOverride ==
-                      RemoteOverride.followUser
-                  ? (value) => _changeAdBlock(value)
-                  : null,
-            ),
-          ),
-          _SettingsTile(
-            icon: Icons.audiotrack_outlined,
-            title: 'Background audio',
-            subtitle: 'Keep playing when app is closed',
-            trailing: Switch(
-              value: _backgroundAudioEnabled,
-              onChanged: RemoteConfigService.instance.backgroundAudioOverride ==
-                      RemoteOverride.followUser
-                  ? (value) => _changeBackgroundAudio(value)
-                  : null,
-            ),
-          ),
-          const _SectionHeader(title: 'About'),
           _SettingsTile(
             icon: Icons.info_outline,
             title: AppConstants.appName,
@@ -202,6 +249,32 @@ class _SettingsPageState extends State<SettingsPage> {
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
+  }
+
+  void _showClearHistoryDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear Watch History'),
+        content: const Text('This will remove all watched videos from your history. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              _clearHistory();
+              Navigator.pop(context);
+            },
+            child: const Text(
+              'Clear',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showThemePicker() {
@@ -240,7 +313,7 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       isScrollControlled: true,
       builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
+        initialChildSize: 0.7,
         expand: false,
         builder: (context, scrollController) => ListView.builder(
           controller: scrollController,
