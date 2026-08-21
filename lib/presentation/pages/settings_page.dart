@@ -6,6 +6,7 @@ import '../../core/constants/app_constants.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../services/remote_config_service.dart';
 import 'stats_page.dart';
+import 'history_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
