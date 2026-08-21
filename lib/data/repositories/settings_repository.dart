@@ -102,9 +102,4 @@ class SettingsRepository {
     final prefs = await _prefs;
     await prefs.setBool(_historyKey, enabled);
   }
-
-  static Future<void> clearHistory() async {
-    final prefs = await _prefs;
-    await prefs.remove(_historyKey);
-  }
 }

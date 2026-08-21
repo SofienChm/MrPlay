@@ -1,25 +1,18 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../models/video.dart';
-import '../../providers/player_provider.dart';
 import '../../services/recent_activity_service.dart';
-import '../../core/constants/platform_constants.dart';
 
-class HistoryPage extends ConsumerStatefulWidget {
+class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
 
   @override
-  ConsumerState<HistoryPage> createState() => _HistoryPageState();
+  State<HistoryPage> createState() => _HistoryPageState();
 }
 
-class _HistoryPageState extends ConsumerState<HistoryPage> {
-  late Future<List<Map<String, dynamic>>> _historyFuture;
-  bool _isLoading = false;
-  String? _clearError;
+class _HistoryPageState extends State<HistoryPage> {
+  List<Map<String, dynamic>> _history = const [];
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -29,29 +22,19 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
 
   Future<void> _refreshHistory() async {
     setState(() => _isLoading = true);
-    _historyFuture = RecentActivityService.instance.load();
-    setState(() => _isLoading = false);
-  }
-
-  Future<void> _clearHistory() async {
-    setState(() => _isLoading = true);
     try {
-      await RecentActivityService.instance.clear();
-      await _refreshHistory();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('History cleared')),
-        );
-      }
-    } catch (e) {
-      setState(() => _clearError = 'Failed to clear history');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      final entries = await RecentActivityService.instance.load();
+      if (!mounted) return;
+      setState(() {
+        _history = entries;
+        _isLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to load history')),
+      );
     }
   }
 
@@ -90,74 +73,52 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildHistoryList(theme),
-                if (_clearError != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _clearError!,
-                    style: const TextStyle(color: Colors.red, fontSize: 12),
-                  ),
-                ],
-              ],
-            ),
-    );
-  }
+          : RefreshIndicator(
+              onRefresh: _refreshHistory,
+              child: _history.isEmpty
+                  ? ListView(
+                      children: [_emptyState(theme)],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: _history.length,
+                      itemBuilder: (context, index) {
+                        final entry = _history[index];
+                        final date = entry['date'] as int?;
+                        final formatted =
+                            date != null ? _formatDate(date) : 'Unknown';
 
-  Widget _buildHistoryList(ThemeData theme) {
-    return Expanded(
-      child: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _historyFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-          if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return _emptyState(theme);
-          }
-
-          final history = snapshot.data!;
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: history.length,
-            itemBuilder: (context, index) {
-              final entry = history[index];
-              final date = entry['date'] as int?;
-              final formatted = date != null ? _formatDate(date) : 'Unknown';
-
-              return Card(
-                margin: const EdgeInsets.only(bottom: 12),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  leading: _platformIcon(entry['platform'] as String? ?? 'Web', theme),
-                  title: Text(
-                    entry['title'] as String? ?? 'Unknown Video',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall,
-                  ),
-                  subtitle: Text(
-                    '${entry['platform'] as String? ?? 'Web'} • $formatted',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            leading: _platformIcon(
+                                entry['platform'] as String? ?? 'Web', theme),
+                            title: Text(
+                              entry['title'] as String? ?? 'Unknown Video',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleSmall,
+                            ),
+                            subtitle: Text(
+                              '${entry['platform'] as String? ?? 'Web'} • $formatted',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.6),
+                              ),
+                            ),
+                            onTap: () {
+                              final url = entry['url'] as String?;
+                              if (url != null && url.isNotEmpty) {
+                                _openUrl(url);
+                              }
+                            },
+                          ),
+                        );
+                      },
                     ),
-                  ),
-                  onTap: () {
-                    final url = entry['url'] as String?;
-                    if (url != null && url.isNotEmpty) {
-                      _openUrl(url);
-                    }
-                  },
-                ),
-              );
-            },
-          );
-        },
-      ),
+            ),
     );
   }
 
@@ -184,30 +145,38 @@ class _HistoryPageState extends ConsumerState<HistoryPage> {
     );
   }
 
-Widget _emptyState(ThemeData theme) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Icon(
-          Icons.history_rounded,
-          size: 64,
-          color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+  Widget _emptyState(ThemeData theme) {
+    return SizedBox(
+      height: MediaQuery.of(context).size.height * 0.7,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.history_rounded,
+              size: 64,
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No watch history yet',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.titleMedium?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Videos you watch will appear here',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          'No watch history yet',
-          style: theme.textTheme.titleMedium?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.6),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Videos you watch will appear here',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

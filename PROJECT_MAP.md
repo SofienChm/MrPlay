@@ -68,6 +68,21 @@ MrPlay - Project Map
 >   swipe-down gesture — so the video stays visible in its floating window
 >   instead of a black inline frame. `enterPiP`/`exitPiP`/`togglePictureInPicture`
 >   also now target the actively-playing `<video>`.
+> - Fixes 2026-08-21: watch history never recorded anything — root cause:
+>   `RecentActivityService.load()` returned `const []` when storage was empty
+>   and `recordVideo` mutated that list (`removeWhere`) → unawaited future
+>   threw `Unsupported operation` silently on the FIRST ever recording, so
+>   history could never bootstrap. load() now always returns a fresh mutable
+>   list; recordVideo copies defensively; recording is gated by the
+>   "Enable Watch History" toggle; `SettingsRepository.clearHistory()` used to
+>   delete the toggle key instead of the records — removed, settings page now
+>   calls `RecentActivityService.clear()`. HistoryPage rewritten: real async
+>   loading + pull-to-refresh + properly centered empty state. Settings
+>   restructure: "Enable Watch History" + "Clear History" moved into Privacy &
+>   Security; new "Toggles" sub-page (`toggles_page.dart`) hosts the
+>   "Block ads & trackers" and "Background audio" switches. Hub banner ad is
+>   centered (`UnifiedBannerAdSlot` had a hard `Alignment.centerLeft`; padding
+>   made symmetric, width from adSize). Tests: `test/recent_activity_test.dart`.
 
 Overview
 MrPlay is a multi-platform video/content hub iOS app built with Flutter. It provides a native iOS experience with a platform hub, persistent WebView-based video playback, background audio, mini player overlay, and JavaScript-based ad blocking on YouTube mobile web.

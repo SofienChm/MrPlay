@@ -104,13 +104,13 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Align(
-        alignment: Alignment.centerLeft,
+        alignment: Alignment.center,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: SizedBox(
-            width: 320,
+            width: widget.adSize.width.toDouble(),
             height: widget.adSize.height.toDouble(),
             child: Stack(
               children: [

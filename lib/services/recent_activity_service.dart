@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/video.dart';
+import '../data/repositories/settings_repository.dart';
 
 class RecentActivityService {
   RecentActivityService._();
@@ -25,28 +25,34 @@ class RecentActivityService {
     _groupConfigured = true;
   }
 
+  /// Returns the stored entries, newest first. Always returns a fresh
+  /// modifiable list (never a const/unmodifiable one) so callers can mutate
+  /// the result.
   Future<List<Map<String, dynamic>>> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_prefsKey);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) return <Map<String, dynamic>>[];
     try {
-      final decoded = jsonDecode(raw) as List<dynamic>;
+      final decoded = jsonDecode(raw);
+      if (decoded is! List<dynamic>) return const [];
       return decoded.map((dynamic item) {
-        final map = item as Map<String, dynamic>;
+        if (item is! Map) return <String, dynamic>{};
         return <String, dynamic>{
-          'title': map['title'] as String?,
-          'url': map['url'] as String?,
-          'platform': map['platform'] as String?,
-          'date': map['date'] as int? ?? 0,
+          'title': item['title'] as String?,
+          'url': item['url'] as String?,
+          'platform': item['platform'] as String?,
+          'date': item['date'] as int? ?? 0,
         };
-      }).toList()
+      }).where((e) => (e['url'] as String?)?.isNotEmpty ?? false).toList()
         ..sort((a, b) => b['date'].compareTo(a['date']));
     } catch (_) {
-      return const [];
+      return <Map<String, dynamic>>[];
     }
   }
 
   Future<void> recordVideo(Video video) async {
+    // "Enable Watch History" off means nothing is recorded.
+    if (!await SettingsRepository.getHistoryEnabled()) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     final entry = <String, dynamic>{
       'title': video.title,
@@ -54,7 +60,7 @@ class RecentActivityService {
       'platform': video.platform.isEmpty ? 'Web' : video.platform,
       'date': now,
     };
-    final entries = await load();
+    final entries = List<Map<String, dynamic>>.of(await load());
     entries.removeWhere((e) => e['url'] == video.videoUrl);
     entries.insert(0, entry);
     // Keep only entries from last 15 days (15 * 24 * 60 * 60 * 1000 = 1,296,000,000 ms)
