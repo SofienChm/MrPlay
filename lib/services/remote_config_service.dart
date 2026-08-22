@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
+import '../ad_config.dart';
 
 /// How a remote config parameter should treat the user's local preference.
 enum RemoteOverride {
@@ -26,7 +27,13 @@ class RemoteConfigService {
 
   static const String _adBlockKey = 'ad_block';
   static const String _backgroundAudioKey = 'background_audio';
+  static const String _hubAdUnitKey = 'ad_unit_hub';
+  static const String _floatingAdUnitKey = 'ad_unit_floating';
   static const String _localDefault = 'default';
+
+  /// Bumped after every successful fetch+activate so live banner slots can
+  /// reload with fresh ad unit IDs.
+  final ValueNotifier<int> updateTick = ValueNotifier(0);
 
   bool _fetched = false;
 
@@ -37,6 +44,29 @@ class RemoteConfigService {
 
   /// "Background audio" override set in the Remote Config console.
   RemoteOverride get backgroundAudioOverride => _overrideOf(_backgroundAudioKey);
+
+  /// Ad unit ID for the hub page banner.
+  ///
+  /// Console param `ad_unit_hub`: set it to a real AdMob unit ID to go live,
+  /// or leave it as "default" to serve Google's test banners.
+  String get hubBannerAdUnitId =>
+      _adUnitOf(_hubAdUnitKey, AdConfig.hubBannerAdUnitId);
+
+  /// Ad unit ID for the floating (in-browser) banner.
+  ///
+  /// Console param `ad_unit_floating`: same contract as [hubBannerAdUnitId].
+  String get floatingBannerAdUnitId =>
+      _adUnitOf(_floatingAdUnitKey, AdConfig.bannerAdUnitId);
+
+  static final RegExp _adUnitPattern =
+      RegExp(r'^ca-app-pub-\d{9,16}/\d{8,12}$');
+
+  String _adUnitOf(String key, String fallback) {
+    if (!hasFetched) return fallback;
+    final value = FirebaseRemoteConfig.instance.getString(key).trim();
+    if (value.isEmpty || value == _localDefault) return fallback;
+    return _adUnitPattern.hasMatch(value) ? value : fallback;
+  }
 
   RemoteOverride _overrideOf(String key) {
     if (!hasFetched) return RemoteOverride.followUser;
@@ -67,11 +97,14 @@ class RemoteConfigService {
       await remoteConfig.setDefaults(const {
         _adBlockKey: _localDefault,
         _backgroundAudioKey: _localDefault,
+        _hubAdUnitKey: _localDefault,
+        _floatingAdUnitKey: _localDefault,
       });
 
       final updated = await remoteConfig.fetchAndActivate();
       debugPrint('MrPlay remote config fetched (activated=$updated)');
       _fetched = true;
+      updateTick.value++;
     } catch (e) {
       debugPrint('MrPlay remote config failed: $e');
     }

@@ -15,7 +15,6 @@ import 'settings_page.dart';
 import 'stats_page.dart';
 import 'history_page.dart';
 import '../../app.dart';
-import '../../ad_config.dart';
 import '../../widgets/unified_banner_ad_slot.dart';
 
 class HubPage extends StatefulWidget {
@@ -303,7 +302,7 @@ class _HubPageState extends State<HubPage> {
               const SizedBox(height: 24),
               Center(
                 child: UnifiedBannerAdSlot(
-                  adUnitId: AdConfig.hubBannerAdUnitId,
+                  slot: BannerSlot.hub,
                   adSize: AdSize.banner,
                   showDismissButton: false,
                 ),

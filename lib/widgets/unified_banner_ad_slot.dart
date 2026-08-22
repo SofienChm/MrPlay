@@ -1,11 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import '../ad_config.dart';
 import '../core/theme/app_colors.dart';
+import '../services/remote_config_service.dart';
+
+/// Which logical ad slot this widget serves. Determines which Remote Config
+/// parameter supplies the ad unit ID when none is passed explicitly.
+enum BannerSlot { floating, hub }
 
 class UnifiedBannerAdSlot extends StatefulWidget {
-  final String adUnitId;
+  final String? adUnitId;
+  final BannerSlot slot;
   final AdSize adSize;
   final Color backgroundColor;
   final bool isVisible;
@@ -14,7 +19,8 @@ class UnifiedBannerAdSlot extends StatefulWidget {
 
   const UnifiedBannerAdSlot({
     super.key,
-    this.adUnitId = AdConfig.bannerAdUnitId,
+    this.adUnitId,
+    this.slot = BannerSlot.floating,
     this.adSize = AdSize.largeBanner,
     this.backgroundColor = AppColors.surface,
     this.isVisible = true,
@@ -34,11 +40,33 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
   Timer? _retryTimer;
+  String _loadedUnitId = '';
+
+  /// The effective unit ID: explicit override wins, otherwise the Remote
+  /// Config param for this slot (falling back to the local test ID).
+  String get _resolvedAdUnitId {
+    if (widget.adUnitId != null) return widget.adUnitId!;
+    final remote = RemoteConfigService.instance;
+    return widget.slot == BannerSlot.hub
+        ? remote.hubBannerAdUnitId
+        : remote.floatingBannerAdUnitId;
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    RemoteConfigService.instance.updateTick.addListener(_onRemoteConfigUpdate);
+    _loadBannerAd();
+  }
+
+  void _onRemoteConfigUpdate() {
+    if (!mounted) return;
+    if (_resolvedAdUnitId == _loadedUnitId) return;
+    _retryTimer?.cancel();
+    _bannerAd?.dispose();
+    _bannerAd = null;
+    setState(() => _adLoaded = false);
     _loadBannerAd();
   }
 
@@ -51,8 +79,13 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   }
 
   void _loadBannerAd() {
+    final unitId = _resolvedAdUnitId;
+    _loadedUnitId = unitId;
+    debugPrint('MrPlay banner loading from $unitId '
+        '(slot=${widget.slot.name}, remoteFetched='
+        '${RemoteConfigService.instance.hasFetched})');
     _bannerAd = BannerAd(
-      adUnitId: widget.adUnitId,
+      adUnitId: unitId,
       size: widget.adSize,
       request: const AdRequest(),
       listener: BannerAdListener(
@@ -66,7 +99,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
           // Logged so Xcode/Console shows WHY the banner is missing
           // (no-fill, wrong app id, offline...). Retry every 30s.
           debugPrint('MrPlay banner failed to load '
-              '(${widget.adUnitId}): '
+              '($unitId): '
               'code=${error.code} domain=${error.domain} message=${error.message}');
           if (!mounted) return;
           setState(() => _bannerAd = null);
@@ -90,6 +123,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    RemoteConfigService.instance.updateTick.removeListener(_onRemoteConfigUpdate);
     _retryTimer?.cancel();
     _bannerAd?.dispose();
     super.dispose();
