@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/theme/hub_backgrounds.dart';
 import '../../data/models/favorite_video.dart';
 import '../../data/repositories/favorites_repository.dart';
 import '../../data/repositories/watch_later_repository.dart';
@@ -12,39 +14,48 @@ class FavoritesPage extends StatelessWidget {
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: 3,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Library'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(icon: Icon(Icons.favorite), text: 'Favorites'),
-              Tab(icon: Icon(Icons.bookmark), text: 'Watch Later'),
-              Tab(icon: Icon(Icons.queue_music), text: 'Queue'),
-            ],
+      child: ValueListenableBuilder<int>(
+        valueListenable: MrPlayApp.hubBackgroundNotifier,
+        builder: (context, background, _) => Theme(
+          data: AppTheme.darkTheme(Theme.of(context).colorScheme.primary),
+          child: Scaffold(
+            appBar: AppBar(
+              title: const Text('Library'),
+              bottom: const TabBar(
+                tabs: [
+                  Tab(icon: Icon(Icons.favorite), text: 'Favorites'),
+                  Tab(icon: Icon(Icons.bookmark), text: 'Watch Later'),
+                  Tab(icon: Icon(Icons.queue_music), text: 'Queue'),
+                ],
+              ),
+            ),
+            body: Container(
+              decoration: HubBackgrounds.decorationFor(background),
+              child: const TabBarView(
+                children: [
+                  _VideoListTab(
+                    getAll: FavoritesRepository.getAll,
+                    remove: FavoritesRepository.remove,
+                    clear: FavoritesRepository.clear,
+                    emptyIcon: Icons.favorite_border,
+                    emptyText: 'No favorites yet',
+                    trailingIcon: Icons.favorite,
+                    trailingColor: Colors.red,
+                  ),
+                  _VideoListTab(
+                    getAll: WatchLaterRepository.getAll,
+                    remove: WatchLaterRepository.remove,
+                    clear: WatchLaterRepository.clear,
+                    emptyIcon: Icons.bookmark_border,
+                    emptyText: 'Watch Later queue is empty',
+                    trailingIcon: Icons.bookmark,
+                    trailingColor: Colors.amber,
+                  ),
+                  QueueListView(),
+                ],
+              ),
+            ),
           ),
-        ),
-        body: const TabBarView(
-          children: [
-            _VideoListTab(
-              getAll: FavoritesRepository.getAll,
-              remove: FavoritesRepository.remove,
-              clear: FavoritesRepository.clear,
-              emptyIcon: Icons.favorite_border,
-              emptyText: 'No favorites yet',
-              trailingIcon: Icons.favorite,
-              trailingColor: Colors.red,
-            ),
-            _VideoListTab(
-              getAll: WatchLaterRepository.getAll,
-              remove: WatchLaterRepository.remove,
-              clear: WatchLaterRepository.clear,
-              emptyIcon: Icons.bookmark_border,
-              emptyText: 'Watch Later queue is empty',
-              trailingIcon: Icons.bookmark,
-              trailingColor: Colors.amber,
-            ),
-            QueueListView(),
-          ],
         ),
       ),
     );

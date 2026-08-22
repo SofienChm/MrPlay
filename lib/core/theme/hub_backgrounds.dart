@@ -11,6 +11,7 @@ class HubBackgrounds {
     'Deep Space',
     'Emerald',
     'Cherry',
+    'Totally Dark',
   ];
 
   static const List<List<Color>> palettes = [
@@ -22,6 +23,7 @@ class HubBackgrounds {
     [Color(0xFF000428), Color(0xFF004E92)],
     [Color(0xFF11998E), Color(0xFF38EF7D)],
     [Color(0xFFCB2D3E), Color(0xFFEF473A)],
+    [Color(0xFF000000), Color(0xFF0A0A0A)],
   ];
 
   static Decoration decorationFor(int index) {

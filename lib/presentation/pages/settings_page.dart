@@ -23,7 +23,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String _themeMode = 'system';
   String _defaultPlatform = 'YouTube';
-  bool _historyEnabled = true;
   int _accent = SettingsRepository.defaultAccentColor;
   int _hubBackground = 0;
   bool _disposed = false;
@@ -54,14 +53,12 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
-    final history = await SettingsRepository.getHistoryEnabled();
     final accent = await SettingsRepository.getAccentColor();
     final hubBackground = await SettingsRepository.getHubBackground();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
-      _historyEnabled = history;
       _accent = accent;
       _hubBackground = hubBackground;
     });
@@ -86,11 +83,6 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _defaultPlatform = name);
   }
 
-  Future<void> _changeHistory(bool enabled) async {
-    await SettingsRepository.setHistoryEnabled(enabled);
-    setState(() => _historyEnabled = enabled);
-  }
-
   Future<void> _changeAccent(Color color) async {
     await SettingsRepository.setAccentColor(color.toARGB32());
     setState(() => _accent = color.toARGB32());
@@ -108,7 +100,6 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _themeMode = 'system';
       _defaultPlatform = 'YouTube';
-      _historyEnabled = true;
       _accent = SettingsRepository.defaultAccentColor;
       _hubBackground = 0;
     });
@@ -279,15 +270,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           _SettingsTile(
-            icon: Icons.history,
-            title: 'Enable Watch History',
-            subtitle: _historyEnabled ? 'On' : 'Off',
-            trailing: Switch(
-              value: _historyEnabled,
-              onChanged: (value) => _changeHistory(value),
-            ),
-          ),
-          _SettingsTile(
             icon: Icons.delete_outline,
             title: 'Clear History',
             subtitle: 'Clear watched videos record',
@@ -315,7 +297,22 @@ class _SettingsPageState extends State<SettingsPage> {
     const text = 'Check out MrPlay – your all-in-one video hub!';
     final link =
         AppConstants.isOnAppStore ? ' ${AppConstants.appStoreUrl}' : '';
-    await Share.share('$text$link');
+    try {
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.share(
+        '$text$link',
+        sharePositionOrigin:
+            box != null && box.hasSize && box.size.width > 0
+                ? box.localToGlobal(Offset.zero) & box.size
+                : null,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the share sheet')),
+        );
+      }
+    }
   }
 
   Future<void> _rateApp() async {

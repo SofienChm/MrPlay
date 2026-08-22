@@ -18,6 +18,7 @@ class _TogglesPageState extends State<TogglesPage> {
   bool _showShorts = true;
   bool _showPosts = true;
   bool _fullscreenOnRotation = false;
+  bool _historyEnabled = true;
   bool _disposed = false;
 
   @override
@@ -36,11 +37,19 @@ class _TogglesPageState extends State<TogglesPage> {
     final adBlock = await SettingsRepository.getEffectiveAdBlockEnabled();
     final backgroundAudio =
         await SettingsRepository.getEffectiveBackgroundAudioEnabled();
+    final history = await SettingsRepository.getHistoryEnabled();
     if (_disposed || !mounted) return;
     setState(() {
       _adBlockEnabled = adBlock;
       _backgroundAudioEnabled = backgroundAudio;
+      _historyEnabled = history;
     });
+  }
+
+  Future<void> _changeHistory(bool enabled) async {
+    await SettingsRepository.setHistoryEnabled(enabled);
+    if (!mounted) return;
+    setState(() => _historyEnabled = enabled);
   }
 
   Future<void> _changeAdBlock(bool enabled) async {
@@ -95,6 +104,15 @@ class _TogglesPageState extends State<TogglesPage> {
               value: _fullscreenOnRotation,
               onChanged: (value) =>
                   setState(() => _fullscreenOnRotation = value),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('Watch history'),
+            subtitle: const Text('Record watched videos'),
+            trailing: Switch(
+              value: _historyEnabled,
+              onChanged: (value) => _changeHistory(value),
             ),
           ),
           const Divider(),

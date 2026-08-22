@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../app.dart';
+import '../../core/theme/app_theme.dart';
+import '../../core/theme/hub_backgrounds.dart';
 import '../../services/recent_activity_service.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -67,24 +69,29 @@ class _HistoryPageState extends State<HistoryPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Watch History'),
-        centerTitle: true,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _refreshHistory,
-              child: _history.isEmpty
-                  ? ListView(
-                      children: [_emptyState(theme)],
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _history.length,
-                      itemBuilder: (context, index) {
-                        final entry = _history[index];
+    return ValueListenableBuilder<int>(
+      valueListenable: MrPlayApp.hubBackgroundNotifier,
+      builder: (context, background, _) => Theme(
+        data: AppTheme.darkTheme(theme.colorScheme.primary),
+        child: Scaffold(
+          appBar: AppBar(
+            title: const Text('Watch History'),
+            centerTitle: true,
+          ),
+          body: Container(
+            decoration: HubBackgrounds.decorationFor(background),
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : RefreshIndicator(
+                    onRefresh: _refreshHistory,
+                    child: _history.isEmpty
+                        ? ListView(children: [_emptyState(Theme.of(context))])
+                        : ListView.builder(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: _history.length,
+                            itemBuilder: (context, index) {
+                              final theme = Theme.of(context);
+                              final entry = _history[index];
                         final date = entry['date'] as int?;
                         final formatted =
                             date != null ? _formatDate(date) : 'Unknown';
@@ -119,7 +126,10 @@ class _HistoryPageState extends State<HistoryPage> {
                         );
                       },
                     ),
-            ),
+                  ),
+          ),
+        ),
+      ),
     );
   }
 
