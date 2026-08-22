@@ -1348,8 +1348,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
     return Stack(
       children: [
+        // Browse tab — kept offstage until it actually holds a page. Playing
+        // straight from Library/History never browsed anything, so an empty
+        // WKWebView would paint as a white sheet behind the collapsed video
+        // tab; hiding it lets the HubPage show through instead.
         Positioned.fill(
-          child: InAppWebView(
+          child: Offstage(
+            offstage: _currentUrl == null,
+            child: InAppWebView(
             initialUserScripts: UnmodifiableListView([
               if (_adBlockEnabled)
                 UserScript(
@@ -1417,6 +1423,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               }
               return false;
             },
+            ),
           ),
         ),
         // Tab 2 — dedicated video tab. Rendered on top while "full", fades
