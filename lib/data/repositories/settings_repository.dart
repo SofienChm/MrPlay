@@ -9,6 +9,7 @@ class SettingsRepository {
   static const String _backgroundAudioKey = 'background_audio_enabled';
   static const String _historyKey = 'history_enabled';
   static const String _accentColorKey = 'accent_color';
+  static const String _hubBackgroundKey = 'hub_background';
 
   static Future<SharedPreferences> get _prefs =>
       SharedPreferences.getInstance();
@@ -93,6 +94,7 @@ class SettingsRepository {
     await prefs.remove(_adBlockKey);
     await prefs.remove(_backgroundAudioKey);
     await prefs.remove(_accentColorKey);
+    await prefs.remove(_hubBackgroundKey);
   }
 
   static Future<bool> getHistoryEnabled() async {
@@ -115,5 +117,15 @@ class SettingsRepository {
   static Future<void> setAccentColor(int value) async {
     final prefs = await _prefs;
     await prefs.setInt(_accentColorKey, value);
+  }
+
+  static Future<int> getHubBackground() async {
+    final prefs = await _prefs;
+    return prefs.getInt(_hubBackgroundKey) ?? 0;
+  }
+
+  static Future<void> setHubBackground(int index) async {
+    final prefs = await _prefs;
+    await prefs.setInt(_hubBackgroundKey, index);
   }
 }

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../app.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/theme/hub_backgrounds.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../services/recent_activity_service.dart';
 import 'stats_page.dart';
@@ -23,6 +25,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String _defaultPlatform = 'YouTube';
   bool _historyEnabled = true;
   int _accent = SettingsRepository.defaultAccentColor;
+  int _hubBackground = 0;
   bool _disposed = false;
 
   static const List<Color> _accentChoices = [
@@ -53,12 +56,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final platform = await SettingsRepository.getDefaultPlatform();
     final history = await SettingsRepository.getHistoryEnabled();
     final accent = await SettingsRepository.getAccentColor();
+    final hubBackground = await SettingsRepository.getHubBackground();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
       _historyEnabled = history;
       _accent = accent;
+      _hubBackground = hubBackground;
     });
   }
 
@@ -92,6 +97,12 @@ class _SettingsPageState extends State<SettingsPage> {
     MrPlayApp.accentColorNotifier.value = color;
   }
 
+  Future<void> _changeHubBackground(int index) async {
+    await SettingsRepository.setHubBackground(index);
+    setState(() => _hubBackground = index);
+    MrPlayApp.hubBackgroundNotifier.value = index;
+  }
+
   Future<void> _clearCache() async {
     await SettingsRepository.clearCache();
     setState(() {
@@ -99,15 +110,41 @@ class _SettingsPageState extends State<SettingsPage> {
       _defaultPlatform = 'YouTube';
       _historyEnabled = true;
       _accent = SettingsRepository.defaultAccentColor;
+      _hubBackground = 0;
     });
     MrPlayApp.themeModeNotifier.value = ThemeMode.system;
     MrPlayApp.accentColorNotifier.value =
         const Color(SettingsRepository.defaultAccentColor);
+    MrPlayApp.hubBackgroundNotifier.value = 0;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cache cleared')),
       );
     }
+  }
+
+  void _confirmClearCache() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear Cache'),
+        content: const Text(
+            'This resets all settings (theme, accent color, hub background, platform choice) to their defaults. Continue?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _clearCache();
+            },
+            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _clearHistory() async {
@@ -116,13 +153,6 @@ class _SettingsPageState extends State<SettingsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('History cleared')),
       );
-    }
-  }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
   }
 
@@ -149,6 +179,13 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             onTap: () => _showAccentPicker(),
           ),
+          _SettingsTile(
+            icon: Icons.wallpaper_outlined,
+            title: 'Hub Background',
+            subtitle: HubBackgrounds.names[_hubBackground.clamp(
+                0, HubBackgrounds.palettes.length - 1)],
+            onTap: () => _showHubBackgroundPicker(),
+          ),
           const _SectionHeader(title: 'Manage Apps'),
           _SettingsTile(
             icon: Icons.apps,
@@ -170,7 +207,7 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.delete_outline,
             title: 'Clear Cache',
             subtitle: 'Reset all settings to default',
-            onTap: _clearCache,
+            onTap: _confirmClearCache,
           ),
           _SettingsTile(
             icon: Icons.history,
@@ -212,8 +249,10 @@ class _SettingsPageState extends State<SettingsPage> {
           _SettingsTile(
             icon: Icons.star_outline,
             title: 'Rate App',
-            subtitle: 'Rate us on the App Store',
-            onTap: () => _openUrl(AppConstants.appStoreUrl),
+            subtitle: AppConstants.isOnAppStore
+                ? 'Rate us on the App Store'
+                : 'Coming soon to the App Store',
+            onTap: _rateApp,
           ),
           _SettingsTile(
             icon: Icons.share,
@@ -273,6 +312,19 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _shareApp() async {
+    const text = 'Check out MrPlay – your all-in-one video hub!';
+    final link =
+        AppConstants.isOnAppStore ? ' ${AppConstants.appStoreUrl}' : '';
+    await Share.share('$text$link');
+  }
+
+  Future<void> _rateApp() async {
+    if (!AppConstants.isOnAppStore) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('MrPlay is coming soon to the App Store')),
+      );
+      return;
+    }
     final uri = Uri.parse(AppConstants.appStoreUrl);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -378,6 +430,70 @@ class _SettingsPageState extends State<SettingsPage> {
               onTap: () { _changeTheme('system'); Navigator.pop(context); },
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  void _showHubBackgroundPicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Hub Background',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Wrap(
+                spacing: 16,
+                runSpacing: 14,
+                children: [
+                  for (var i = 0; i < HubBackgrounds.palettes.length; i++)
+                    GestureDetector(
+                      onTap: () {
+                        _changeHubBackground(i);
+                        Navigator.pop(context);
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: HubBackgrounds.palettes[i],
+                              ),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _hubBackground == i
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.transparent,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            HubBackgrounds.names[i],
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

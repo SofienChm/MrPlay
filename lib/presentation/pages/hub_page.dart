@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/hub_backgrounds.dart';
 import '../../data/models/custom_bookmark.dart';
 import '../../data/models/platform_model.dart';
 import '../../data/repositories/custom_bookmarks_repository.dart';
@@ -212,15 +213,11 @@ class _HubPageState extends State<HubPage> {
           ),
         ],
       ),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [AppColors.hubGradientStart, AppColors.hubGradientEnd],
-          ),
-        ),
-        child: SafeArea(
+      body: ValueListenableBuilder<int>(
+        valueListenable: MrPlayApp.hubBackgroundNotifier,
+        builder: (context, background, _) => Container(
+          decoration: HubBackgrounds.decorationFor(background),
+          child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -363,6 +360,7 @@ class _HubPageState extends State<HubPage> {
                       ),
               ),
             ],
+          ),
           ),
         ),
       ),

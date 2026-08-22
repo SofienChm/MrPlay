@@ -24,6 +24,7 @@ class MrPlayApp extends StatefulWidget {
   static final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(ThemeMode.system);
   static final ValueNotifier<Color> accentColorNotifier =
       ValueNotifier(const Color(SettingsRepository.defaultAccentColor));
+  static final ValueNotifier<int> hubBackgroundNotifier = ValueNotifier(0);
 
   /// A backgrounded session older than this is reset when the app resumes.
   static const Duration _sessionTimeout = Duration(hours: 1);
@@ -47,6 +48,8 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
   Future<void> _loadAccent() async {
     final value = await SettingsRepository.getAccentColor();
     MrPlayApp.accentColorNotifier.value = Color(value);
+    MrPlayApp.hubBackgroundNotifier.value =
+        await SettingsRepository.getHubBackground();
   }
 
   @override
