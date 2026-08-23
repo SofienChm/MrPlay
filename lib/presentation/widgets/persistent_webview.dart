@@ -11,6 +11,7 @@ import '../../core/constants/media_observer_js.dart';
 import '../../models/video.dart';
 import '../../providers/player_provider.dart';
 import '../../services/media_controls_service.dart';
+import '../../services/background_audio_keep_alive.dart';
 import '../../services/playback_stats_service.dart';
 import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
@@ -56,6 +57,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _endedHandled = false;
   bool _resumeSeekDone = false;
   bool _appIsBackgrounded = false;
+  // Whether a system-forced pause (iOS suspends the webview's media when the
+  // app backgrounds / the screen locks) may be auto-resumed to keep audio
+  // playing. User-initiated pauses clear this so they are not fought. Used for
+  // YouTube Music (audio-only), whose playback is kept alive by the silent loop
+  // rather than phantom-PiP.
+  bool _backgroundResumeAllowed = false;
+  bool _userPausedInBackground = false;
+  // True while the tracked video is a YouTube Music (music.youtube.com) page.
+  bool _isMusic = false;
   int _lastNowPlayingMs = 0;
   Timer? _statePoll;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
@@ -118,6 +128,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (ref.read(playerProvider).isPlaying) {
           ref.read(playerProvider.notifier).pause();
           MediaControlsService.instance.setPlaying(false);
+          // Another app owns the session now: never auto-resume over it.
+          _backgroundResumeAllowed = false;
+          if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
           // Pause the actual element so JS-side state (and the state poll)
           // stop reporting "playing" and no phantom-PiP keep-alive audio
           // lingers.
@@ -135,6 +148,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _statePoll?.cancel();
     _interruptionSub?.cancel();
     PlaybackStatsService.instance.flush();
+    BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
   }
 
@@ -146,6 +160,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
+      _userPausedInBackground = false;
+      if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
       // The video was phantom-PiP'd on background to keep audio alive. Restore
       // it inline after a short delay so WebKit can finish its own reattachment
       // first; the restore is event-driven (webkitpresentationmodechanged)
@@ -156,15 +172,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _enterBackground() {
     _appIsBackgrounded = true;
+    _backgroundResumeAllowed =
+        ref.read(playerProvider).isPlaying && !_userPausedInBackground;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
       // Background audio is opt-in. When disabled, behave like a normal
-      // browser: pause and let iOS stop audio on background (no phantom-PiP
-      // keep-alive). When enabled, enter the phantom-PiP keep-alive so
-      // playback continues in the background.
+      // browser: pause and let iOS stop audio on background (no keep-alive).
       if (_backgroundAudioEnabled) {
-        _enterPhantomPiP();
+        if (_isMusic) {
+          // YouTube Music: keep the silent loop alive so iOS doesn't suspend
+          // the app and its audio-only playback keeps going natively.
+          BackgroundAudioKeepAlive.instance.start();
+        } else {
+          // Other platforms: phantom-PiP keeps the video/audio alive.
+          _enterPhantomPiP();
+        }
       } else {
+        BackgroundAudioKeepAlive.instance.stop();
         ref.read(playerProvider.notifier).pause();
         MediaControlsService.instance.setPlaying(false);
         controlVideo('pause');
@@ -262,6 +286,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (url.contains('music.youtube.com')) return false;
     return url.contains('youtube.com');
   }
+
+  bool _isMusicUrl(String? url) =>
+      url != null && url.contains('music.youtube.com');
 
   void _onLoadStart(InAppWebViewController controller, WebUri? url) {
     _currentUrl = url?.toString();
@@ -420,6 +447,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _endedHandled = false;
           _resumeSeekDone = false;
           _unmuteDone = false;
+          _userPausedInBackground = false;
+          _isMusic = _isMusicUrl(video.videoUrl);
           if (_videoTabUrl != null) {
             ref.read(playerProvider.notifier).openVideoTab(video);
           } else {
@@ -452,6 +481,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final playing = data['playing'] == true;
       final ended = data['ended'] == true;
+      final pip = data['pip'] == true;
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
       final posSec = (data['position'] as num?)?.toDouble() ?? 0;
@@ -495,11 +525,33 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           );
         }
       }
-      if (!playing && !_appIsBackgrounded && ended) {
-        PlaybackStatsService.instance.flush();
-        final id = video?.id ?? '';
-        if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
-        _handleEnded();
+      if (_isMusic) {
+        // YouTube Music: keep the silent loop alive while playing and
+        // auto-resume a system-forced background pause (PiP can't take over
+        // because YTM disables it, so we rely on native audio-only playback).
+        if (playing && !ended) {
+          if (_backgroundAudioEnabled) {
+            BackgroundAudioKeepAlive.instance.start();
+          }
+          _userPausedInBackground = false;
+        } else if (!_appIsBackgrounded) {
+          BackgroundAudioKeepAlive.instance.stop();
+          if (ended) {
+            PlaybackStatsService.instance.flush();
+            final id = video?.id ?? '';
+            if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+            _handleEnded();
+          }
+        } else if (!ended && _backgroundResumeAllowed && !pip) {
+          controlVideo('play');
+        }
+      } else {
+        if (!playing && !_appIsBackgrounded && ended) {
+          PlaybackStatsService.instance.flush();
+          final id = video?.id ?? '';
+          if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+          _handleEnded();
+        }
       }
     } catch (_) {}
   }
@@ -539,6 +591,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else {
       ref.read(playerProvider.notifier).play(video);
     }
+    _userPausedInBackground = false;
+    _isMusic = _isMusicUrl(url);
     return video;
   }
 
@@ -585,6 +639,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final positionMs = position?.inMilliseconds ?? 0;
     switch (command) {
       case 'play':
+        _backgroundResumeAllowed = true;
+        _userPausedInBackground = false;
         notifier.resume();
         controlVideo('play');
         break;
@@ -595,6 +651,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (state.isPlaying) {
           userInitiatedPause();
         } else {
+          _backgroundResumeAllowed = true;
+          _userPausedInBackground = false;
           notifier.resume();
           controlVideo('play');
         }
@@ -621,8 +679,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   /// Pauses playback as an explicit user action (lock screen / Control Center
-  /// / sleep timer).
+  /// / sleep timer). While backgrounded, system-forced pauses are auto-resumed
+  /// (for YouTube Music); user pauses must not be fought.
   void userInitiatedPause() {
+    _backgroundResumeAllowed = false;
+    if (_appIsBackgrounded) _userPausedInBackground = true;
+    if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
   }
@@ -879,6 +941,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// video tab is open it is closed too, so playback fully stops.
   void closePlayer() {
     controlVideo('pause');
+    BackgroundAudioKeepAlive.instance.stop();
     _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;
@@ -1671,6 +1734,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// the HubPage (below in the app Stack) becomes visible again.
   void _goToHub() {
     controlVideo('pause');
+    BackgroundAudioKeepAlive.instance.stop();
     _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;
