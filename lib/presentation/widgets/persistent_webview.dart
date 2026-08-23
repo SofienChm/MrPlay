@@ -17,7 +17,11 @@ import '../../services/data_export_service.dart';
 import '../../data/repositories/queue_repository.dart';
 import '../../data/repositories/watch_later_repository.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../../data/repositories/playlist_repository.dart';
 import '../../data/models/favorite_video.dart';
+import '../../data/models/queue_item.dart';
+import '../../data/models/playlist.dart';
+import '../../data/models/playlist_item.dart';
 import '../../presentation/pages/settings_page.dart';
 import '../../presentation/pages/favorites_page.dart';
 import '../../widgets/sleep_timer_sheet.dart';
@@ -172,8 +176,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _enterBackground() {
     _appIsBackgrounded = true;
-    _backgroundResumeAllowed =
-        ref.read(playerProvider).isPlaying && !_userPausedInBackground;
+    _backgroundResumeAllowed = _backgroundAudioEnabled &&
+        ref.read(playerProvider).isPlaying &&
+        !_userPausedInBackground;
     _reassertAudioSession();
     if (ref.read(playerProvider).isPlaying) {
       // Background audio is opt-in. When disabled, behave like a normal
@@ -768,6 +773,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     ),
                     const Divider(color: Colors.white10, height: 1, indent: 56),
                     _SheetMenuItem(
+                      icon: Icons.playlist_add,
+                      label: 'Add to Playlist',
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        if (video == null) return;
+                        _showAddToPlaylistSheet(video);
+                      },
+                    ),
+                    const Divider(color: Colors.white10, height: 1, indent: 56),
+                    _SheetMenuItem(
                       icon: Icons.bookmark_border,
                       label: 'Add to Bookmarks',
                       onTap: () async {
@@ -936,6 +951,132 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     );
   }
 
+  /// Bottom sheet that lets the user add the current video to an existing
+  /// playlist or create a new one.
+  void _showAddToPlaylistSheet(Video video) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black54,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF1C1C1E),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                    child: Text(
+                      'Add to playlist',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.add, color: Colors.white70),
+                    title: const Text('New playlist',
+                        style: TextStyle(color: Colors.white)),
+                    onTap: () async {
+                      Navigator.pop(sheetContext);
+                      final name = await showDialog<String>(
+                        context: context,
+                        builder: (_) => const _NewPlaylistDialog(),
+                      );
+                      if (name == null || name.isEmpty || !mounted) return;
+                      final playlist = await PlaylistRepository.create(name);
+                      await _addVideoToPlaylist(playlist, video);
+                    },
+                  ),
+                  const Divider(color: Colors.white10, height: 1, indent: 56),
+                  Flexible(
+                    child: FutureBuilder<List<Playlist>>(
+                      future: PlaylistRepository.getAll(),
+                      builder: (context, snapshot) {
+                        final playlists = snapshot.data ?? const <Playlist>[];
+                        if (playlists.isEmpty) {
+                          return const Padding(
+                            padding: EdgeInsets.all(20),
+                            child: Text(
+                              'No playlists yet — create one first.',
+                              style:
+                                  TextStyle(color: Colors.white54, fontSize: 14),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: playlists.length,
+                          itemBuilder: (context, index) {
+                            final playlist = playlists[index];
+                            return ListTile(
+                              leading: const Icon(Icons.playlist_play,
+                                  color: Colors.white70),
+                              title: Text(playlist.name,
+                                  style: const TextStyle(color: Colors.white),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                _addVideoToPlaylist(playlist, video);
+                              },
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _addVideoToPlaylist(Playlist playlist, Video video) async {
+    final item = PlaylistItem(
+      id: '${playlist.id}::${video.id.isEmpty ? video.videoUrl : video.id}',
+      title: video.title.isEmpty ? 'Untitled' : video.title,
+      thumbnailUrl: video.thumbnailUrl,
+      platformUrl: video.videoUrl,
+      platformName: video.platform.isEmpty ? 'YouTube' : video.platform,
+      playlistId: playlist.id,
+    );
+    final added = await PlaylistRepository.addItem(playlist.id, item);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(added
+            ? 'Added to "${playlist.name}"'
+            : 'Already in "${playlist.name}"'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
+  }
+
   /// Full cleanup: pauses the video, cancels timers, stops audio keep-alive,
   /// clears now-playing, flushes stats, and dismisses the player state. When a
   /// video tab is open it is closed too, so playback fully stops.
@@ -1092,6 +1233,20 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _resumeSeekDone = false;
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
+    });
+  }
+
+  /// Plays a list of items one-by-one. The first URL is loaded immediately and
+  /// the rest are placed in the playback queue, which [_handleEnded] advances
+  /// through automatically as each item finishes.
+  void playSequentially(List<QueueItem> items) {
+    if (items.isEmpty) return;
+    // Clear any existing manual queue so the playlist plays in order.
+    QueueRepository.clear().then((_) async {
+      for (var i = 1; i < items.length; i++) {
+        await QueueRepository.add(items[i]);
+      }
+      if (mounted) loadUrl(items.first.platformUrl);
     });
   }
 
@@ -1824,6 +1979,52 @@ class _SheetMenuItem extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _NewPlaylistDialog extends StatefulWidget {
+  const _NewPlaylistDialog();
+
+  @override
+  State<_NewPlaylistDialog> createState() => _NewPlaylistDialogState();
+}
+
+class _NewPlaylistDialogState extends State<_NewPlaylistDialog> {
+  final TextEditingController _nameController = TextEditingController();
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New playlist'),
+      content: TextField(
+        controller: _nameController,
+        autofocus: true,
+        textCapitalization: TextCapitalization.words,
+        decoration: const InputDecoration(
+          labelText: 'Name',
+          hintText: 'My playlist',
+        ),
+        onSubmitted: (value) {
+          if (value.trim().isNotEmpty) Navigator.pop(context, value.trim());
+        },
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _nameController.text.trim()),
+          child: const Text('Create'),
+        ),
+      ],
     );
   }
 }

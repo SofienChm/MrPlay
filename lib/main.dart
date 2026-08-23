@@ -8,6 +8,8 @@ import 'app.dart';
 import 'data/models/favorite_video.dart';
 import 'data/models/custom_bookmark.dart';
 import 'data/models/queue_item.dart';
+import 'data/models/playlist.dart';
+import 'data/models/playlist_item.dart';
 import 'services/remote_config_service.dart';
 
 Future<void> main() async {
@@ -29,5 +31,7 @@ Future<void> main() async {
   Hive.registerAdapter(FavoriteVideoAdapter());
   Hive.registerAdapter(CustomBookmarkAdapter());
   Hive.registerAdapter(QueueItemAdapter());
+  Hive.registerAdapter(PlaylistAdapter());
+  Hive.registerAdapter(PlaylistItemAdapter());
   runApp(const ProviderScope(child: MrPlayApp()));
 }

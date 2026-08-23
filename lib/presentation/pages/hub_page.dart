@@ -14,6 +14,7 @@ import 'favorites_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
 import 'history_page.dart';
+import 'playlists_page.dart';
 import '../../app.dart';
 import '../../widgets/unified_banner_ad_slot.dart';
 
@@ -341,10 +342,21 @@ class _HubPageState extends State<HubPage> {
                             mainAxisSpacing: 12,
                           ),
                           itemCount: _filteredPlatforms.length +
-                              (_showResults ? 0 : 1),
+                              (_showResults ? 0 : 2),
                           itemBuilder: (context, index) {
-                            if (index >= _filteredPlatforms.length) {
+                            if (index >= _filteredPlatforms.length + 1) {
                               return _AddCard(onTap: _showAddBookmarkDialog);
+                            }
+                            if (index >= _filteredPlatforms.length) {
+                              return _PlaylistCard(
+                                onTap: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => const PlaylistsPage(),
+                                    ),
+                                  );
+                                },
+                              );
                             }
                             final platform = _filteredPlatforms[index];
                             return PlatformCard(
@@ -465,6 +477,40 @@ class _AddCard extends StatelessWidget {
             SizedBox(height: 8),
             Text(
               'Add',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PlaylistCard extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _PlaylistCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white30, width: 1.5),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.playlist_play, size: 36, color: Colors.white70),
+            SizedBox(height: 8),
+            Text(
+              'Playlist',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 12,
