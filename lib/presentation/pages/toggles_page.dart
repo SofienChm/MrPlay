@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../data/repositories/settings_repository.dart';
-import '../../services/remote_config_service.dart';
 
 /// Privacy & Security → Toggles: hosts the two playback/privacy switches
 /// ("Block ads & trackers" and "Background audio") on their own page.
@@ -34,9 +33,9 @@ class _TogglesPageState extends State<TogglesPage> {
   }
 
   Future<void> _loadSettings() async {
-    final adBlock = await SettingsRepository.getEffectiveAdBlockEnabled();
+    final adBlock = await SettingsRepository.getAdBlockEnabled();
     final backgroundAudio =
-        await SettingsRepository.getEffectiveBackgroundAudioEnabled();
+        await SettingsRepository.getBackgroundAudioEnabled();
     final history = await SettingsRepository.getHistoryEnabled();
     if (_disposed || !mounted) return;
     setState(() {
@@ -53,16 +52,12 @@ class _TogglesPageState extends State<TogglesPage> {
   }
 
   Future<void> _changeAdBlock(bool enabled) async {
-    final override = RemoteConfigService.instance.adBlockOverride;
-    if (override != RemoteOverride.followUser) return;
     await SettingsRepository.setAdBlockEnabled(enabled);
     if (!mounted) return;
     setState(() => _adBlockEnabled = enabled);
   }
 
   Future<void> _changeBackgroundAudio(bool enabled) async {
-    final override = RemoteConfigService.instance.backgroundAudioOverride;
-    if (override != RemoteOverride.followUser) return;
     await SettingsRepository.setBackgroundAudioEnabled(enabled);
     if (!mounted) return;
     setState(() => _backgroundAudioEnabled = enabled);
@@ -123,10 +118,7 @@ class _TogglesPageState extends State<TogglesPage> {
                 const Text('Off by default. Removes ads when enabled.'),
             trailing: Switch(
               value: _adBlockEnabled,
-              onChanged: RemoteConfigService.instance.adBlockOverride ==
-                      RemoteOverride.followUser
-                  ? (value) => _changeAdBlock(value)
-                  : null,
+              onChanged: (value) => _changeAdBlock(value),
             ),
           ),
           ListTile(
@@ -135,11 +127,7 @@ class _TogglesPageState extends State<TogglesPage> {
             subtitle: const Text('Keep playing when app is in background'),
             trailing: Switch(
               value: _backgroundAudioEnabled,
-              onChanged:
-                  RemoteConfigService.instance.backgroundAudioOverride ==
-                          RemoteOverride.followUser
-                      ? (value) => _changeBackgroundAudio(value)
-                      : null,
+              onChanged: (value) => _changeBackgroundAudio(value),
             ),
           ),
         ],

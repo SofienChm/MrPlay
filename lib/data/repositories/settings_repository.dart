@@ -1,5 +1,4 @@
 import 'package:shared_preferences/shared_preferences.dart';
-import '../../services/remote_config_service.dart';
 
 class SettingsRepository {
   static const String _themeKey = 'theme_mode';
@@ -49,17 +48,6 @@ class SettingsRepository {
     return prefs.getBool(_adBlockKey) ?? false;
   }
 
-  /// Effective "Block ads & trackers" state.
-  ///
-  /// A Remote Config override set to "true"/"false" always wins; only when the
-  /// param is "default" does the user's local toggle apply.
-  static Future<bool> getEffectiveAdBlockEnabled() async {
-    final override = RemoteConfigService.instance.adBlockOverride;
-    if (override == RemoteOverride.forceTrue) return true;
-    if (override == RemoteOverride.forceFalse) return false;
-    return getAdBlockEnabled();
-  }
-
   static Future<void> setAdBlockEnabled(bool enabled) async {
     final prefs = await _prefs;
     await prefs.setBool(_adBlockKey, enabled);
@@ -68,17 +56,6 @@ class SettingsRepository {
   static Future<bool> getBackgroundAudioEnabled() async {
     final prefs = await _prefs;
     return prefs.getBool(_backgroundAudioKey) ?? false;
-  }
-
-  /// Effective "Background audio" state.
-  ///
-  /// A Remote Config override set to "true"/"false" always wins; only when the
-  /// param is "default" does the user's local toggle apply.
-  static Future<bool> getEffectiveBackgroundAudioEnabled() async {
-    final override = RemoteConfigService.instance.backgroundAudioOverride;
-    if (override == RemoteOverride.forceTrue) return true;
-    if (override == RemoteOverride.forceFalse) return false;
-    return getBackgroundAudioEnabled();
   }
 
   static Future<void> setBackgroundAudioEnabled(bool enabled) async {

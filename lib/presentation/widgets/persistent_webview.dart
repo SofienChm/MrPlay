@@ -101,7 +101,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// so the app presents as a plain browser to App Review; the user can opt in
   /// from Settings at any time.
   Future<void> _loadAdBlockSetting() async {
-    final enabled = await SettingsRepository.getEffectiveAdBlockEnabled();
+    final enabled = await SettingsRepository.getAdBlockEnabled();
     if (mounted && enabled != _adBlockEnabled) {
       setState(() => _adBlockEnabled = enabled);
     }
@@ -112,7 +112,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// phantom-PiP keep-alive keeps playback alive in the background.
   Future<void> _loadBackgroundAudioSetting() async {
     final enabled =
-        await SettingsRepository.getEffectiveBackgroundAudioEnabled();
+        await SettingsRepository.getBackgroundAudioEnabled();
     if (mounted && enabled != _backgroundAudioEnabled) {
       setState(() => _backgroundAudioEnabled = enabled);
     }
