@@ -1,17 +1,13 @@
 class AdConfig {
   AdConfig._();
 
-  /// The app-wide floating banner slot is intentionally a Google test unit
-  /// (same as the original app). The release build previously fell back to the
-  /// prod unit `ca-app-pub-2351054385499645/9979835900` while Info.plist still
-  /// declared a test GADApplicationIdentifier, which made AdMob fail every load
-  /// with "app ID mismatch" -> the banner silently disappeared in release
-  /// builds.
+  /// Floating bottom banner overlay shown over the webview when the hub is not
+  /// visible. Served with `AdSize.largeBanner`.
   static const String bannerAdUnitId =
-      'ca-app-pub-3940256099942544/6300978111';
+      'ca-app-pub-2351054385499645/8756107312';
 
-  /// Small banner slot on the hub page. Uses a Google test unit for now; swap
-  /// in the real hub banner unit from the AdMob console when configured.
+  /// Banner slot on the hub page, under the search bar. Served with
+  /// `AdSize.banner`.
   static const String hubBannerAdUnitId =
-      'ca-app-pub-3940256099942544/6300978111';
+      'ca-app-pub-2351054385499645/4819742051';
 }

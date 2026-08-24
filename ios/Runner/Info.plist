@@ -57,8 +57,8 @@
 		</array>
 		<key>UIStatusBarHidden</key>
 		<false/>
-		<key>GADApplicationIdentifier</key>
-		<string>ca-app-pub-3940256099942544~3347511713</string>
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-2351054385499645~9410713435</string>
 		<key>AppGroupId</key>
 		<string>group.com.mrplay.shared</string>
 		<key>NSAppTransportSecurity</key>
@@ -94,8 +94,10 @@
 				</dict>
 			</dict>
 		</dict>
-		<key>NSMicrophoneUsageDescription</key>
-		<string>Microphone access is used by web content you open in MrPlay for audio recording and voice features.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Microphone access is used by web content you open in MrPlay for audio recording and voice features.</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>Your data is used to deliver personalized ads and measure their effectiveness. This identifier helps keep MrPlay free to use.</string>
 		<key>CFBundleURLTypes</key>
 		<array>
 			<dict>
