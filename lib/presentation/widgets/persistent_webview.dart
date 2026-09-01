@@ -1577,7 +1577,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             initialUserScripts: UnmodifiableListView([
               if (_adBlockEnabled)
                 UserScript(
+                  source: ContentBlockerJS.stripAdDataScript,
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                ),
+              if (_adBlockEnabled)
+                UserScript(
+                  source: ContentBlockerJS.adRequestBlockerScript,
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                ),
+              if (_adBlockEnabled)
+                UserScript(
                   source: ContentBlockerJS.genericAdBlockerScript,
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                ),
+              if (_adBlockEnabled)
+                UserScript(
+                  source: ContentBlockerJS.adFallbackSkipScript,
                   injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                 ),
               UserScript(
@@ -1669,7 +1684,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     initialUserScripts: UnmodifiableListView([
                       if (_adBlockEnabled)
                         UserScript(
+                          source: ContentBlockerJS.stripAdDataScript,
+                          injectionTime:
+                              UserScriptInjectionTime.AT_DOCUMENT_START,
+                        ),
+                      if (_adBlockEnabled)
+                        UserScript(
+                          source: ContentBlockerJS.adRequestBlockerScript,
+                          injectionTime:
+                              UserScriptInjectionTime.AT_DOCUMENT_START,
+                        ),
+                      if (_adBlockEnabled)
+                        UserScript(
                           source: ContentBlockerJS.genericAdBlockerScript,
+                          injectionTime:
+                              UserScriptInjectionTime.AT_DOCUMENT_START,
+                        ),
+                      if (_adBlockEnabled)
+                        UserScript(
+                          source: ContentBlockerJS.adFallbackSkipScript,
                           injectionTime:
                               UserScriptInjectionTime.AT_DOCUMENT_START,
                         ),
