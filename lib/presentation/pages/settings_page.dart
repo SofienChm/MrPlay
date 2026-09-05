@@ -294,13 +294,12 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _shareApp() async {
-    const text = 'Check out MrPlay – your all-in-one video hub!';
-    final link =
-        AppConstants.isOnAppStore ? ' ${AppConstants.appStoreUrl}' : '';
+    const text =
+        'Check out MrPlay – your all-in-one video hub!\n${AppConstants.appStoreUrl}';
     try {
       final box = context.findRenderObject() as RenderBox?;
       await Share.share(
-        '$text$link',
+        text,
         sharePositionOrigin:
             box != null && box.hasSize && box.size.width > 0
                 ? box.localToGlobal(Offset.zero) & box.size
