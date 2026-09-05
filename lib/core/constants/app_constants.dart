@@ -1,6 +1,6 @@
 class AppConstants {
   static const String appName = 'MrPlay';
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '1.0.1';
   static const String appSubtitle = 'Your Video Hub';
 
   static const bool isOnAppStore = true;
