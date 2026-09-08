@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app.dart';
 import '../../data/repositories/settings_repository.dart';
 
 /// Privacy & Security → Toggles: hosts the two playback/privacy switches
@@ -16,7 +17,7 @@ class _TogglesPageState extends State<TogglesPage> {
   bool _backgroundAudioEnabled = false;
   bool _showShorts = true;
   bool _showPosts = true;
-  bool _fullscreenOnRotation = false;
+  bool _fullscreenOnRotation = true;
   bool _historyEnabled = true;
   bool _disposed = false;
 
@@ -37,11 +38,14 @@ class _TogglesPageState extends State<TogglesPage> {
     final backgroundAudio =
         await SettingsRepository.getBackgroundAudioEnabled();
     final history = await SettingsRepository.getHistoryEnabled();
+    final fullscreenOnRotation =
+        await SettingsRepository.getFullscreenOnRotation();
     if (_disposed || !mounted) return;
     setState(() {
       _adBlockEnabled = adBlock;
       _backgroundAudioEnabled = backgroundAudio;
       _historyEnabled = history;
+      _fullscreenOnRotation = fullscreenOnRotation;
     });
   }
 
@@ -49,6 +53,13 @@ class _TogglesPageState extends State<TogglesPage> {
     await SettingsRepository.setHistoryEnabled(enabled);
     if (!mounted) return;
     setState(() => _historyEnabled = enabled);
+  }
+
+  Future<void> _changeFullscreenOnRotation(bool enabled) async {
+    await SettingsRepository.setFullscreenOnRotation(enabled);
+    MrPlayApp.fullscreenOnRotationNotifier.value = enabled;
+    if (!mounted) return;
+    setState(() => _fullscreenOnRotation = enabled);
   }
 
   Future<void> _changeAdBlock(bool enabled) async {
@@ -97,8 +108,7 @@ class _TogglesPageState extends State<TogglesPage> {
                 const Text('Rotate your device to watch in fullscreen'),
             trailing: Switch(
               value: _fullscreenOnRotation,
-              onChanged: (value) =>
-                  setState(() => _fullscreenOnRotation = value),
+              onChanged: (value) => _changeFullscreenOnRotation(value),
             ),
           ),
           ListTile(

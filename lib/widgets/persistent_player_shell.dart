@@ -1,16 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../app.dart';
 import '../providers/player_provider.dart';
 import 'mini_player.dart';
 import 'full_player.dart';
 
-class PersistentPlayerShell extends ConsumerWidget {
+class PersistentPlayerShell extends ConsumerStatefulWidget {
   const PersistentPlayerShell({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<PersistentPlayerShell> createState() =>
+      _PersistentPlayerShellState();
+}
+
+class _PersistentPlayerShellState extends ConsumerState<PersistentPlayerShell> {
+  Orientation? _lastOrientation;
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(playerProvider);
     final hasVideo = state.currentVideo != null;
+    final orientation = MediaQuery.orientationOf(context);
+
+    if (_lastOrientation != null && _lastOrientation != orientation) {
+      final previous = _lastOrientation!;
+      _lastOrientation = orientation;
+      _onOrientationChanged(previous, orientation);
+    } else {
+      _lastOrientation = orientation;
+    }
 
     // Rotated the phone to landscape while the video tab was collapsed ->
     // bring the tab back to fullscreen so the video fills the rotated screen.
@@ -18,10 +36,11 @@ class PersistentPlayerShell extends ConsumerWidget {
     // (landscape->portrait leaves the tab untouched; the user can collapse
     // again with the down gesture). Deferred to a post-frame callback so the
     // notifier isn't mutated during the build itself.
-    if (hasVideo &&
+    if (MrPlayApp.fullscreenOnRotationNotifier.value &&
+        hasVideo &&
         state.isVideoTab &&
         state.isMinimized &&
-        MediaQuery.orientationOf(context) == Orientation.landscape) {
+        orientation == Orientation.landscape) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         ref.read(playerProvider.notifier).expand();
       });
@@ -73,5 +92,21 @@ class PersistentPlayerShell extends ConsumerWidget {
             : const FullPlayerWidget(key: ValueKey('full')),
       ),
     );
+  }
+
+  void _onOrientationChanged(Orientation previous, Orientation next) {
+    if (!MrPlayApp.fullscreenOnRotationNotifier.value) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = ref.read(playerProvider);
+      if (state.currentVideo == null) return;
+      if (next == Orientation.landscape) {
+        if (!state.isMinimized) {
+          MrPlayApp.webViewKey.currentState?.controlVideo('enterFullscreen');
+        }
+      } else {
+        MrPlayApp.webViewKey.currentState?.controlVideo('exitFullscreen');
+      }
+    });
   }
 }

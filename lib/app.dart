@@ -25,6 +25,8 @@ class MrPlayApp extends StatefulWidget {
   static final ValueNotifier<Color> accentColorNotifier =
       ValueNotifier(const Color(SettingsRepository.defaultAccentColor));
   static final ValueNotifier<int> hubBackgroundNotifier = ValueNotifier(0);
+  static final ValueNotifier<bool> fullscreenOnRotationNotifier =
+      ValueNotifier(true);
 
   /// A backgrounded session older than this is reset when the app resumes.
   static const Duration _sessionTimeout = Duration(hours: 1);
@@ -50,6 +52,8 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
     MrPlayApp.accentColorNotifier.value = Color(value);
     MrPlayApp.hubBackgroundNotifier.value =
         await SettingsRepository.getHubBackground();
+    MrPlayApp.fullscreenOnRotationNotifier.value =
+        await SettingsRepository.getFullscreenOnRotation();
   }
 
   @override

@@ -68,6 +68,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // rather than phantom-PiP.
   bool _backgroundResumeAllowed = false;
   bool _userPausedInBackground = false;
+  // Latched true when the system pauses us (another app / a call takes the
+  // audio session). While latched, the state poll / JS events must not re-mark
+  // Now Playing as "playing", so Control Center shows the true paused state and
+  // the elapsed time stays put. Cleared on explicit user resume or a new video.
+  bool _systemPaused = false;
   // True while the tracked video is a YouTube Music (music.youtube.com) page.
   bool _isMusic = false;
   int _lastNowPlayingMs = 0;
@@ -130,15 +135,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (!event.begin) return;
         if (!mounted) return;
         if (ref.read(playerProvider).isPlaying) {
-          ref.read(playerProvider.notifier).pause();
-          MediaControlsService.instance.setPlaying(false);
-          // Another app owns the session now: never auto-resume over it.
-          _backgroundResumeAllowed = false;
-          if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
-          // Pause the actual element so JS-side state (and the state poll)
-          // stop reporting "playing" and no phantom-PiP keep-alive audio
-          // lingers.
-          controlVideo('pause');
+          _systemPause();
         }
       });
     } catch (_) {}
@@ -453,6 +450,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _resumeSeekDone = false;
           _unmuteDone = false;
           _userPausedInBackground = false;
+          _systemPaused = false;
           _isMusic = _isMusicUrl(video.videoUrl);
           if (_videoTabUrl != null) {
             ref.read(playerProvider.notifier).openVideoTab(video);
@@ -484,9 +482,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _onVideoState(Map<String, dynamic> data) {
     try {
-      final playing = data['playing'] == true;
+      var playing = data['playing'] == true;
       final ended = data['ended'] == true;
       final pip = data['pip'] == true;
+      // While the system has latched us as paused (another app / a call took
+      // the audio session), ignore any "playing" report from the poll / JS so
+      // Now Playing can't be flipped back to "playing" out of sync with the
+      // actual (paused) video.
+      if (_systemPaused && playing) {
+        playing = false;
+      }
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
       final posSec = (data['position'] as num?)?.toDouble() ?? 0;
@@ -644,10 +649,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final positionMs = position?.inMilliseconds ?? 0;
     switch (command) {
       case 'play':
-        _backgroundResumeAllowed = true;
-        _userPausedInBackground = false;
-        notifier.resume();
-        controlVideo('play');
+        resumePlayback();
         break;
       case 'pause':
         userInitiatedPause();
@@ -656,10 +658,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (state.isPlaying) {
           userInitiatedPause();
         } else {
-          _backgroundResumeAllowed = true;
-          _userPausedInBackground = false;
-          notifier.resume();
-          controlVideo('play');
+          resumePlayback();
         }
         break;
       case 'skipForward':
@@ -692,6 +691,28 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
+  }
+
+  /// The system took over our audio (another app, a phone call, a route
+  /// change). Pause and latch so the state poll / JS events cannot re-mark
+  /// Now Playing as "playing" while the video is actually paused.
+  void _systemPause() {
+    _systemPaused = true;
+    _backgroundResumeAllowed = false;
+    if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
+    ref.read(playerProvider.notifier).pause();
+    MediaControlsService.instance.setPlaying(false);
+    controlVideo('pause');
+  }
+
+  /// User-initiated resume (mini player / full player / remote play). Clears
+  /// the system-pause latch and resumes playback.
+  void resumePlayback() {
+    _systemPaused = false;
+    _backgroundResumeAllowed = true;
+    _userPausedInBackground = false;
+    ref.read(playerProvider.notifier).resume();
+    controlVideo('play');
   }
 
   /// Shows the mini player: tracks the currently-playing video if needed (so
@@ -1083,6 +1104,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void closePlayer() {
     controlVideo('pause');
     BackgroundAudioKeepAlive.instance.stop();
+    _systemPaused = false;
     _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;
@@ -1156,6 +1178,34 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               }
             } else if (v.webkitEnterFullscreen) {
               v.webkitEnterFullscreen();
+            }
+          })();
+        ''');
+        break;
+      case 'enterFullscreen':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            var v = $_activeVideoJs;
+            if (!v) return;
+            if (v.requestFullscreen) {
+              if (!document.fullscreenElement) {
+                v.requestFullscreen().catch(function(){});
+              }
+            } else if (v.webkitEnterFullscreen) {
+              try { v.webkitEnterFullscreen(); } catch (e) {}
+            }
+          })();
+        ''');
+        break;
+      case 'exitFullscreen':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            if (document.fullscreenElement && document.exitFullscreen) {
+              document.exitFullscreen().catch(function(){});
+            }
+            var v = $_activeVideoJs;
+            if (v && v.webkitExitFullscreen) {
+              try { v.webkitExitFullscreen(); } catch (e) {}
             }
           })();
         ''');
@@ -1923,6 +1973,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _goToHub() {
     controlVideo('pause');
     BackgroundAudioKeepAlive.instance.stop();
+    _systemPaused = false;
     _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;

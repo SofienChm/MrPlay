@@ -7,6 +7,7 @@ class SettingsRepository {
   static const String _adBlockKey = 'ad_block_enabled';
   static const String _backgroundAudioKey = 'background_audio_enabled';
   static const String _historyKey = 'history_enabled';
+  static const String _fullscreenOnRotationKey = 'fullscreen_on_rotation';
   static const String _accentColorKey = 'accent_color';
   static const String _hubBackgroundKey = 'hub_background';
 
@@ -82,6 +83,16 @@ class SettingsRepository {
   static Future<void> setHistoryEnabled(bool enabled) async {
     final prefs = await _prefs;
     await prefs.setBool(_historyKey, enabled);
+  }
+
+  static Future<bool> getFullscreenOnRotation() async {
+    final prefs = await _prefs;
+    return prefs.getBool(_fullscreenOnRotationKey) ?? true;
+  }
+
+  static Future<void> setFullscreenOnRotation(bool enabled) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_fullscreenOnRotationKey, enabled);
   }
 
   static const int defaultAccentColor = 0xFF2196F3;
