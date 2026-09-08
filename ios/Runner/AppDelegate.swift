@@ -19,7 +19,7 @@ import MediaPlayer
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     do {
-      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: .duckOthers)
+      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
       try AVAudioSession.sharedInstance().setActive(true)
     } catch {
       print("MrPlay: AVAudioSession error: \(error)")

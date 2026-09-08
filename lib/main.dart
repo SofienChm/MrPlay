@@ -18,7 +18,7 @@ Future<void> main() async {
   await session.configure(const AudioSessionConfiguration(
     avAudioSessionCategory: AVAudioSessionCategory.playback,
     avAudioSessionMode: AVAudioSessionMode.moviePlayback,
-    avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.duckOthers,
+    avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.none,
   ));
 
   await MobileAds.instance.initialize();
