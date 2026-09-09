@@ -190,11 +190,8 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
                   child: Consumer(
                     builder: (context, ref, _) {
                       final state = ref.watch(playerProvider);
-                      // Don't float the banner over the fullscreen player.
-                      final hide =
-                          state.currentVideo != null && !state.isMinimized;
-                      // The hub shows its own small ad slot, so keep the
-                      // floating banner hidden while the hub is visible.
+                      final hide = state.isVideoTab ||
+                          (state.currentVideo != null && !state.isMinimized);
                       return ValueListenableBuilder<bool>(
                         valueListenable: PersistentWebViewState.hubVisible,
                         builder: (context, hubVisible, _) {

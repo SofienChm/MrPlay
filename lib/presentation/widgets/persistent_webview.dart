@@ -59,7 +59,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   Timer? _loadingTimer;
   Timer? _nowPlayingThrottle;
   bool _endedHandled = false;
-  bool _resumeSeekDone = false;
   bool _appIsBackgrounded = false;
   // Whether a system-forced pause (iOS suspends the webview's media when the
   // app backgrounds / the screen locks) may be auto-resumed to keep audio
@@ -389,7 +388,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
       if (urlStr != _videoTabUrl) {
         _videoTabUrl = urlStr;
-        _resumeSeekDone = false;
         _endedHandled = false;
       }
       _handleWatchPage(controller, urlStr);
@@ -404,9 +402,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  /// Runs the watch-page tasks (title extraction for the mini player and
-  /// resume-seek). Safe to call repeatedly for the same page: playerInfo is
-  /// deduped by video id and the seek is guarded by [_resumeSeekDone].
+  /// Runs the watch-page tasks (title extraction for the mini player).
+  /// Safe to call repeatedly for the same page: playerInfo is deduped by
+  /// video id.
   void _handleWatchPage(InAppWebViewController controller, String urlStr) {
     if (urlStr.contains('youtube.com')) {
       if (urlStr.contains('/watch')) {
@@ -429,32 +427,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             })();
           ''');
         });
-
-        // Resume where you left off: if we have stored progress for this video,
-        // seek once the player is actually ready (skip for live streams).
-        final videoIdMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(urlStr);
-        final videoId = videoIdMatch?.group(1) ?? '';
-        if (videoId.isNotEmpty) {
-          PlaybackStatsService.instance
-              .resumePosition(videoId)
-              .then((resumeMs) {
-            if (resumeMs > 0) {
-              Future.delayed(const Duration(milliseconds: 3500), () async {
-                if (!mounted) return;
-                if (_resumeSeekDone) return;
-                _resumeSeekDone = true;
-                await controller.evaluateJavascript(source: '''
-                  (function() {
-                    var v = document.querySelector('video');
-                    if (v && v.duration > 10 && isFinite(v.duration)) {
-                      v.currentTime = $resumeMs;
-                    }
-                  })();
-                ''');
-              });
-            }
-          });
-        }
       }
     }
   }
@@ -473,7 +445,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         final currentId = ref.read(playerProvider).currentVideo?.id;
         if (currentId != video.id) {
           _endedHandled = false;
-          _resumeSeekDone = false;
           _unmuteDone = false;
           _userPausedInBackground = false;
           _systemPaused = false;
@@ -783,7 +754,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _openVideoTab(String url) {
     if (_videoTabUrl == url) return;
     _videoTabUrl = url;
-    _resumeSeekDone = false;
     _endedHandled = false;
     _unmuteDone = false;
     ref.read(playerProvider.notifier).videoTabActive();
@@ -1331,7 +1301,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
     PersistentWebViewState.hubVisible.value = false;
     _endedHandled = false;
-    _resumeSeekDone = false;
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
     });
