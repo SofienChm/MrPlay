@@ -113,15 +113,12 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
   }
 
   void _togglePlayPause() {
-    final notifier = ref.read(playerProvider.notifier);
     final webView = MrPlayApp.webViewKey.currentState;
     final current = ref.read(playerProvider);
     if (current.isPlaying) {
-      notifier.pause();
-      webView?.controlVideo('pause');
+      webView?.userInitiatedPause();
     } else {
-      notifier.resume();
-      webView?.controlVideo('play');
+      webView?.resumePlayback();
     }
   }
 
@@ -227,8 +224,8 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                             iconSize: 40,
                                             icon: const Icon(Icons.replay_10,
                                                 color: Colors.white),
-                                            tooltip: 'Back 10 seconds',
-                                            onPressed: () => _seekBy(-10),
+                                            tooltip: 'Back 15 seconds',
+                                            onPressed: () => _seekBy(-15),
                                           ),
                                           IconButton(
                                             iconSize: 56,
@@ -247,8 +244,8 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                             iconSize: 40,
                                             icon: const Icon(Icons.forward_10,
                                                 color: Colors.white),
-                                            tooltip: 'Forward 10 seconds',
-                                            onPressed: () => _seekBy(10),
+                                            tooltip: 'Forward 15 seconds',
+                                            onPressed: () => _seekBy(15),
                                           ),
                                         ],
                                       ),
@@ -485,7 +482,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                     IconButton(
                       icon: const Icon(Icons.close, color: Colors.white54),
                       onPressed: () {
-                        ref.read(playerProvider.notifier).dismiss();
+                        MrPlayApp.webViewKey.currentState?.closePlayer();
                       },
                     ),
                   ],

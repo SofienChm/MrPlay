@@ -55,7 +55,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   void play(Video video) {
     state = state.copyWith(
       currentVideo: video,
-      isPlaying: true,
+      isPlaying: false,
       isMinimized: true,
       position: Duration.zero,
       duration: Duration.zero,
@@ -74,7 +74,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   void openVideoTab(Video video) {
     state = state.copyWith(
       currentVideo: video,
-      isPlaying: true,
+      isPlaying: false,
       isMinimized: false,
       isVideoTab: true,
       position: Duration.zero,
@@ -93,7 +93,6 @@ class PlayerNotifier extends Notifier<PlayerState> {
   void videoTabActive() => state = state.copyWith(
         isVideoTab: true,
         isMinimized: false,
-        isPlaying: true,
       );
 
   void syncState({

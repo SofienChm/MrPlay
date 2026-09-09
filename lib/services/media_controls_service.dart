@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 /// Bridges to the native `com.mrplay/media` channel (iOS only).
@@ -33,7 +34,8 @@ class MediaControlsService {
     });
   }
 
-  /// Full update including artwork. Call when a new video starts.
+  /// Full update including artwork. Sends metadata immediately, then updates
+  /// with artwork when the fetch completes (non-blocking).
   Future<void> updateNowPlaying({
     required String title,
     required String artist,
@@ -42,10 +44,6 @@ class MediaControlsService {
     required bool isPlaying,
     String? artworkUrl,
   }) async {
-    String? artwork;
-    if (artworkUrl != null && artworkUrl.isNotEmpty) {
-      artwork = await _fetchArtwork(artworkUrl);
-    }
     try {
       await _channel.invokeMethod('setNowPlaying', {
         'title': title,
@@ -53,9 +51,23 @@ class MediaControlsService {
         'positionMs': position.inMilliseconds.toDouble(),
         'durationMs': duration.inMilliseconds.toDouble(),
         'isPlaying': isPlaying,
-        if (artwork != null) 'artwork': artwork,
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] setNowPlaying failed: $e');
+    }
+
+    if (artworkUrl != null && artworkUrl.isNotEmpty) {
+      _fetchArtwork(artworkUrl).then((artwork) {
+        if (artwork == null) return;
+        try {
+          _channel.invokeMethod('setNowPlaying', {
+            'artwork': artwork,
+          });
+        } catch (e) {
+          debugPrint('[MrPlay] artwork update failed: $e');
+        }
+      });
+    }
   }
 
   /// Lightweight progress update (no artwork). Throttle callers.
@@ -82,7 +94,9 @@ class MediaControlsService {
   Future<void> clearNowPlaying() async {
     try {
       await _channel.invokeMethod('clearNowPlaying');
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] clearNowPlaying failed: $e');
+    }
   }
 
   Future<String?> _fetchArtwork(String url) async {
@@ -97,7 +111,8 @@ class MediaControlsService {
         bytes.addAll(chunk);
       }
       return base64Encode(bytes);
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[MrPlay] artwork fetch failed: $e');
       return null;
     } finally {
       client?.close(force: true);

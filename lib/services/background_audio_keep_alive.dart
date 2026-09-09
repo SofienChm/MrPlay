@@ -1,4 +1,5 @@
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 
 /// Silent audio loop used to keep iOS WebView audio alive in the background.
 ///
@@ -21,7 +22,8 @@ class BackgroundAudioKeepAlive {
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.setVolume(0);
       await _player.play(AssetSource('audio/silence.wav'));
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[MrPlay] background keep-alive start failed: $e');
       _running = false;
     }
   }
@@ -31,6 +33,8 @@ class BackgroundAudioKeepAlive {
     _running = false;
     try {
       await _player.stop();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] background keep-alive stop failed: $e');
+    }
   }
 }

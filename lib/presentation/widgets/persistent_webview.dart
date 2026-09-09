@@ -155,7 +155,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _systemPause();
         }
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] audio interruption subscribe failed: $e');
+    }
   }
 
   @override
@@ -219,7 +221,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final session = await AudioSession.instance;
       await session.setActive(true);
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] audio session reassert failed: $e');
+    }
   }
 
   void _onWebViewCreated(InAppWebViewController controller) {
@@ -360,7 +364,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _waitingToGoBack = false;
         try {
           controller.goBack();
-        } catch (_) {}
+        } catch (e) {
+          debugPrint('[MrPlay] goBack failed: $e');
+        }
       });
       return;
     }
@@ -494,7 +500,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] _onPlayerInfo error: $e');
+    }
   }
 
   void _onVideoState(Map<String, dynamic> data) {
@@ -580,7 +588,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _handleEnded();
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MrPlay] _onVideoState error: $e');
+    }
   }
 
   /// Builds and tracks a [Video] from the current watch URL when the
@@ -1264,7 +1274,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       );
       final value = result?.value;
       return value is Map && value['audible'] == true;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[MrPlay] _unmuteVideo error: $e');
       return false;
     }
   }
@@ -1458,9 +1469,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final value = result?.value;
       final ok = value is Map && value['ok'] == true;
       if (!ok) {
+        debugPrint('[MrPlay] inline restore failed, reloading');
         _activeController?.reload();
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[MrPlay] _restoreVideoInline error: $e');
       _activeController?.reload();
     }
   }

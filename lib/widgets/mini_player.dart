@@ -178,14 +178,11 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
                             color: Colors.white,
                           ),
                           onPressed: () {
-                            final notifier = ref.read(playerProvider.notifier);
                             final webView = MrPlayApp.webViewKey.currentState;
                             if (state.isPlaying) {
-                              notifier.pause();
-                              webView?.controlVideo('pause');
+                              webView?.userInitiatedPause();
                             } else {
-                              notifier.resume();
-                              webView?.controlVideo('play');
+                              webView?.resumePlayback();
                             }
                           },
                         ),
