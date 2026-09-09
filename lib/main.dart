@@ -14,15 +14,15 @@ import 'data/models/playlist_item.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  await MobileAds.instance.initialize();
+  await _requestTrackingPermission();
+
   final session = await AudioSession.instance;
   await session.configure(const AudioSessionConfiguration(
     avAudioSessionCategory: AVAudioSessionCategory.playback,
     avAudioSessionMode: AVAudioSessionMode.moviePlayback,
     avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.none,
   ));
-
-  await MobileAds.instance.initialize();
-  await _requestTrackingPermission();
 
   await Hive.initFlutter();
   Hive.registerAdapter(FavoriteVideoAdapter());

@@ -16,6 +16,7 @@ class UnifiedBannerAdSlot extends StatefulWidget {
   final bool isVisible;
   final bool showDismissButton;
   final Alignment alignment;
+  final ValueChanged<bool>? onAdActivity;
 
   const UnifiedBannerAdSlot({
     super.key,
@@ -26,6 +27,7 @@ class UnifiedBannerAdSlot extends StatefulWidget {
     this.isVisible = true,
     this.showDismissButton = true,
     this.alignment = Alignment.center,
+    this.onAdActivity,
   });
 
   @override
@@ -78,16 +80,16 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
           if (!mounted) return;
           _adWidget = AdWidget(key: ValueKey(ad.hashCode), ad: ad as BannerAd);
           setState(() => _adLoaded = true);
+          widget.onAdActivity?.call(true);
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
-          // Logged so Xcode/Console shows WHY the banner is missing
-          // (no-fill, wrong app id, offline...). Retry every 30s.
           debugPrint('MrPlay banner failed to load '
               '($unitId): '
               'code=${error.code} domain=${error.domain} message=${error.message}');
           if (!mounted) return;
           setState(() => _bannerAd = null);
+          widget.onAdActivity?.call(false);
           _retryTimer?.cancel();
           _retryTimer = Timer(const Duration(seconds: 30), () {
             if (mounted && !_adLoaded) _loadBannerAd();
@@ -98,11 +100,8 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   }
 
   void _handleDismiss() {
-    // Session-scoped dismissal: the banner stays hidden for the rest of the
-    // app session (across both tabs) instead of auto-reappearing after a
-    // few minutes. Re-presenting an ad the user explicitly closed during the
-    // same session is the pattern AdMob flags as intrusive.
     setState(() => _isDismissed = true);
+    widget.onAdActivity?.call(false);
   }
 
   @override

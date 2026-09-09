@@ -201,6 +201,10 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
                           return UnifiedBannerAdSlot(
                             isVisible: !hubVisible && !hide,
                             alignment: Alignment.centerLeft,
+                            onAdActivity: (active) {
+                              MrPlayApp.webViewKey.currentState
+                                  ?.setAdActive(active);
+                            },
                           );
                         },
                       );

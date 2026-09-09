@@ -76,6 +76,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // True while the tracked video is a YouTube Music (music.youtube.com) page.
   bool _isMusic = false;
   int _lastNowPlayingMs = 0;
+  bool _adActive = false;
+  bool _wasPlayingBeforeAd = false;
   Timer? _statePoll;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
 
@@ -151,6 +153,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _interruptionSub = session.interruptionEventStream.listen((event) {
         if (!event.begin) return;
         if (!mounted) return;
+        if (_adActive) return;
         if (ref.read(playerProvider).isPlaying) {
           _systemPause();
         }
@@ -740,6 +743,26 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _userPausedInBackground = false;
     ref.read(playerProvider.notifier).resume();
     controlVideo('play');
+  }
+
+  /// Called by the floating ad banner when a video ad starts (true) or
+  /// ends/fails (false). While a video ad is active, audio interruptions from
+  /// the ad SDK are ignored so the video is not falsely paused.
+  void setAdActive(bool active) {
+    if (_adActive == active) return;
+    _adActive = active;
+    if (active) {
+      _wasPlayingBeforeAd = ref.read(playerProvider).isPlaying;
+    } else if (_wasPlayingBeforeAd) {
+      _wasPlayingBeforeAd = false;
+      if (!ref.read(playerProvider).isPlaying && mounted) {
+        _systemPaused = false;
+        _backgroundResumeAllowed = true;
+        ref.read(playerProvider.notifier).resume();
+        controlVideo('play');
+        _reassertAudioSession();
+      }
+    }
   }
 
   /// Shows the mini player: tracks the currently-playing video if needed (so
