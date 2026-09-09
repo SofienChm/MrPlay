@@ -183,12 +183,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
-      // Stop the YouTube Music keep-alive when the app is back in the
-      // foreground and the video is not playing (the silent loop is no
-      // longer needed to keep the WebView alive).
-      if (_isMusic &&
-          !ref.read(playerProvider).isPlaying &&
-          !_systemPaused) {
+      // Stop the keep-alive when the app is back in the foreground and the
+      // video is not playing (the silent loop is no longer needed).
+      if (!ref.read(playerProvider).isPlaying && !_systemPaused) {
         BackgroundAudioKeepAlive.instance.stop();
       }
       // The video was phantom-PiP'd on background to keep audio alive. Restore
@@ -218,13 +215,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         MediaControlsService.instance.setPlaying(false);
         controlVideo('pause');
       }
-    } else if (_isMusic &&
-        _backgroundAudioEnabled &&
+    } else if (_backgroundAudioEnabled &&
         _userPausedInBackground &&
         !_systemPaused) {
-      // User paused YouTube Music from Control Center while backgrounded.
-      // Keep the silent loop alive so iOS doesn't suspend the WebView —
-      // without it, Control Center's play button can't reach the webview.
+      // User paused from Control Center while backgrounded. Keep the silent
+      // loop alive so iOS doesn't suspend the WebView — without it, Control
+      // Center's play button can't reach the webview.
       BackgroundAudioKeepAlive.instance.start();
     }
   }
@@ -699,10 +695,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void userInitiatedPause() {
     _backgroundResumeAllowed = false;
     if (_appIsBackgrounded) _userPausedInBackground = true;
-    // YouTube Music: keep the silent loop alive while backgrounded so iOS
-    // doesn't suspend the WebView. Without it, Control Center's play button
-    // can't reach the webview to resume playback.
-    if (_isMusic && !_appIsBackgrounded) {
+    // Keep the silent loop alive while backgrounded so iOS doesn't suspend
+    // the WebView. Without it, Control Center's play button can't reach the
+    // webview to resume playback.
+    if (!_appIsBackgrounded) {
       BackgroundAudioKeepAlive.instance.stop();
     }
     ref.read(playerProvider.notifier).pause();
