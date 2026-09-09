@@ -1664,6 +1664,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ]),
             initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
+              javaScriptCanOpenWindowsAutomatically: false,
+              supportMultipleWindows: false,
               allowsInlineMediaPlayback: true,
               mediaPlaybackRequiresUserGesture: false,
               allowBackgroundAudioPlaying: _backgroundAudioEnabled,
@@ -1698,13 +1700,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               return NavigationActionPolicy.ALLOW;
             },
             onCreateWindow: (controller, createWindowAction) async {
-              // Open popup/new-window targets (e.g. OAuth "Continue with ...")
-              // inside the main WebView instead of dropping them.
-              final url = createWindowAction.request.url;
-              if (url != null) {
-                controller.loadUrl(urlRequest: URLRequest(url: url));
-              }
-              return false;
+              // Block popunders/new-tab ads: never open a new window and
+              // never load its URL into the main page.
+              return true;
             },
             ),
           ),
@@ -1783,6 +1781,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     ]),
                     initialSettings: InAppWebViewSettings(
                       javaScriptEnabled: true,
+                      javaScriptCanOpenWindowsAutomatically: false,
+                      supportMultipleWindows: false,
                       allowsInlineMediaPlayback: true,
                       mediaPlaybackRequiresUserGesture: false,
                       allowBackgroundAudioPlaying: _backgroundAudioEnabled,
@@ -1819,11 +1819,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       return NavigationActionPolicy.ALLOW;
                     },
                     onCreateWindow: (controller, createWindowAction) async {
-                      final url = createWindowAction.request.url;
-                      if (url != null) {
-                        controller.loadUrl(urlRequest: URLRequest(url: url));
-                      }
-                      return false;
+                      return true;
                     },
                   ),
                 ),
