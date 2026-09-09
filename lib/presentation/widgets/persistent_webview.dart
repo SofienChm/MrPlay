@@ -92,6 +92,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     })()
   ''';
 
+  static bool _isAdDomain(String host) {
+    final h = host.toLowerCase();
+    const adDomains = [
+      'doubleclick.net',
+      'googlesyndication.com',
+      'googleadservices.com',
+      'google-analytics.com',
+      'adservice.google.com',
+      'pagead2.googlesyndication.com',
+      'tpc.googlesyndication.com',
+    ];
+    for (final d in adDomains) {
+      if (h == d || h.endsWith('.$d')) return true;
+    }
+    return false;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1664,8 +1681,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             ]),
             initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
-              javaScriptCanOpenWindowsAutomatically: false,
-              supportMultipleWindows: false,
               allowsInlineMediaPlayback: true,
               mediaPlaybackRequiresUserGesture: false,
               allowBackgroundAudioPlaying: _backgroundAudioEnabled,
@@ -1700,9 +1715,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               return NavigationActionPolicy.ALLOW;
             },
             onCreateWindow: (controller, createWindowAction) async {
-              // Block popunders/new-tab ads: never open a new window and
-              // never load its URL into the main page.
-              return true;
+              final url = createWindowAction.request.url;
+              if (url == null) return false;
+              final host = url.host;
+              if (_isAdDomain(host)) return false;
+              controller.loadUrl(urlRequest: URLRequest(url: url));
+              return false;
             },
             ),
           ),
@@ -1781,8 +1799,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     ]),
                     initialSettings: InAppWebViewSettings(
                       javaScriptEnabled: true,
-                      javaScriptCanOpenWindowsAutomatically: false,
-                      supportMultipleWindows: false,
                       allowsInlineMediaPlayback: true,
                       mediaPlaybackRequiresUserGesture: false,
                       allowBackgroundAudioPlaying: _backgroundAudioEnabled,
@@ -1819,7 +1835,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       return NavigationActionPolicy.ALLOW;
                     },
                     onCreateWindow: (controller, createWindowAction) async {
-                      return true;
+                      final url = createWindowAction.request.url;
+                      if (url == null) return false;
+                      final host = url.host;
+                      if (_isAdDomain(host)) return false;
+                      controller.loadUrl(urlRequest: URLRequest(url: url));
+                      return false;
                     },
                   ),
                 ),
