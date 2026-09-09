@@ -72,6 +72,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // Now Playing as "playing", so Control Center shows the true paused state and
   // the elapsed time stays put. Cleared on explicit user resume or a new video.
   bool _systemPaused = false;
+  // Elapsed seconds frozen at the moment of a system pause (call / other app
+  // seizing the audio session). Used to hold the Now Playing elapsed time
+  // steady so iOS doesn't keep counting up while the video is actually paused.
+  double _systemPausedElapsed = 0;
   // True while the tracked video is a YouTube Music (music.youtube.com) page.
   bool _isMusic = false;
   int _lastNowPlayingMs = 0;
@@ -454,6 +458,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _unmuteDone = false;
           _userPausedInBackground = false;
           _systemPaused = false;
+          _systemPausedElapsed = 0;
           _isMusic = _isMusicUrl(video.videoUrl);
           if (_videoTabUrl != null) {
             ref.read(playerProvider.notifier).openVideoTab(video);
@@ -632,6 +637,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }) {
     if (positionMs - _lastNowPlayingMs < 1000) return;
     _lastNowPlayingMs = positionMs;
+    // While the system has paused us, freeze the elapsed time in Now Playing
+    // so the notification doesn't keep counting up while the video is stopped.
+    if (_systemPaused) {
+      MediaControlsService.instance.updateProgress(
+        position: Duration(seconds: _systemPausedElapsed.toInt()),
+        duration: Duration(milliseconds: durationMs),
+        isPlaying: false,
+      );
+      return;
+    }
     MediaControlsService.instance.updateProgress(
       position: Duration(milliseconds: positionMs),
       duration: Duration(milliseconds: durationMs),
@@ -711,16 +726,28 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _systemPause() {
     _systemPaused = true;
     _backgroundResumeAllowed = false;
+    // Freeze the elapsed time so Now Playing doesn't keep counting up while
+    // the video is actually paused by the system (call / other app).
+    _systemPausedElapsed = ref.read(playerProvider).position.inSeconds.toDouble();
     if (_isMusic) BackgroundAudioKeepAlive.instance.stop();
     ref.read(playerProvider.notifier).pause();
     MediaControlsService.instance.setPlaying(false);
     controlVideo('pause');
+    // Force-update Now Playing with the frozen elapsed time so the
+    // notification immediately shows the correct paused position.
+    final dur = ref.read(playerProvider).duration;
+    MediaControlsService.instance.updateProgress(
+      position: Duration(seconds: _systemPausedElapsed.toInt()),
+      duration: dur,
+      isPlaying: false,
+    );
   }
 
   /// User-initiated resume (mini player / full player / remote play). Clears
   /// the system-pause latch and resumes playback.
   void resumePlayback() {
     _systemPaused = false;
+    _systemPausedElapsed = 0;
     _backgroundResumeAllowed = true;
     _userPausedInBackground = false;
     ref.read(playerProvider.notifier).resume();
@@ -1136,6 +1163,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     controlVideo('pause');
     BackgroundAudioKeepAlive.instance.stop();
     _systemPaused = false;
+    _systemPausedElapsed = 0;
     _stopStatePoll();
     _loadingTimer?.cancel();
     _loadingTimer = null;
