@@ -55,9 +55,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _backgroundAudioEnabled = false;
   String? _pendingUrl;
   String? _currentUrl;
-  /// Last URL loaded in the browse webview, saved before blanking so we can
-  /// restore it when the video tab collapses back to mini.
-  String? _lastBrowseUrl;
   String? _loadError;
   Timer? _loadingTimer;
   Timer? _nowPlayingThrottle;
@@ -84,7 +81,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   int _lastNowPlayingMs = 0;
   bool _adActive = false;
   bool _wasPlayingBeforeAd = false;
-  bool _browsePreloaded = false;
   Timer? _statePoll;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
 
@@ -149,33 +145,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  /// Blanks the browse webview to free ~150MB of WebContent process memory.
-  /// The current URL is saved in [_lastBrowseUrl] so it can be restored when
-  /// the video tab collapses.
-  void _blankBrowseWebview() {
-    _lastBrowseUrl = _currentUrl;
-    _webViewController?.loadUrl(
-      urlRequest: URLRequest(url: WebUri('about:blank')),
-    );
-    _currentUrl = null;
-  }
-
-  /// Restores the browse webview after it was blanked. Uses the saved
-  /// [_lastBrowseUrl] or falls back to YouTube home.
-  void _restoreBrowseWebview() {
-    final url = _lastBrowseUrl;
-    if (url != null && url.isNotEmpty && _webViewController != null) {
-      _webViewController!.loadUrl(
-        urlRequest: URLRequest(url: WebUri(url)),
-      );
-      _currentUrl = url;
-    } else if (_webViewController != null) {
-      _webViewController!.loadUrl(
-        urlRequest: URLRequest(url: WebUri('https://m.youtube.com')),
-      );
-    }
-  }
-
   /// Another app (TikTok, Spotify, a call...) has taken the audio session -
   /// iOS pauses our playback and silences the phantom-PiP keep-alive. Update
   /// the player state and Now Playing so Control Center doesn't keep showing
@@ -228,20 +197,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // first; the restore is event-driven (webkitpresentationmodechanged)
       // with a page reload as a last resort.
       Future.delayed(const Duration(milliseconds: 300), _restoreVideoInline);
-      // Browse was blanked on background to free memory. Restore it when the
-      // user is going to see it (no video tab, or the video tab is minimized).
-      // Keep it blank while the expanded video tab covers it.
-      final vidTabExpanded = _videoTabUrl != null &&
-          ref.read(playerProvider).isVideoTab &&
-          !ref.read(playerProvider).isMinimized;
-      if (!vidTabExpanded &&
-          _pendingUrl == null &&
-          _lastBrowseUrl != null &&
-          _currentUrl == null) {
-        Future.delayed(const Duration(milliseconds: 800), () {
-          if (mounted) _restoreBrowseWebview();
-        });
-      }
     }
   }
 
@@ -271,20 +226,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // loop alive so iOS doesn't suspend the WebView — without it, Control
       // Center's play button can't reach the webview.
       BackgroundAudioKeepAlive.instance.start();
-    }
-    // Memory cleanup: blank the browse webview whenever it is hidden (video
-    // tab is active) and blank both webviews when backgrounded without audio.
-    // WKWebView runs out-of-process, so this frees ~150-300 MB of WebContent
-    // memory — the main cause of device heating.
-    if (!ref.read(playerProvider).isPlaying) {
-      // No playback — safe to blank everything for maximum memory recovery.
-      _blankBrowseWebview();
-      _videoWebViewController?.loadUrl(
-        urlRequest: URLRequest(url: WebUri('about:blank')),
-      );
-    } else if (_videoTabUrl != null) {
-      // Audio playing but browse is hidden behind the video tab.
-      _blankBrowseWebview();
     }
   }
 
@@ -855,10 +796,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _unmuteDone = false;
     ref.read(playerProvider.notifier).videoTabActive();
     _videoTabIntro = true;
-    // Blank the browse webview since it is fully hidden behind the video tab.
-    // This frees ~150 MB of WebContent process memory while watching.
-    _blankBrowseWebview();
-    _browsePreloaded = false;
     final vc = _videoWebViewController;
     if (vc != null) {
       vc.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
@@ -1829,16 +1766,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               controller.loadUrl(urlRequest: URLRequest(url: url));
               return false;
             },
-            onWebContentProcessDidTerminate: (controller) async {
-              debugPrint('[MrPlay] Browse WebContent process terminated — reloading');
-              if (mounted) {
-                setState(() => _isLoading = true);
-                await Future.delayed(const Duration(milliseconds: 500));
-                if (mounted) {
-                  controller.reload();
-                }
-              }
-            },
             ),
           ),
         ),
@@ -1958,16 +1885,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       if (_isAdDomain(host)) return false;
                       controller.loadUrl(urlRequest: URLRequest(url: url));
                       return false;
-                    },
-                    onWebContentProcessDidTerminate: (controller) async {
-                      debugPrint('[MrPlay] Video WebContent process terminated — reloading');
-                      if (mounted) {
-                        setState(() => _isLoading = true);
-                        await Future.delayed(const Duration(milliseconds: 500));
-                        if (mounted) {
-                          controller.reload();
-                        }
-                      }
                     },
                   ),
                 ),
@@ -2124,14 +2041,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _nowPlayingThrottle?.cancel();
     _nowPlayingThrottle = null;
     _videoTabUrl = null;
-    _videoWebViewController?.loadUrl(
-      urlRequest: URLRequest(url: WebUri('about:blank')),
-    );
     _videoWebViewController = null;
     _pendingVideoUrl = null;
     _tabSwipeOffset = 0;
-    _browsePreloaded = false;
-    _lastBrowseUrl = null;
     _webViewController?.loadUrl(
       urlRequest: URLRequest(url: WebUri('about:blank')),
     );
@@ -2158,13 +2070,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_videoTabUrl == null) return;
     _tabSwipeOffset = 0;
     ref.read(playerProvider.notifier).minimize();
-    // Ensure the browse webview is loaded by the time the video slides away.
-    // If a preload was triggered during the swipe it may already be loading;
-    // otherwise kick one off now so there is no white-flash.
-    if (!_browsePreloaded && _lastBrowseUrl != null) {
-      _restoreBrowseWebview();
-    }
-    _browsePreloaded = false;
   }
 
   void _onTabSwipeUpdate(DragUpdateDetails details) {
@@ -2172,18 +2077,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _tabSwipeOffset += details.delta.dy;
       if (_tabSwipeOffset < 0) _tabSwipeOffset = 0;
     });
-    // When the user swipes down (positive delta) and the browse webview was
-    // blanked to save memory, start loading it immediately so it is ready by
-    // the time the video tab finishes sliding away. This avoids the white-
-    // flash that would otherwise appear behind the minimizing video.
-    if (details.delta.dy > 0 &&
-        !_browsePreloaded &&
-        _currentUrl == null &&
-        _lastBrowseUrl != null &&
-        _webViewController != null) {
-      _browsePreloaded = true;
-      _restoreBrowseWebview();
-    }
   }
 
   void _onTabSwipeEnd(DragEndDetails details) {
