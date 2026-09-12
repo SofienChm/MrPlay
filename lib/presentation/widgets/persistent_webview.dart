@@ -82,6 +82,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   Timer? _statePoll;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
 
+  /// Timestamp of the last time playback was (re)started by MrPlay, the page,
+  /// or a new video. Interruptions that arrive shortly after are almost always
+  /// transient session toggling (AdMob SDK / WebKit handoff on the *shared*
+  /// AVAudioSession), not a real system interruption, so they are not acted on.
+  DateTime _lastPlayInitiatedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// How long after our own play start transient interruptions are ignored.
+  static const Duration _interruptionGrace = Duration(milliseconds: 2500);
+
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
   /// stale/ad/preview video that `document.querySelector('video')` may hit.
@@ -143,11 +152,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  /// Another app (TikTok, Spotify, a call...) has taken the audio session -
-  /// iOS pauses our playback and silences the phantom-PiP keep-alive. Update
-  /// the player state and Now Playing so Control Center doesn't keep showing
-  /// "playing" while the video is actually paused. When the interruption ends
-  /// the webview stays paused; the user resumes explicitly.
+  /// Listens for AVAudioSession interruptions (a phone call, Siri, another app
+  /// grabbing the audio session...). The interruptor's `begin` event is not
+  /// acted on blindly: the shared AVAudioSession is also touched transiently by
+  /// the AdMob SDK and by WebKit's own media handoff on first play, which iOS
+  /// misreports as an interruption even though nothing paused our `<video>`.
+  /// [_handleAudioInterruptionBegan] verifies against the actual element before
+  /// latching a system pause, so those transient events can't kill playback.
   Future<void> _subscribeToAudioInterruptions() async {
     try {
       final session = await AudioSession.instance;
@@ -155,12 +166,40 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (!event.begin) return;
         if (!mounted) return;
         if (ref.read(playerProvider).isPlaying) {
-          _systemPause();
+          _handleAudioInterruptionBegan();
         }
       });
     } catch (e) {
       debugPrint('[MrPlay] audio interruption subscribe failed: $e');
     }
+  }
+
+  /// Verifies an interruption before pausing. A genuine system interruption
+  /// pauses the `<video>` element itself (WebKit is interrupted too), so a
+  /// short grace window plus a fresh element poll distinguish it from the
+  /// transient session toggling of the ad SDK / WebKit first-play handoff.
+  Future<void> _handleAudioInterruptionBegan() async {
+    // In the background the webview may already be suspended and can't be
+    // polled, so treat every interruption as genuine there (a call / another
+    // app seizing the session really does stop our keep-alive audio).
+    if (!_appIsBackgrounded) {
+      // Ignore interruptions arriving right after we (or the page) started
+      // playback - this is when the AdMob SDK / WebKit settle the shared audio
+      // session and iOS emits a spurious "interruption began".
+      if (DateTime.now().difference(_lastPlayInitiatedAt) < _interruptionGrace) {
+        return;
+      }
+      if (mounted) {
+        await Future<void>.delayed(const Duration(milliseconds: 350));
+      }
+      if (!mounted) return;
+      await _pollVideoState();
+      if (!mounted) return;
+      // The element is still playing -> the "interruption" was transient
+      // (session toggling), not the system taking our audio. Ignore it.
+      if (ref.read(playerProvider).isPlaying) return;
+    }
+    _systemPause();
   }
 
   @override
@@ -456,6 +495,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _userPausedInBackground = false;
           _systemPaused = false;
           _systemPausedElapsed = 0;
+          _lastPlayInitiatedAt = DateTime.now();
           _isMusic = _isMusicUrl(video.videoUrl);
           if (_videoTabUrl != null) {
             ref.read(playerProvider.notifier).openVideoTab(video);
@@ -495,9 +535,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // While the system has latched us as paused (another app / a call took
       // the audio session), ignore any "playing" report from the poll / JS so
       // Now Playing can't be flipped back to "playing" out of sync with the
-      // actual (paused) video.
+      // actual (paused) video. But if the real <video> IS playing again, the
+      // interruption ended and playback resumed (user tapped play in the page,
+      // or iOS auto-resumed the element) - drop the stale latch so the player
+      // button, Now Playing and the background keep-alive follow reality
+      // instead of fighting it. A genuine lingering pause keeps the latch,
+      // because the element keeps reporting paused.
       if (_systemPaused && playing) {
-        playing = false;
+        _systemPaused = false;
+        _systemPausedElapsed = 0;
+        _backgroundResumeAllowed = true;
       }
       // Live streams can report non-finite position/duration - clamp to 0 so
       // Duration(milliseconds:) never receives Infinity/NaN (which throws).
@@ -610,6 +657,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else {
       ref.read(playerProvider.notifier).play(video);
     }
+    _lastPlayInitiatedAt = DateTime.now();
     _userPausedInBackground = false;
     _isMusic = _isMusicUrl(url);
     return video;
@@ -745,6 +793,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void resumePlayback() {
     _systemPaused = false;
     _systemPausedElapsed = 0;
+    _lastPlayInitiatedAt = DateTime.now();
     _backgroundResumeAllowed = true;
     _userPausedInBackground = false;
     ref.read(playerProvider.notifier).resume();
@@ -771,6 +820,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _videoTabUrl = url;
     _endedHandled = false;
     _unmuteDone = false;
+    _lastPlayInitiatedAt = DateTime.now();
     ref.read(playerProvider.notifier).videoTabActive();
     _videoTabIntro = true;
     final vc = _videoWebViewController;
@@ -1161,6 +1211,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (controller == null) return;
     switch (action) {
       case 'play':
+        _lastPlayInitiatedAt = DateTime.now();
         controller.evaluateJavascript(source: '''
           (function() {
             var v = $_activeVideoJs;
@@ -1490,10 +1541,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// playing inside the PiP session. iOS pauses the webview video when the app
   /// backgrounds; the PiP handoff alone leaves it paused (no audio). We wait for
   /// the mode-change event, then resume playback so the PiP/AVFoundation session
-  /// keeps the audio alive.
+  /// keeps the audio alive. Retried once: the very first background of a session
+  /// sports a cold PiP pipeline, so the handoff can lose the race against
+  /// suspension (audio dies for that one background until the user hits play
+  /// from the notification center).
   Future<void> _enterPhantomPiP() async {
+    if (await _tryEnterPhantomPiP()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    if (!mounted) return;
+    if (!await _tryEnterPhantomPiP()) {
+      debugPrint('[MrPlay] phantom PiP retry failed');
+    }
+  }
+
+  Future<bool> _tryEnterPhantomPiP() async {
     final controller = _activeController;
-    if (controller == null) return;
+    if (controller == null) return false;
     try {
       final result = await controller.callAsyncJavaScript(functionBody: '''
         var videos = document.querySelectorAll('video');
@@ -1543,11 +1606,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         return { ok: !video.paused, reason: video.paused ? 'still-paused' : 'playing' };
       ''');
       final value = result?.value;
-      if (value is Map && value['ok'] != true) {
-        debugPrint('[MrPlay] phantom PiP failed: ${value['reason']}');
+      final ok = value is Map && value['ok'] == true;
+      if (!ok) {
+        debugPrint('[MrPlay] phantom PiP failed: ${value is Map ? value['reason'] : 'unknown'}');
       }
+      return ok;
     } catch (_) {
       // WebContent may already be suspended; nothing else we can do from Dart.
+      return false;
     }
   }
 
@@ -1692,6 +1758,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
               UserScript(
+                source: YouTubeJS.unmutePopupRemoverScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
                 source: YouTubeJS.playerControlsScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
@@ -1807,6 +1877,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       ),
                       UserScript(
                         source: YouTubeJS.appBannerRemoverScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: YouTubeJS.unmutePopupRemoverScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                       ),
                       UserScript(
