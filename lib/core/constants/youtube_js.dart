@@ -206,6 +206,30 @@ class YouTubeJS {
     })();
   ''';
 
+  /// Removes YouTube's "Tap to unmute" popup that overlays the player when a
+  /// video starts (autoplay) muted. Keeps stripping the widget on an interval
+  /// too, because the player re-renders it after every SPA navigation. The
+  /// actual unmuting is left to the Dart-side `_unmuteVideo` bridge, so the
+  /// popup is gone without ever breaking the mute toggle the user controls.
+  static const String unmutePopupRemoverScript = '''
+    (function() {
+      if (location.hostname.indexOf('youtube.com') === -1) return;
+      function hidePopups() {
+        try {
+          document.querySelectorAll('.ytp-unmute-widget, [class*="unmute"]').forEach(function(el) {
+            try {
+              el.style.setProperty('display', 'none', 'important');
+              el.style.setProperty('visibility', 'hidden', 'important');
+            } catch (e) {}
+          });
+        } catch (e) {}
+      }
+      hidePopups();
+      new MutationObserver(hidePopups).observe(document.documentElement, { childList: true, subtree: true });
+      setInterval(hidePopups, 1000);
+    })();
+  ''';
+
   static const String playerControlsScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;
