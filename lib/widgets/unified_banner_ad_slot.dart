@@ -16,7 +16,6 @@ class UnifiedBannerAdSlot extends StatefulWidget {
   final bool isVisible;
   final bool showDismissButton;
   final Alignment alignment;
-  final ValueChanged<bool>? onAdActivity;
 
   const UnifiedBannerAdSlot({
     super.key,
@@ -27,7 +26,6 @@ class UnifiedBannerAdSlot extends StatefulWidget {
     this.isVisible = true,
     this.showDismissButton = true,
     this.alignment = Alignment.center,
-    this.onAdActivity,
   });
 
   @override
@@ -80,7 +78,6 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
           if (!mounted) return;
           _adWidget = AdWidget(key: ValueKey(ad.hashCode), ad: ad as BannerAd);
           setState(() => _adLoaded = true);
-          widget.onAdActivity?.call(true);
         },
         onAdFailedToLoad: (ad, error) {
           ad.dispose();
@@ -89,7 +86,6 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
               'code=${error.code} domain=${error.domain} message=${error.message}');
           if (!mounted) return;
           setState(() => _bannerAd = null);
-          widget.onAdActivity?.call(false);
           _retryTimer?.cancel();
           _retryTimer = Timer(const Duration(seconds: 30), () {
             if (mounted && !_adLoaded) _loadBannerAd();
@@ -101,7 +97,6 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
 
   void _handleDismiss() {
     setState(() => _isDismissed = true);
-    widget.onAdActivity?.call(false);
   }
 
   @override
