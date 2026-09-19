@@ -400,4 +400,83 @@ class ContentBlockerJS {
       } catch (e) {}
     })();
   ''';
+
+  /// Layer 4 — whitelist-based popup/window blocker. Runs in *all* frames
+  /// (main + iframes) so ads that open a new tab from inside an embedded
+  /// video iframe are caught too. Never runs its logic on the app's own
+  /// whitelisted platforms (YouTube, YouTube Music, Twitch, DailyMotion,
+  /// Rumble, iFunny, ...) so their native popup behavior is untouched.
+  static const String platformWhitelist = '''
+    var PLATFORM_HOSTS = [
+      'youtube.com', 'youtu.be', 'kick.com', 'twitch.tv',
+      '9gag.com', 'dailymotion.com', 'ifunny.co', 'rumble.com'
+    ];
+  ''';
+
+  static const String popupBlockerScript = '''
+    (function() {
+      try {
+        $platformWhitelist
+
+        function hostOf(url) {
+          try {
+            var a = document.createElement('a');
+            a.href = url;
+            return (a.hostname || '').toLowerCase().replace(/^www\\\\./, '');
+          } catch (e) { return ''; }
+        }
+
+        function isPlatform(host) {
+          for (var i = 0; i < PLATFORM_HOSTS.length; i++) {
+            var d = PLATFORM_HOSTS[i];
+            if (host === d) return true;
+            if (host.length > d.length && host.lastIndexOf('.' + d) === host.length - d.length - 1) return true;
+          }
+          return false;
+        }
+
+        // Never touch the app's whitelisted platforms.
+        if (isPlatform((window.location.hostname || '').toLowerCase().replace(/^www\\\\./, ''))) {
+          return;
+        }
+
+        var pageHost = (window.location.hostname || '').toLowerCase().replace(/^www\\\\./, '');
+
+        var _open = window.open;
+        window.open = function() {
+          try {
+            var target = arguments[0];
+            if (target == null) return _open.apply(this, arguments);
+            var sh = hostOf(target) || '';
+            if (sh === '' || sh === pageHost || isPlatform(sh)) {
+              return _open.apply(this, arguments);
+            }
+          } catch (e) {
+            return null;
+          }
+          return null;
+        };
+
+        document.addEventListener('click', function(evt) {
+          try {
+            var el = evt.target;
+            while (el && el.nodeType === 1 && el !== document) {
+              if (el.tagName === 'A') {
+                var target = (el.getAttribute('target') || '').toLowerCase();
+                if (target === '_blank' || target === '_new' || target === 'blank') {
+                  var h = hostOf(el.href) || '';
+                  if (h !== '' && h !== pageHost && !isPlatform(h)) {
+                    evt.preventDefault();
+                    evt.stopPropagation();
+                    return;
+                  }
+                }
+              }
+              el = el.parentNode;
+            }
+          } catch (e) {}
+        }, true);
+      } catch (e) {}
+    })();
+  ''';
 }

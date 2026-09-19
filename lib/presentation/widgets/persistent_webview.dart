@@ -121,6 +121,64 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     return false;
   }
 
+  static bool _isAllowedPlatformDomain(String host) {
+    final h = host.toLowerCase();
+    const allowedDomains = [
+      'youtube.com',
+      'youtu.be',
+      'kick.com',
+      'twitch.tv',
+      '9gag.com',
+      'dailymotion.com',
+      'ifunny.co',
+      'rumble.com',
+    ];
+    for (final d in allowedDomains) {
+      if (h == d || h.endsWith('.$d')) return true;
+    }
+    return false;
+  }
+
+  /// Network-level ad blockers (WKContentRuleList). Only applied when the
+  /// user opts into "Block ads & trackers" from Settings. Scoped via
+  /// [ContentBlockerTrigger.unlessTopUrl] so the app's own whitelisted
+  /// platforms (YouTube, Twitch, ...) are never touched.
+  static final List<ContentBlocker> _adNetworkBlockers = [
+    ContentBlocker(
+      trigger: ContentBlockerTrigger(
+        urlFilter:
+            r'.*(doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google\.|amazon-adsystem\.com|adnxs\.com|adform\.net|taboola\.com|outbrain\.com|pubmatic\.com|criteo\.com|rubiconproject\.com|adsrvr\.org|tremorhub\.com|springserve\.com).*',
+        unlessTopUrl: [
+          r'.*youtube\.com.*',
+          r'.*youtu\.be.*',
+          r'.*kick\.com.*',
+          r'.*twitch\.tv.*',
+          r'.*9gag\.com.*',
+          r'.*dailymotion\.com.*',
+          r'.*ifunny\.co.*',
+          r'.*rumble\.com.*',
+        ],
+      ),
+      action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
+    ),
+    ContentBlocker(
+      trigger: ContentBlockerTrigger(
+        urlFilter: r'.*(google-analytics.com|metrics\.gstatic\.com|pagead2\.google|tpc\.googlesyndication).*',
+        unlessTopUrl: [
+          r'.*youtube\.com.*',
+          r'.*youtu\.be.*',
+          r'.*kick\.com.*',
+          r'.*twitch\.tv.*',
+          r'.*9gag\.com.*',
+          r'.*dailymotion\.com.*',
+          r'.*ifunny\.co.*',
+          r'.*rumble\.com.*',
+        ],
+      ),
+      action: ContentBlockerAction(type: ContentBlockerActionType.BLOCK),
+    ),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -1729,6 +1787,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             offstage: _currentUrl == null,
             child: InAppWebView(
             initialUserScripts: UnmodifiableListView([
+              UserScript(
+                source: ContentBlockerJS.popupBlockerScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                forMainFrameOnly: false,
+              ),
               if (_adBlockEnabled)
                 UserScript(
                   source: ContentBlockerJS.stripAdDataScript,
@@ -1770,7 +1833,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
             ]),
-            initialSettings: InAppWebViewSettings(
+initialSettings: InAppWebViewSettings(
               javaScriptEnabled: true,
               allowsInlineMediaPlayback: true,
               mediaPlaybackRequiresUserGesture: false,
@@ -1778,6 +1841,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               allowsPictureInPictureMediaPlayback: _backgroundAudioEnabled,
               allowsAirPlayForMediaPlayback: true,
               isFraudulentWebsiteWarningEnabled: false,
+              contentBlockers:
+                  _adBlockEnabled ? _adNetworkBlockers : const [],
               userAgent:
                   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
             ),
@@ -1791,10 +1856,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               final url = navigationAction.request.url;
               if (url != null) {
                 final scheme = url.scheme.toLowerCase();
-                if (scheme == 'http' ||
-                    scheme == 'https' ||
-                    scheme == 'about' ||
-                    scheme == 'file') {
+                if (scheme == 'http' || scheme == 'https') {
+                  if (_isAdDomain(url.host)) {
+                    return NavigationActionPolicy.CANCEL;
+                  }
+                  return NavigationActionPolicy.ALLOW;
+                }
+                if (scheme == 'about' || scheme == 'file') {
                   return NavigationActionPolicy.ALLOW;
                 }
                 if (scheme == 'javascript' ||
@@ -1810,10 +1878,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               if (url == null) return false;
               final host = url.host;
               if (_isAdDomain(host)) return false;
+              if (!_isAllowedPlatformDomain(host)) return false;
               controller.loadUrl(urlRequest: URLRequest(url: url));
               return false;
             },
-            ),
+          ),
           ),
         ),
         // Tab 2 — dedicated video tab. Rendered on top while "full", fades
@@ -1839,6 +1908,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     key: const ValueKey('video-tab'),
                     initialUrlRequest: URLRequest(url: WebUri(_videoTabUrl!)),
                     initialUserScripts: UnmodifiableListView([
+                      UserScript(
+                        source: ContentBlockerJS.popupBlockerScript,
+                        injectionTime:
+                            UserScriptInjectionTime.AT_DOCUMENT_START,
+                        forMainFrameOnly: false,
+                      ),
                       if (_adBlockEnabled)
                         UserScript(
                           source: ContentBlockerJS.stripAdDataScript,
@@ -1901,6 +1976,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                           _backgroundAudioEnabled,
                       allowsAirPlayForMediaPlayback: true,
                       isFraudulentWebsiteWarningEnabled: false,
+                      contentBlockers:
+                          _adBlockEnabled ? _adNetworkBlockers : const [],
                       userAgent:
                           'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
                     ),
@@ -1915,10 +1992,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       final url = navigationAction.request.url;
                       if (url != null) {
                         final scheme = url.scheme.toLowerCase();
-                        if (scheme == 'http' ||
-                            scheme == 'https' ||
-                            scheme == 'about' ||
-                            scheme == 'file') {
+                        if (scheme == 'http' || scheme == 'https') {
+                          if (_isAdDomain(url.host)) {
+                            return NavigationActionPolicy.CANCEL;
+                          }
+                          return NavigationActionPolicy.ALLOW;
+                        }
+                        if (scheme == 'about' || scheme == 'file') {
                           return NavigationActionPolicy.ALLOW;
                         }
                         if (scheme == 'javascript' ||
@@ -1934,6 +2014,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       if (url == null) return false;
                       final host = url.host;
                       if (_isAdDomain(host)) return false;
+                      if (!_isAllowedPlatformDomain(host)) return false;
                       controller.loadUrl(urlRequest: URLRequest(url: url));
                       return false;
                     },
