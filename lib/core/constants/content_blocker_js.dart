@@ -8,11 +8,12 @@ class ContentBlockerJS {
       r'(doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|adform\.net|taboola\.com|outbrain\.com|pubmatic\.com|criteo\.com|rubiconproject\.com|adsrvr\.org|tremorhub\.com|springserve\.com)';
 
   /// Layer 1 — strips ad/mid-roll data out of the player response before the
-  /// player ever reads it. Two parts: an accessor on `ytInitialPlayerResponse`
-  /// that scrubs the raw assignment, and a `fetch` override that reparses
-  /// `/youtubei/v1/player` responses and rebuilds them without ad fields. Both
-  /// are wrapped so any failure silently falls back to original behavior. On a
-  /// parse failure the untouched original response is returned, never a
+  /// player ever reads it. It scrubs the `ytInitialPlayerResponse` assignment
+  /// (plus a legacy `ytplayer` embedded-response trap) and reparses
+  /// `/youtubei/v1/player` responses arriving through `fetch` or
+  /// `XMLHttpRequest`, rebuilding them without ad fields. All parts are wrapped
+  /// so any failure silently falls back to original behavior. On a parse
+  /// failure the untouched original response is returned, never a
   /// broken/undefined one.
   static const String stripAdDataScript = '''
     (function() {
@@ -84,6 +85,77 @@ class ContentBlockerJS {
             }
           };
         }
+
+        // Mirror the same strip across the XMLHttpRequest transport: some
+        // YouTube builds fetch the player response via XHR (mostly during SPA
+        // navigation), which the `fetch` override above never sees. The body is
+        // rewritten by shadowing `responseText`/`response` with an own property
+        // so `adPlacements`/`playerAds`/`adSlots` are gone before YouTube's own
+        // code parses the request. `response` is only shadowed for the text
+        // response types, so `responseType` = json callers still get an object.
+        var _xhrOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function(method, url) {
+          try {
+            var _u = (typeof url === 'string')
+                ? url
+                : (url && typeof url.href === 'string') ? url.href : '';
+            this.__mrAdUrl = _u;
+          } catch (e) {
+            this.__mrAdUrl = '';
+          }
+          return _xhrOpen.apply(this, arguments);
+        };
+        var _xhrSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function(body) {
+          var _src = this.__mrAdUrl;
+          if (typeof _src === 'string' && _src.indexOf('/youtubei/v1/player') !== -1) {
+            try {
+              var _xhr = this;
+              this.addEventListener('load', function() {
+                try {
+                  var _raw = _xhr.responseText;
+                  if (!_raw) return;
+                  var _data = JSON.parse(_raw);
+                  stripAds(_data);
+                  var _fixed = JSON.stringify(_data);
+                  var _rt = _xhr.responseType;
+                  try {
+                    Object.defineProperty(_xhr, 'responseText', { configurable: true, writable: false, value: _fixed });
+                    if (!_rt || _rt === 'text') {
+                      Object.defineProperty(_xhr, 'response', { configurable: true, writable: false, value: _fixed });
+                    }
+                  } catch (e) {}
+                } catch (e) {}
+              });
+            } catch (e) {}
+          }
+          return _xhrSend.apply(this, arguments);
+        };
+
+        // Best-effort scrub of the legacy embedded player response
+        // (`ytplayer.config.args.raw_player_response`, a JSON string) in case a
+        // page flow assigns it directly without going through
+        // `ytInitialPlayerResponse`. Only catches whole-object assignment.
+        try {
+          var _ytpStored = window.ytplayer;
+          Object.defineProperty(window, 'ytplayer', {
+            configurable: true,
+            enumerable: true,
+            get: function() { return _ytpStored; },
+            set: function(v) {
+              try {
+                if (v && v.config && v.config.args &&
+                    typeof v.config.args.raw_player_response === 'string' &&
+                    v.config.args.raw_player_response.indexOf('{') === 0) {
+                  v.config.args.raw_player_response = JSON.stringify(
+                    stripAds(JSON.parse(v.config.args.raw_player_response))
+                  );
+                }
+              } catch (e) {}
+              _ytpStored = v;
+            }
+          });
+        } catch (e) {}
       } catch (e) {}
     })();
   ''';
@@ -223,12 +295,14 @@ class ContentBlockerJS {
   ''';
 
   /// Layer 3 — masked instant-skip safety net. Acts only on a *live* re-check
-  /// of `ad-showing`, prefers a real skip-button click, and only jumps
-  /// `currentTime` when the playing ad is a sane short duration (<= 121s) so a
-  /// real video can never be cut off. Ad presence drives the flow via a
-  /// MutationObserver on the player's class attribute; the only interval is the
-  /// unmute safety net. Everything is inside one outer try/catch: any failure
-  /// simply means no ad-blocking that session, never broken playback.
+  /// of `ad-showing`, prefers a real skip-button click, and jumps `currentTime`
+  /// to end the ad. Safety comes from the synchronous `ad-showing` re-check
+  /// (YouTube never flags real content as an ad) plus a 600s cap, so even long
+  /// unskippable pre-rolls get cut without risking real videos. Ad presence
+  /// drives the flow via a MutationObserver on the player's class attribute;
+  /// the only interval is the unmute safety net. Everything is inside one outer
+  /// try/catch: any failure simply means no ad-blocking that session, never
+  /// broken playback.
   static const String adFallbackSkipScript = '''
     (function() {
       try {
@@ -343,12 +417,15 @@ class ContentBlockerJS {
               return;
             }
 
-            // Unskippable ad: masked jump, gated by a strict duration guard so a
-            // real video is never skipped (121s = well under real content while
-            // comfortably above any ad).
+            // Unskippable ad: masked jump. `ad-showing` was re-checked
+            // synchronously right above, and at this moment the element's
+            // duration is the *ad's*, never the real video's (YouTube never
+            // flags real content as an ad). Ending the ad pod via currentTime
+            // is therefore safe, and the 600s cap still guards against any
+            // pathological duration read while the skip safety net is live.
             if (v && p.classList.contains('ad-showing')) {
               var d = v.duration;
-              if (typeof d === 'number' && isFinite(d) && d > 0 && d <= 121) {
+              if (typeof d === 'number' && isFinite(d) && d > 0 && d <= 600) {
                 v.currentTime = d;
               }
             }

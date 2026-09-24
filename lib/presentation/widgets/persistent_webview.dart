@@ -598,19 +598,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             BackgroundAudioKeepAlive.instance.start();
           }
           _userPausedInBackground = false;
+        } else if (ended) {
+          BackgroundAudioKeepAlive.instance.stop();
+          PlaybackStatsService.instance.flush();
+          final id = video?.id ?? '';
+          if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
+          _handleEnded();
         } else if (!_appIsBackgrounded) {
           BackgroundAudioKeepAlive.instance.stop();
-          if (ended) {
-            PlaybackStatsService.instance.flush();
-            final id = video?.id ?? '';
-            if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
-            _handleEnded();
-          }
-        } else if (!ended && _backgroundResumeAllowed && !pip) {
+        } else if (_backgroundResumeAllowed && !pip) {
           controlVideo('play');
         }
       } else {
-        if (!playing && !_appIsBackgrounded && ended) {
+        if (!playing && ended) {
           PlaybackStatsService.instance.flush();
           final id = video?.id ?? '';
           if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
@@ -699,6 +699,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     );
   }
 
+  /// Advances the playback queue to the next item once the current video ends.
+  /// Runs in the foreground *and* the background: while backgrounded the
+  /// `ended` event still reaches Dart (the phantom-PiP / silent-loop keep-alive
+  /// keeps the webview alive), and this is the only path that moves the MrPlay
+  /// queue forward, so gating it on the app state was why queued videos never
+  /// started after leaving the app. The next URL is routed into the active
+  /// controller (video tab if present, else the browse webview), and the
+  /// background keep-alive is re-applied once the next video plays.
   Future<void> _handleEnded() async {
     if (_endedHandled) return;
     _endedHandled = true;
@@ -707,7 +715,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final next = items.first;
     await QueueRepository.remove(next.id);
     exitPiP();
-    if (mounted) loadUrl(next.platformUrl);
+    if (!mounted) return;
+    if (_routesToVideoTab(next.platformUrl) && _videoTabUrl != null) {
+      if (_videoTabUrl == next.platformUrl) {
+        _videoWebViewController?.reload();
+      } else {
+        _openVideoTab(next.platformUrl);
+      }
+    } else {
+      loadUrl(next.platformUrl);
+    }
+    if (_appIsBackgrounded && _backgroundAudioEnabled) {
+      _reengageBackgroundKeepAlive();
+    }
+  }
+
+  /// Best-effort background queue continuity: after a video ends while the app
+  /// is backgrounded, iOS ends the PiP window and would soon suspend the
+  /// webview. Waits for the next queued video to start playing, then re-applies
+  /// the keep-alive (phantom-PiP for normal YouTube, silent loop for Music) so
+  /// playback survives the handoff.
+  Future<void> _reengageBackgroundKeepAlive() async {
+    for (var i = 0; i < 30; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      if (!mounted) return;
+      if (ref.read(playerProvider).isPlaying) break;
+    }
+    if (!mounted || !_appIsBackgrounded || !_backgroundAudioEnabled) return;
+    if (_isMusic) {
+      BackgroundAudioKeepAlive.instance.start();
+    } else {
+      _enterPhantomPiP();
+    }
   }
 
   void _onRemoteCommand(String command, {Duration? position}) {
