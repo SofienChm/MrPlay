@@ -307,7 +307,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       handlerName: 'playerInfo',
       callback: (args) {
         if (args.isNotEmpty && args.first is Map) {
-          _onPlayerInfo(args.first as Map<String, dynamic>);
+          _onPlayerInfo(controller, args.first as Map<String, dynamic>);
         }
       },
     );
@@ -315,13 +315,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       handlerName: 'videoState',
       callback: (args) {
         if (args.isNotEmpty && args.first is Map) {
-          _onVideoState(args.first as Map<String, dynamic>);
+          _onVideoState(controller, args.first as Map<String, dynamic>);
         }
       },
     );
     controller.addJavaScriptHandler(
       handlerName: 'playerControl',
       callback: (args) {
+        if (!_acceptsPlayerEvents(controller)) return;
         if (args.isEmpty || args.first is! Map) return;
         final action =
             (args.first as Map<String, dynamic>)['action'] as String?;
@@ -341,9 +342,29 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     controller.addJavaScriptHandler(
       handlerName: 'videoTabSwipe',
       callback: (args) {
-        _minimizeVideoTab();
+        if (_acceptsPlayerEvents(controller)) _minimizeVideoTab();
       },
     );
+  }
+
+  bool _acceptsPlayerEvents(InAppWebViewController source) {
+    return acceptsPlayerEvents(
+      source: source,
+      browseController: _webViewController,
+      videoController: _videoWebViewController,
+      videoTabActive: _videoTabUrl != null,
+    );
+  }
+
+  @visibleForTesting
+  static bool acceptsPlayerEvents({
+    required Object source,
+    required Object? browseController,
+    required Object? videoController,
+    required bool videoTabActive,
+  }) {
+    final expected = videoTabActive ? videoController : browseController;
+    return identical(source, expected);
   }
 
   InAppWebViewController? get _activeController =>
@@ -477,7 +498,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  void _onPlayerInfo(Map<String, dynamic> data) {
+  void _onPlayerInfo(
+    InAppWebViewController source,
+    Map<String, dynamic> data,
+  ) {
+    if (!_acceptsPlayerEvents(source)) return;
     try {
       final title = data['title'] as String? ?? '';
       if (title.isNotEmpty) {
@@ -527,7 +552,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  void _onVideoState(Map<String, dynamic> data) {
+  void _onVideoState(
+    InAppWebViewController source,
+    Map<String, dynamic> data,
+  ) {
+    if (!_acceptsPlayerEvents(source)) return;
     try {
       var playing = data['playing'] == true;
       final ended = data['ended'] == true;
@@ -1707,7 +1736,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         })();
       ''');
       if (result is Map) {
-        _onVideoState(Map<String, dynamic>.from(result));
+        _onVideoState(controller, Map<String, dynamic>.from(result));
       }
     } catch (_) {}
   }

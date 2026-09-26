@@ -17,6 +17,10 @@ import 'widgets/persistent_player_shell.dart';
 import 'widgets/unified_banner_ad_slot.dart';
 import 'widgets/link_resolver_sheet.dart';
 
+@visibleForTesting
+bool shouldOpenSharedLink(Object? action) =>
+    action == 'play' || action == 'open';
+
 class MrPlayApp extends StatefulWidget {
   const MrPlayApp({super.key});
 
@@ -120,7 +124,7 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
         return LinkResolverSheet(key: ValueKey(url), url: url);
       },
     ).then((action) {
-      if (action == 'play' || action == 'open' || action == null) {
+      if (shouldOpenSharedLink(action)) {
         MrPlayApp.webViewKey.currentState?.loadUrl(url);
       }
     });
