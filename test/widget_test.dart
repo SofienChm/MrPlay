@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:hive/hive.dart';
 import 'package:mrplay/app.dart';
 import 'package:mrplay/presentation/widgets/persistent_webview.dart';
@@ -70,6 +71,30 @@ void main() {
         videoTabActive: true,
       ),
       isFalse,
+    );
+  });
+
+  test('popup windows block ads and missing urls but allow normal links', () {
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: null,
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: WebUri('https://ad.doubleclick.net/pixel'),
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: WebUri('https://m.youtube.com/watch?v=abc'),
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isTrue,
     );
   });
 }

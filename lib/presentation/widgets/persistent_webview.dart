@@ -104,7 +104,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     })()
   ''';
 
-  static bool _isAdDomain(String host) {
+  @visibleForTesting
+  static bool isAdDomain(String host) {
     final h = host.toLowerCase();
     const adDomains = [
       'doubleclick.net',
@@ -369,6 +370,27 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   InAppWebViewController? get _activeController =>
       _videoWebViewController ?? _webViewController;
+
+  Future<bool> _handleCreateWindow(
+    InAppWebViewController controller,
+    CreateWindowAction createWindowAction,
+  ) async {
+    final url = createWindowAction.request.url;
+    if (!shouldLoadPopupUrl(url: url, isAdDomain: isAdDomain)) {
+      return true;
+    }
+    controller.loadUrl(urlRequest: URLRequest(url: url!));
+    return true;
+  }
+
+  @visibleForTesting
+  static bool shouldLoadPopupUrl({
+    required WebUri? url,
+    required bool Function(String) isAdDomain,
+  }) {
+    if (url == null) return false;
+    return !isAdDomain(url.host);
+  }
 
   /// Only m.youtube.com watch pages get routed into the dedicated video tab.
   /// YouTube Music keeps playing inline in its own tab by design, so
@@ -1873,14 +1895,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               }
               return NavigationActionPolicy.ALLOW;
             },
-            onCreateWindow: (controller, createWindowAction) async {
-              final url = createWindowAction.request.url;
-              if (url == null) return false;
-              final host = url.host;
-              if (_isAdDomain(host)) return false;
-              controller.loadUrl(urlRequest: URLRequest(url: url));
-              return false;
-            },
+            onCreateWindow: _handleCreateWindow,
             ),
           ),
         ),
@@ -1997,14 +2012,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       }
                       return NavigationActionPolicy.ALLOW;
                     },
-                    onCreateWindow: (controller, createWindowAction) async {
-                      final url = createWindowAction.request.url;
-                      if (url == null) return false;
-                      final host = url.host;
-                      if (_isAdDomain(host)) return false;
-                      controller.loadUrl(urlRequest: URLRequest(url: url));
-                      return false;
-                    },
+                    onCreateWindow: _handleCreateWindow,
                   ),
                 ),
               ),
