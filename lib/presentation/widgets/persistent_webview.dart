@@ -1438,12 +1438,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
-  /// Un-mutes the actively playing video. YouTube sometimes starts playback
-  /// muted (or the user previously muted it), and the "tap to unmute" overlay
-  /// needs a tap. We bypass the UI by directly clearing `muted` on the video
-  /// element(s) and restoring volume. Returns whether the active video is now
-  /// audible, so callers can retry until it is (a single fire-and-forget shot
-  /// leaves some videos muted when the element wasn't ready yet).
+  /// Un-mutes the actively playing video and unlocks YouTube's player.
+  ///
+  /// YouTube sometimes starts playback muted (or the user previously muted it),
+  /// showing the "tap to unmute" overlay. Just clearing `muted` on the `<video>`
+  /// element makes it audible but leaves YouTube's own player state locked in
+  /// "awaiting gesture" — which stops a mix from auto-advancing to the next
+  /// video in the background. So we also trigger YouTube's own unmute (player
+  /// API, falling back to clicking the real button, which fires even when the
+  /// widget is CSS-hidden) to clear that state. Returns whether the active
+  /// video is now audible, so callers can retry until it is.
   Future<bool> _unmuteVideo() async {
     final controller = _activeController;
     if (controller == null) return false;
@@ -1466,6 +1470,23 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               main.defaultMuted = false;
               main.volume = 1;
             }
+            // Unlock YouTube's player so autoplay can advance. Its own API is
+            // the reliable path; clicking the real unmute button (hidden or not)
+            // is the fallback that also clears the internal "tap to unmute"
+            // state YouTube uses to gate the next video.
+            try {
+              var player = document.getElementById('movie_player');
+              if (player) {
+                if (typeof player.unMute === 'function') { player.unMute(); }
+                else if (typeof player.setVolume === 'function') { player.setVolume(100); }
+              }
+            } catch (e) {}
+            try {
+              var btn = document.querySelector(
+                '.ytp-unmute-widget button, .ytp-unmute button, [class*="unmute"] button'
+              );
+              if (btn && typeof btn.click === 'function') { btn.click(); }
+            } catch (e) {}
             return { audible: !main.muted && main.volume > 0 };
           })();
         ''',
