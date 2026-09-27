@@ -238,9 +238,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
-      // Stop the keep-alive when the app is back in the foreground and the
-      // video is not playing (the silent loop is no longer needed).
-      if (!ref.read(playerProvider).isPlaying && !_systemPaused) {
+      // Foreground playback never needs the keep-alive: release the silent
+      // loop (used to bridge native-autoplay gaps in the background) for
+      // anything that isn't backgrounded music playback.
+      if (!_isMusic || !ref.read(playerProvider).isPlaying) {
         BackgroundAudioKeepAlive.instance.stop();
       }
       // The video was phantom-PiP'd on background to keep audio alive. Restore
@@ -780,7 +781,21 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_endedHandled) return;
     _endedHandled = true;
     final items = await QueueRepository.getAll();
-    if (items.isEmpty) return;
+    if (items.isEmpty) {
+      // No MrPlay queue item — a single video or a native autoplay sequence
+      // (e.g. a YouTube mix) that the page advances itself. While backgrounded
+      // the phantom-PiP window closes the moment the video ends, and with no
+      // active audio iOS suspends the webview before the next video can start
+      // — the mix stops after the first video until the user nudges it. Bridge
+      // the gap with the silent keep-alive so the page stays alive long enough
+      // for YouTube's auto-advance to fire, then re-apply the real keep-alive
+      // once the next video plays.
+      if (_appIsBackgrounded && _backgroundAudioEnabled) {
+        BackgroundAudioKeepAlive.instance.start();
+        _reengageBackgroundKeepAlive();
+      }
+      return;
+    }
     final next = items.first;
     await QueueRepository.remove(next.id);
     exitPiP();
@@ -801,20 +816,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   /// Best-effort background queue continuity: after a video ends while the app
   /// is backgrounded, iOS ends the PiP window and would soon suspend the
-  /// webview. Waits for the next queued video to start playing, then re-applies
-  /// the keep-alive (phantom-PiP for normal YouTube, silent loop for Music) so
-  /// playback survives the handoff.
+  /// webview. Waits for the next video to start playing, then re-applies the
+  /// keep-alive (phantom-PiP for normal YouTube, silent loop for Music) so
+  /// playback survives the handoff. For native autoplay (mixes) the caller
+  /// keeps the silent loop running during the gap; it is released here once
+  /// the next video plays (or never starts).
   Future<void> _reengageBackgroundKeepAlive() async {
+    var playing = false;
     for (var i = 0; i < 30; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (!mounted) return;
-      if (ref.read(playerProvider).isPlaying) break;
+      if (ref.read(playerProvider).isPlaying) {
+        playing = true;
+        break;
+      }
     }
-    if (!mounted || !_appIsBackgrounded || !_backgroundAudioEnabled) return;
+    if (!mounted || !_appIsBackgrounded || !_backgroundAudioEnabled) {
+      // Back in the foreground (or background audio off): no keep-alive needed.
+      BackgroundAudioKeepAlive.instance.stop();
+      return;
+    }
+    if (!playing) {
+      // Nothing auto-started in time (single video, mix finished, autoplay
+      // off). Release the gap-bridging silent loop so iOS suspends cleanly
+      // instead of force-playing an ended video.
+      BackgroundAudioKeepAlive.instance.stop();
+      return;
+    }
     if (_isMusic) {
       BackgroundAudioKeepAlive.instance.start();
     } else {
-      _enterPhantomPiP();
+      final ok = await _enterPhantomPiP();
+      if (ok) BackgroundAudioKeepAlive.instance.stop();
     }
   }
 
@@ -1683,13 +1716,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// sports a cold PiP pipeline, so the handoff can lose the race against
   /// suspension (audio dies for that one background until the user hits play
   /// from the notification center).
-  Future<void> _enterPhantomPiP() async {
-    if (await _tryEnterPhantomPiP()) return;
+  Future<bool> _enterPhantomPiP() async {
+    if (await _tryEnterPhantomPiP()) return true;
     await Future<void>.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-    if (!await _tryEnterPhantomPiP()) {
-      debugPrint('[MrPlay] phantom PiP retry failed');
-    }
+    if (!mounted) return false;
+    final ok = await _tryEnterPhantomPiP();
+    if (!ok) debugPrint('[MrPlay] phantom PiP retry failed');
+    return ok;
   }
 
   Future<bool> _tryEnterPhantomPiP() async {
