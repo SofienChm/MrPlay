@@ -91,6 +91,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// How long after our own play start transient interruptions are ignored.
   static const Duration _interruptionGrace = Duration(milliseconds: 2500);
 
+  /// Last time the `<video>` reported actually playing. Used to tell a
+  /// lock-screen / Control Center scrub of a *playing* video apart from a
+  /// deliberate pause followed by a scrub: iOS pauses the element during the
+  /// drag (so `state.isPlaying` is already false by the time the seek lands)
+  /// and never sends a follow-up play command, leaving the element stuck on
+  /// the buffering spinner. Cleared on explicit user/system pauses.
+  DateTime _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Debounced timer that resumes playback after a remote seek (see
+  /// [_resumeAfterRemoteSeek]). Reset on every seek event so a long scrub drag
+  /// only resumes once the user lifts their finger.
+  Timer? _remoteSeekResumeTimer;
+
   /// JS that resolves the actively-playing `<video>` (falling back to the
   /// first one), so controls target the real playback element rather than a
   /// stale/ad/preview video that `document.querySelector('video')` may hit.
@@ -209,6 +222,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _loadingTimer?.cancel();
     _nowPlayingThrottle?.cancel();
     _statePoll?.cancel();
+    _remoteSeekResumeTimer?.cancel();
     _interruptionSub?.cancel();
     PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
@@ -252,6 +266,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       } else {
         BackgroundAudioKeepAlive.instance.stop();
+        _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
         ref.read(playerProvider.notifier).pause();
         MediaControlsService.instance.setPlaying(false);
         controlVideo('pause');
@@ -583,6 +598,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       var playing = data['playing'] == true;
       final ended = data['ended'] == true;
       final pip = data['pip'] == true;
+      if (playing && !ended) {
+        _lastKnownPlayingAt = DateTime.now();
+      }
       // While the system has latched us as paused (another app / a call took
       // the audio session), ignore any "playing" report from the poll / JS so
       // Now Playing can't be flipped back to "playing" out of sync with the
@@ -822,21 +840,48 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         final next = state.position + const Duration(seconds: 15);
         notifier.seekTo(next);
         controlVideo('seek', position: next.inMilliseconds / 1000.0);
+        _resumeAfterRemoteSeek();
         break;
       case 'skipBackward':
         final prev = state.position - const Duration(seconds: 15);
         final clamped = prev.isNegative ? Duration.zero : prev;
         notifier.seekTo(clamped);
         controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
+        _resumeAfterRemoteSeek();
         break;
       case 'seek':
         if (positionMs > 0) {
           final target = Duration(milliseconds: positionMs);
           notifier.seekTo(target);
           controlVideo('seek', position: target.inMilliseconds / 1000.0);
+          _resumeAfterRemoteSeek();
         }
         break;
     }
+  }
+
+  /// Debounced resume after a lock-screen / Control Center seek. iOS pauses the
+  /// `<video>` while the user drags the scrubber and never sends a follow-up
+  /// play command, so the element can be left mid-seek — YouTube shows its
+  /// buffering spinner ("loading") and playback never continues until the user
+  /// nudges the timeline again. If the video was playing right before the scrub
+  /// (and wasn't deliberately paused), re-start playback at the new position
+  /// once the drag settles. The timer resets on every seek event, so a long
+  /// drag only resumes when the finger lifts.
+  void _resumeAfterRemoteSeek() {
+    _remoteSeekResumeTimer?.cancel();
+    _remoteSeekResumeTimer = Timer(const Duration(milliseconds: 350), () {
+      _remoteSeekResumeTimer = null;
+      if (!mounted) return;
+      final now = DateTime.now();
+      final wasPlayingRecently =
+          now.difference(_lastKnownPlayingAt) < const Duration(seconds: 3);
+      if (!wasPlayingRecently && !ref.read(playerProvider).isPlaying) return;
+      // With background audio off the app intentionally stops in the background;
+      // don't fight that from a Control Center scrub.
+      if (_appIsBackgrounded && !_backgroundAudioEnabled) return;
+      resumePlayback();
+    });
   }
 
   /// Pauses playback as an explicit user action (lock screen / Control Center
@@ -844,6 +889,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// (for YouTube Music); user pauses must not be fought.
   void userInitiatedPause() {
     _backgroundResumeAllowed = false;
+    _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     if (_appIsBackgrounded) _userPausedInBackground = true;
     // Keep the silent loop alive while backgrounded so iOS doesn't suspend
     // the WebView. Without it, Control Center's play button can't reach the
@@ -861,6 +907,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _systemPause() {
     _systemPaused = true;
     _backgroundResumeAllowed = false;
+    _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     // Freeze the elapsed time so Now Playing doesn't keep counting up while
     // the video is actually paused by the system (call / other app).
     _systemPausedElapsed = ref.read(playerProvider).position.inSeconds.toDouble();
@@ -884,6 +931,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _systemPaused = false;
     _systemPausedElapsed = 0;
     _lastPlayInitiatedAt = DateTime.now();
+    _lastKnownPlayingAt = DateTime.now();
     _backgroundResumeAllowed = true;
     _userPausedInBackground = false;
     ref.read(playerProvider.notifier).resume();
