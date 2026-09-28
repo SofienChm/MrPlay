@@ -49,6 +49,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   DateTime _lastInlineForce = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _pipStuckGrace = Duration(milliseconds: 800);
   static const Duration _inlineForceThrottle = Duration(seconds: 3);
+  Timer? _pausedKeepAliveTimer;
+  static const Duration _pausedKeepAliveInterval = Duration(seconds: 4);
+  bool _wasPlayingAtSeek = false;
+  DateTime _lastSeekDragTick = DateTime.fromMillisecondsSinceEpoch(0);
   bool isReady = false;
 
   /// True while the hub page is the visible layer (webview not ready / not
@@ -259,6 +263,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _statePoll?.cancel();
     _remoteSeekResumeTimer?.cancel();
     _interruptionSub?.cancel();
+    _stopPausedKeepAlive();
     PlaybackStatsService.instance.flush();
     BackgroundAudioKeepAlive.instance.stop();
     super.dispose();
@@ -273,6 +278,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else if (state == AppLifecycleState.resumed) {
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
+      _stopPausedKeepAlive();
       // Stop the keep-alive when the app is back in the foreground and the
       // video is not playing (the silent loop is no longer needed). For a
       // regular video, drop the loop even while playing: in the foreground the
@@ -531,7 +537,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (urlStr.contains('youtube.com') && urlStr.contains('/watch')) {
       if (urlStr != _videoTabUrl) {
         _videoTabUrl = urlStr;
-        _endedHandled = false;
+        // Track the new video immediately (placeholder metadata) so the mini
+        // player / Now Playing don't keep showing the previous video while the
+        // new one autoplays. _onPlayerInfo upgrades the title later.
+        _syncTrackedVideoFromUrl(urlStr);
       }
       _handleWatchPage(controller, urlStr);
     }
@@ -591,18 +600,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         );
         final currentId = ref.read(playerProvider).currentVideo?.id;
         if (currentId != video.id) {
-          _endedHandled = false;
           _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
           _userPausedInBackground = false;
           _systemPaused = false;
           _systemPausedElapsed = 0;
           _lastPlayInitiatedAt = DateTime.now();
           _isMusic = _isMusicUrl(video.videoUrl);
-          if (_videoTabUrl != null) {
-            ref.read(playerProvider.notifier).openVideoTab(video);
-          } else {
-            ref.read(playerProvider.notifier).play(video);
-          }
+          // Upgrade metadata only — do not reset isPlaying/position, which
+          // would flash the play icon and snap the slider to 0 on an
+          // already-autoplaying video.
+          ref.read(playerProvider.notifier).updateMetadata(video);
           MediaControlsService.instance.updateNowPlaying(
             title: video.title,
             artist: video.platform.isEmpty ? 'YouTube' : video.platform,
@@ -639,6 +646,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final pip = data['pip'] == true;
       if (playing && !ended) {
         _lastKnownPlayingAt = DateTime.now();
+        _stopPausedKeepAlive();
+        // A fresh play cycle re-arms the ended-latch, so a replayed video (even
+        // the same URL) can advance the queue again when it ends. _handleEnded
+        // sets the latch; navigation alone no longer clears it (that caused a
+        // double queue-advance while _handleEnded was in flight).
+        _endedHandled = false;
       }
       // While the system has latched us as paused (another app / a call took
       // the audio session), ignore any "playing" report from the poll / JS so
@@ -814,6 +827,48 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     return video;
   }
 
+  /// Tracks a freshly-navigated watch URL immediately (used when the video tab
+  /// SPA-navigates to a related video or the queue advances), so the mini
+  /// player / Now Playing stop showing the previous video. Uses placeholder
+  /// metadata — [_onPlayerInfo] upgrades the real title/thumbnail afterwards.
+  /// Preserves the current render state: a minimized tab stays minimized when a
+  /// related video autoplays.
+  void _syncTrackedVideoFromUrl(String url) {
+    final current = ref.read(playerProvider).currentVideo;
+    if (current?.videoUrl == url) return;
+    final idMatch = RegExp(r'[?&]v=([^&]+)').firstMatch(url);
+    final video = Video(
+      id: idMatch != null ? idMatch.group(1)! : url,
+      title: 'YouTube video',
+      thumbnailUrl: idMatch != null
+          ? 'https://i.ytimg.com/vi/${idMatch.group(1)!}/hqdefault.jpg'
+          : '',
+      videoUrl: url,
+      platform: 'YouTube',
+    );
+    if (current == null) {
+      // No video tracked yet: establish the base state (the video tab is
+      // already expanded by _openVideoTab).
+      if (_videoTabUrl != null) {
+        ref.read(playerProvider.notifier).openVideoTab(video);
+      } else {
+        ref.read(playerProvider.notifier).play(video);
+      }
+    } else {
+      // Upgrade metadata only, preserving isMinimized / isVideoTab.
+      ref.read(playerProvider.notifier).updateMetadata(video);
+    }
+    MediaControlsService.instance.updateNowPlaying(
+      title: video.title,
+      artist: 'YouTube',
+      position: Duration.zero,
+      duration: Duration.zero,
+      isPlaying: true,
+      artworkUrl: video.thumbnailUrl,
+    );
+    _isMusic = _isMusicUrl(url);
+  }
+
   String _platformNameFromUrl(String host) {
     var h = host;
     if (h.startsWith('m.')) {
@@ -884,6 +939,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _openVideoTab(next.platformUrl);
       }
     } else {
+      // The next item plays outside the video tab (YouTube Music / another
+      // platform): drop the ended video tab so it doesn't keep covering the
+      // new content, and load the item in the browse webview.
+      if (_videoTabUrl != null) {
+        _videoTabUrl = null;
+        _videoWebViewController = null;
+        ref.read(playerProvider.notifier).dismiss();
+      }
       loadUrl(next.platformUrl);
     }
     if (_appIsBackgrounded && _backgroundAudioEnabled) {
@@ -1026,6 +1089,18 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// decide whether to re-start playback after iOS's scrub-pause.
   void _applyRemoteSeek(Duration target) {
     final clamped = clampSeekTarget(target, ref.read(playerProvider).duration);
+    final now = DateTime.now();
+    // Snapshot whether the video was playing at the START of the scrub. iOS
+    // keeps the element paused for the whole drag, so checking `isPlaying`
+    // later (or a short "recently playing" window) fails on any drag longer
+    // than a couple of seconds — leaving the video stuck on the spinner.
+    if (now.difference(_lastSeekDragTick) >=
+        const Duration(milliseconds: 700)) {
+      _wasPlayingAtSeek =
+          ref.read(playerProvider).isPlaying ||
+              now.difference(_lastKnownPlayingAt) < const Duration(seconds: 5);
+    }
+    _lastSeekDragTick = now;
     ref.read(playerProvider.notifier).seekTo(clamped);
     controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
     _resumeAfterRemoteSeek();
@@ -1035,7 +1110,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// `<video>` while the user drags the scrubber and never sends a follow-up
   /// play command, so the element can be left mid-seek — YouTube shows its
   /// buffering spinner ("loading") and playback never continues until the user
-  /// nudges the timeline again. If the video was playing right before the scrub
+  /// nudges the timeline again. If the video was playing when the scrub began
   /// (and wasn't deliberately paused), re-start playback at the new position
   /// once the drag settles. The timer resets on every seek event, so a long
   /// drag only resumes when the finger lifts.
@@ -1044,10 +1119,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _remoteSeekResumeTimer = Timer(const Duration(milliseconds: 350), () {
       _remoteSeekResumeTimer = null;
       if (!mounted) return;
-      final now = DateTime.now();
-      final wasPlayingRecently =
-          now.difference(_lastKnownPlayingAt) < const Duration(seconds: 3);
-      if (!wasPlayingRecently && !ref.read(playerProvider).isPlaying) return;
+      if (!_wasPlayingAtSeek && !ref.read(playerProvider).isPlaying) return;
       // With background audio off the app intentionally stops in the background;
       // don't fight that from a Control Center scrub.
       if (_appIsBackgrounded && !_backgroundAudioEnabled) return;
@@ -1062,15 +1134,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _backgroundResumeAllowed = false;
     _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     _userPausedInBackground = true;
+    _wasPlayingAtSeek = false;
     if (!_appIsBackgrounded) {
       BackgroundAudioKeepAlive.instance.stop();
+      _stopPausedKeepAlive();
     } else if (_backgroundAudioEnabled && !_systemPaused) {
       // Pausing while backgrounded ends the phantom-PiP keep-alive (iOS closes
       // the PiP window on pause), which lets iOS suspend the WebView — and then
       // the lock screen / Control Center play button can no longer reach it
-      // (you'd have to reopen the app). Keep the silent loop alive so a later
-      // play works — for regular YouTube too, not just Music.
+      // (you'd have to reopen the app). Keep the silent loop alive AND keep
+      // re-asserting phantom PiP so the WebContent process stays reachable for
+      // a later play — for regular YouTube too, not just Music.
       BackgroundAudioKeepAlive.instance.start();
+      _startPausedKeepAlive();
     }
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
@@ -1109,8 +1185,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _lastKnownPlayingAt = DateTime.now();
     _backgroundResumeAllowed = true;
     _userPausedInBackground = false;
+    _stopPausedKeepAlive();
     ref.read(playerProvider.notifier).resume();
-    controlVideo('play');
+    if (_appIsBackgrounded && _backgroundAudioEnabled && !_isMusic) {
+      // Resuming from the lock screen: re-engage the phantom-PiP keep-alive,
+      // which both resumes the paused video and keeps the WebContent process
+      // alive for continued background playback.
+      _enterPhantomPiP();
+    } else {
+      controlVideo('play');
+    }
   }
 
   /// Shows the mini player: tracks the currently-playing video if needed (so
@@ -1131,7 +1215,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _openVideoTab(String url) {
     if (_videoTabUrl == url) return;
     _videoTabUrl = url;
-    _endedHandled = false;
     _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
     _lastPlayInitiatedAt = DateTime.now();
     ref.read(playerProvider.notifier).videoTabActive();
@@ -1712,7 +1795,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _isLoading = true;
     });
     PersistentWebViewState.hubVisible.value = false;
-    _endedHandled = false;
     _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
@@ -1818,6 +1900,47 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
+  /// Re-asserts phantom PiP WITHOUT resuming the video. While a video is
+  /// paused in the background, the phantom-PiP window is what keeps the
+  /// WebView's WebContent process alive; if iOS dismisses it, a lock-screen
+  /// play can no longer reach the video (you'd have to reopen the app). This
+  /// keeps the window alive so that never happens. No-op when already in PiP.
+  void _reassertPhantomPip() {
+    _activeController?.evaluateJavascript(source: '''
+      (function() {
+        var v = $_activeVideoJs;
+        if (!v || !v.webkitSetPresentationMode) return;
+        if (v.webkitPresentationMode === 'picture-in-picture') return;
+        try { v.webkitSetPresentationMode('picture-in-picture'); } catch (e) {}
+      })();
+    ''');
+  }
+
+  /// Periodically re-asserts phantom PiP while a video is paused in the
+  /// background, so the WebContent process stays reachable for a lock-screen
+  /// play. Stops itself once playback resumes, the app returns to the
+  /// foreground, or background audio is off.
+  void _startPausedKeepAlive() {
+    _pausedKeepAliveTimer?.cancel();
+    _pausedKeepAliveTimer = Timer.periodic(_pausedKeepAliveInterval, (_) {
+      if (!mounted) return;
+      if (!_appIsBackgrounded || !_backgroundAudioEnabled) {
+        _stopPausedKeepAlive();
+        return;
+      }
+      if (ref.read(playerProvider).isPlaying || !_userPausedInBackground) {
+        _stopPausedKeepAlive();
+        return;
+      }
+      _reassertPhantomPip();
+    });
+  }
+
+  void _stopPausedKeepAlive() {
+    _pausedKeepAliveTimer?.cancel();
+    _pausedKeepAliveTimer = null;
+  }
+
   void togglePictureInPicture() {
     _activeController?.evaluateJavascript(source: '''
       (function() {
@@ -1878,6 +2001,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
         if (!video && videos.length > 0) video = videos[0];
         if (!video) return { ok: true, reason: 'no-video' };
+        // A REAL user PiP window (mini-bar swipe / PiP button) must never be
+        // force-exited on app resume — only the phantom keep-alive is restored
+        // inline. Leave the window alone.
+        if (document.pictureInPictureElement) {
+          return { ok: true, reason: 'real-pip' };
+        }
         if (!video.webkitSetPresentationMode ||
             video.webkitPresentationMode !== 'picture-in-picture') {
           return { ok: true, reason: 'already-inline' };

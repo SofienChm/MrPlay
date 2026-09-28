@@ -16,6 +16,7 @@ class MediaControlsService {
   static const MethodChannel _channel = MethodChannel('com.mrplay/media');
 
   void Function(String command, {Duration? position})? _remoteHandler;
+  int _artworkGeneration = 0;
 
   void setRemoteCommandHandler(
     void Function(String command, {Duration? position}) handler,
@@ -57,8 +58,11 @@ class MediaControlsService {
     }
 
     if (artworkUrl != null && artworkUrl.isNotEmpty) {
+      // Generation guard: a slow artwork fetch for a previous video must not
+      // land on the current one (or resurrect a dismissed player).
+      final generation = ++_artworkGeneration;
       _fetchArtwork(artworkUrl).then((artwork) {
-        if (artwork == null) return;
+        if (artwork == null || generation != _artworkGeneration) return;
         try {
           _channel.invokeMethod('setNowPlaying', {
             'artwork': artwork,
@@ -92,6 +96,9 @@ class MediaControlsService {
   }
 
   Future<void> clearNowPlaying() async {
+    // Invalidate any in-flight artwork fetch so it can't re-paint Now Playing
+    // after the player was dismissed.
+    _artworkGeneration++;
     try {
       await _channel.invokeMethod('clearNowPlaying');
     } catch (e) {
