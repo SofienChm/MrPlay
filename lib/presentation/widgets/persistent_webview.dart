@@ -43,7 +43,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   double _tabSwipeOffset = 0;
   bool _waitingToGoBack = false;
   bool _videoTabIntro = false;
-  bool _unmuteDone = false;
+  /// Watch URL whose active video has been confirmed audible. Unmuting is
+  /// re-armed whenever the active watch URL differs from this (an SPA autoplay
+  /// advance to the next video always changes the URL), so a plain "already
+  /// unmuted" flag can never stick across videos and leave the next one muted.
+  String? _unmutedVideoUrl;
   bool isReady = false;
 
   /// True while the hub page is the visible layer (webview not ready / not
@@ -553,7 +557,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         final currentId = ref.read(playerProvider).currentVideo?.id;
         if (currentId != video.id) {
           _endedHandled = false;
-          _unmuteDone = false;
+          _unmutedVideoUrl = null;
           _userPausedInBackground = false;
           _systemPaused = false;
           _systemPausedElapsed = 0;
@@ -623,13 +627,21 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
       // YouTube starts some videos muted (or the user previously muted); once
       // the video is actually playing, force-unmute it so audio is audible.
-      // `_unmuteDone` is set to true only once unmuting is *confirmed* (the
-      // active element is audible), otherwise the next report retries. This
-      // fixes videos that open muted because the first unmute attempt ran
-      // before the element was ready and was never retried.
-      if (playing && !ended && !_unmuteDone) {
+      // Keyed on the active watch URL: once unmuting is *confirmed* audible we
+      // remember that URL and stop retrying, but any new URL (autoplay
+      // advancing to the next video, a reload, a repeat) re-arms the unmute.
+      // This fixes both videos that open muted because the first attempt ran
+      // before the element was ready (retried on the next report) and the next
+      // video in a queue staying muted because the flag never reset.
+      final activeUrl = _videoTabUrl ?? _currentUrl;
+      if (playing &&
+          !ended &&
+          needsUnmuteForUrl(
+            activeUrl: activeUrl,
+            confirmedUrl: _unmutedVideoUrl,
+          )) {
         _unmuteVideo().then((audible) {
-          if (mounted && audible) _unmuteDone = true;
+          if (mounted && audible) _unmutedVideoUrl = activeUrl;
         });
       }
       var video = ref.read(playerProvider).currentVideo;
@@ -785,6 +797,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     await QueueRepository.remove(next.id);
     exitPiP();
     if (!mounted) return;
+    // Re-arm the unmute for the next item: whatever URL we route to next is a
+    // new page, and its video must be allowed to start audible even if the
+    // previous video was already confirmed unmuted (or the same URL is being
+    // reloaded, which no visited-history / playerInfo reset would catch).
+    _unmutedVideoUrl = null;
     if (_routesToVideoTab(next.platformUrl) && _videoTabUrl != null) {
       if (_videoTabUrl == next.platformUrl) {
         _videoWebViewController?.reload();
@@ -857,6 +874,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     var clamped = target.isNegative ? Duration.zero : target;
     if (duration > Duration.zero && clamped > duration) clamped = duration;
     return clamped;
+  }
+
+  /// Whether the unmute should run for the active watch URL. Re-arms whenever
+  /// the URL differs from the last one confirmed audible (autoplay advance,
+  /// reload, or a repeat), and never fires when no URL is known yet.
+  @visibleForTesting
+  static bool needsUnmuteForUrl({
+    required String? activeUrl,
+    required String? confirmedUrl,
+  }) {
+    return activeUrl != null && activeUrl != confirmedUrl;
   }
 
   /// Applies a remote (lock-screen / Control Center) seek: updates the player
@@ -966,7 +994,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_videoTabUrl == url) return;
     _videoTabUrl = url;
     _endedHandled = false;
-    _unmuteDone = false;
+    _unmutedVideoUrl = null;
     _lastPlayInitiatedAt = DateTime.now();
     ref.read(playerProvider.notifier).videoTabActive();
     _videoTabIntro = true;
@@ -1547,6 +1575,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
     PersistentWebViewState.hubVisible.value = false;
     _endedHandled = false;
+    _unmutedVideoUrl = null;
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
     });

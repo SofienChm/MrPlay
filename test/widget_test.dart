@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:hive/hive.dart';
 import 'package:mrplay/app.dart';
+import 'package:mrplay/core/constants/content_blocker_js.dart';
 import 'package:mrplay/presentation/widgets/persistent_webview.dart';
 
 void main() {
@@ -149,5 +150,50 @@ void main() {
     expect(script, contains("player.querySelector('.ytp-unmute-widget button"));
     // An already-audible video must be left untouched (no volume override).
     expect(script, contains('if (!main.muted && main.volume > 0) return { audible: true };'));
+  });
+
+  test('ad-blocker only re-mutes mutes it applied itself', () {
+    final script = ContentBlockerJS.adFallbackSkipScript;
+    // The volumechange re-mute must be gated on _state.weMuted so the app's
+    // unmute of a muted next video is never fought and left stuck muted.
+    expect(script, contains('_state.weMuted && !video.muted && _adShowing()'));
+    // And it must still apply a fresh mute the moment an ad is seen.
+    expect(script, contains('video.muted = true;\n            _state.weMuted = true;'));
+  });
+
+  test('unmute re-arms when the active watch URL changes', () {
+    // A new watch URL (SPA autoplay advancing to the next video) always
+    // re-arms the unmute; the confirmed URL is the only thing that stops it.
+    expect(
+      PersistentWebViewState.needsUnmuteForUrl(
+        activeUrl: 'https://youtube.com/watch?v=2',
+        confirmedUrl: 'https://youtube.com/watch?v=1',
+      ),
+      isTrue,
+    );
+    // Same URL already confirmed audible: no retry.
+    expect(
+      PersistentWebViewState.needsUnmuteForUrl(
+        activeUrl: 'https://youtube.com/watch?v=1',
+        confirmedUrl: 'https://youtube.com/watch?v=1',
+      ),
+      isFalse,
+    );
+    // Nothing confirmed yet: must attempt.
+    expect(
+      PersistentWebViewState.needsUnmuteForUrl(
+        activeUrl: 'https://youtube.com/watch?v=1',
+        confirmedUrl: null,
+      ),
+      isTrue,
+    );
+    // No URL known: never unmute blindly.
+    expect(
+      PersistentWebViewState.needsUnmuteForUrl(
+        activeUrl: null,
+        confirmedUrl: 'https://youtube.com/watch?v=1',
+      ),
+      isFalse,
+    );
   });
 }

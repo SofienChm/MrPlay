@@ -375,9 +375,14 @@ class ContentBlockerJS {
               try {
                 video.addEventListener('volumechange', function() {
                   try {
-                    if (!video.muted && _adShowing()) {
+                    // Only defend the mute *we* applied for this ad
+                    // (_state.weMuted). An unmute that happened before any ad
+                    // was seen — the app's own unmute of a muted next video,
+                    // YouTube's autoplay-unmute — must not be fought and then
+                    // left stuck muted because our safety net only restores
+                    // mutes we set.
+                    if (_state.weMuted && !video.muted && _adShowing()) {
                       video.muted = true;
-                      _state.weMuted = true;
                     }
                   } catch (e) {}
                 });
