@@ -182,10 +182,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     try {
       final session = await AudioSession.instance;
       _interruptionSub = session.interruptionEventStream.listen((event) {
-        if (!event.begin) return;
         if (!mounted) return;
-        if (ref.read(playerProvider).isPlaying) {
-          _handleAudioInterruptionBegan();
+        if (event.begin) {
+          if (ref.read(playerProvider).isPlaying) {
+            _handleAudioInterruptionBegan();
+          }
+        } else if (_systemPaused) {
+          // A genuine interruption that latched a system pause just ended.
+          // Re-assert the session and, while backgrounded, re-apply the
+          // keep-alive so a lock-screen play can still reach the webview
+          // (the same "can't resume from notification center" class of bug).
+          _handleAudioInterruptionEnded();
         }
       });
     } catch (e) {
@@ -221,6 +228,29 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _systemPause();
   }
 
+  /// A genuine interruption (call / another app seizing the session) that
+  /// latched a system pause has ended. Clear the latch, re-assert our session,
+  /// and while backgrounded re-apply the keep-alive so a lock-screen play can
+  /// still reach the webview — otherwise iOS suspends it and the notification
+  /// center play button stops working until the app is reopened.
+  Future<void> _handleAudioInterruptionEnded() async {
+    _systemPaused = false;
+    _systemPausedElapsed = 0;
+    _reassertAudioSession();
+    if (!_appIsBackgrounded || !_backgroundAudioEnabled) return;
+    if (ref.read(playerProvider).isPlaying) {
+      if (_isMusic) {
+        BackgroundAudioKeepAlive.instance.start();
+      } else {
+        _enterPhantomPiP();
+      }
+    } else if (!_userPausedInBackground) {
+      // The system paused us and the user hasn't paused on their own: keep the
+      // WebView alive so a lock-screen play can reach it.
+      BackgroundAudioKeepAlive.instance.start();
+    }
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -244,8 +274,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
       // Stop the keep-alive when the app is back in the foreground and the
-      // video is not playing (the silent loop is no longer needed).
+      // video is not playing (the silent loop is no longer needed). For a
+      // regular video, drop the loop even while playing: in the foreground the
+      // visible player / phantom-PiP restore holds the audio session.
       if (!ref.read(playerProvider).isPlaying && !_systemPaused) {
+        BackgroundAudioKeepAlive.instance.stop();
+      } else if (!_isMusic) {
         BackgroundAudioKeepAlive.instance.stop();
       }
       // The video was phantom-PiP'd on background to keep audio alive. Restore
@@ -1027,12 +1061,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void userInitiatedPause() {
     _backgroundResumeAllowed = false;
     _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
-    if (_appIsBackgrounded) _userPausedInBackground = true;
-    // Keep the silent loop alive while backgrounded so iOS doesn't suspend
-    // the WebView. Without it, Control Center's play button can't reach the
-    // webview to resume playback.
+    _userPausedInBackground = true;
     if (!_appIsBackgrounded) {
       BackgroundAudioKeepAlive.instance.stop();
+    } else if (_backgroundAudioEnabled && !_systemPaused) {
+      // Pausing while backgrounded ends the phantom-PiP keep-alive (iOS closes
+      // the PiP window on pause), which lets iOS suspend the WebView — and then
+      // the lock screen / Control Center play button can no longer reach it
+      // (you'd have to reopen the app). Keep the silent loop alive so a later
+      // play works — for regular YouTube too, not just Music.
+      BackgroundAudioKeepAlive.instance.start();
     }
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
