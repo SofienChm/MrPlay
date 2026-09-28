@@ -804,7 +804,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _unmutedVideoUrl = null;
     if (_routesToVideoTab(next.platformUrl) && _videoTabUrl != null) {
       if (_videoTabUrl == next.platformUrl) {
-        _videoWebViewController?.reload();
+        // YouTube's own SPA autoplay usually wins the race and has already
+        // navigated the tab to the next URL by the time `ended` reaches us.
+        // Reloading here would wipe the already-buffering player and drop the
+        // user onto a blank spinner (and, while suspended, can fail to restart
+        // the video at all). The page is already on the right video — just make
+        // sure it is actually playing and audible instead.
+        _resumeOrStartActiveVideo();
       } else {
         _openVideoTab(next.platformUrl);
       }
@@ -814,6 +820,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_appIsBackgrounded && _backgroundAudioEnabled) {
       _reengageBackgroundKeepAlive();
     }
+  }
+
+  /// Best-effort start for the video the page has already navigated to (used
+  /// when the queue's next URL matches the tab's current URL). Resumes a paused
+  /// video, replays an ended one from the start, and re-arms/retries the
+  /// unmute so the next video never stays silent. A no-op when already playing.
+  void _resumeOrStartActiveVideo() {
+    final controller = _activeController;
+    if (controller == null) return;
+    controller.evaluateJavascript(source: '''
+      (function() {
+        var v = $_activeVideoJs;
+        if (!v) return;
+        if (v.ended) { try { v.currentTime = 0; } catch (e) {} }
+        if (v.paused) { v.play().catch(function(){}); }
+      })();
+    ''');
+    _unmuteVideo();
   }
 
   /// Best-effort background queue continuity: after a video ends while the app

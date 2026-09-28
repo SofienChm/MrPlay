@@ -327,6 +327,8 @@ class ContentBlockerJS {
 
         var _overlay = null;
         var _maskStyleAdded = false;
+        var _adStart = 0;
+        var _maskDisabled = false;
 
         function _ensureMask() {
           try {
@@ -394,6 +396,8 @@ class ContentBlockerJS {
         function _handle() {
           try {
             if (!_adShowing()) {
+              _adStart = 0;
+              _maskDisabled = false;
               _clearMask();
               if (_state.weMuted) {
                 var v = _video();
@@ -405,7 +409,18 @@ class ContentBlockerJS {
               return;
             }
 
-            _ensureMask();
+            if (_adStart === 0) _adStart = Date.now();
+            // Stuck-ad watchdog: if an ad stays "showing" but never resolves —
+            // its duration never becomes finite, usually because the ad's own
+            // network requests were blocked — stop rendering our fake loader so
+            // the user sees the real player state instead of an endless spinner
+            // over the next video. The skip/jump below keeps retrying on every
+            // watchdog tick, so a late-appearing duration still gets skipped.
+            if (!_maskDisabled && Date.now() - _adStart > 5000) {
+              _maskDisabled = true;
+              _clearMask();
+            }
+            if (!_maskDisabled) _ensureMask();
             _muteForAd(_video());
 
             // Re-verify live ad state synchronously right before any skip/jump.
@@ -466,11 +481,17 @@ class ContentBlockerJS {
 
         _bootstrap();
 
-        // Unmute safety net only. Catches any case where Layer 3 muted for an
-        // ad and then lost track of state: if muted, no ad is live, and the
-        // mute was ours, unmute.
+        // Watchdog: while an ad is showing, re-run the handler every tick so a
+        // stuck ad eventually un-masks and a late-appearing duration still gets
+        // skipped (the MutationObserver only fires on class changes, which a
+        // stuck ad never makes). When no ad is live, fall back to the unmute
+        // safety net: a mute that was ours but lost track of state gets undone.
         setInterval(function() {
           try {
+            if (_adShowing()) {
+              _handle();
+              return;
+            }
             var v = _video();
             if (!v) return;
             if (v.muted === true && !_adShowing() && _state.weMuted) {

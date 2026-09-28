@@ -161,6 +161,20 @@ void main() {
     expect(script, contains('video.muted = true;\n            _state.weMuted = true;'));
   });
 
+  test('ad-blocker un-masks a stuck ad instead of leaving a fake loader',
+      () {
+    final script = ContentBlockerJS.adFallbackSkipScript;
+    // A stuck ad (never resolves / duration never becomes finite) must stop
+    // showing the black mask + spinner after the watchdog threshold so the next
+    // video isn't covered by a permanent loader.
+    expect(script, contains("Date.now() - _adStart > 5000"));
+    expect(script, contains('_maskDisabled = true;'));
+    expect(script, contains("if (!_maskDisabled) _ensureMask();"));
+    // The watchdog re-runs the handler so a late-appearing duration still gets
+    // skipped even though the MutationObserver sees no class change.
+    expect(script, contains('if (_adShowing()) {\n              _handle();'));
+  });
+
   test('unmute re-arms when the active watch URL changes', () {
     // A new watch URL (SPA autoplay advancing to the next video) always
     // re-arms the unmute; the confirmed URL is the only thing that stops it.
