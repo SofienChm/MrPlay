@@ -175,37 +175,131 @@ void main() {
     expect(script, contains('if (_adShowing()) {\n              _handle();'));
   });
 
-  test('unmute re-arms when the active watch URL changes', () {
-    // A new watch URL (SPA autoplay advancing to the next video) always
-    // re-arms the unmute; the confirmed URL is the only thing that stops it.
+  test('unmute retries while the active video is muted and no ad is showing', () {
+    const throttle = Duration(milliseconds: 1200);
+    // A playing, muted video with no ad: must attempt (once throttled).
     expect(
-      PersistentWebViewState.needsUnmuteForUrl(
-        activeUrl: 'https://youtube.com/watch?v=2',
-        confirmedUrl: 'https://youtube.com/watch?v=1',
+      PersistentWebViewState.shouldAttemptUnmute(
+        playing: true,
+        ended: false,
+        muted: true,
+        adShowing: false,
+        timeSinceLastAttempt: throttle,
+        throttle: throttle,
       ),
       isTrue,
     );
-    // Same URL already confirmed audible: no retry.
+    // Not playing / ended: never unmute.
     expect(
-      PersistentWebViewState.needsUnmuteForUrl(
-        activeUrl: 'https://youtube.com/watch?v=1',
-        confirmedUrl: 'https://youtube.com/watch?v=1',
+      PersistentWebViewState.shouldAttemptUnmute(
+        playing: false,
+        ended: false,
+        muted: true,
+        adShowing: false,
+        timeSinceLastAttempt: throttle,
+        throttle: throttle,
       ),
       isFalse,
     );
-    // Nothing confirmed yet: must attempt.
+    // Already audible: no attempt.
     expect(
-      PersistentWebViewState.needsUnmuteForUrl(
-        activeUrl: 'https://youtube.com/watch?v=1',
-        confirmedUrl: null,
+      PersistentWebViewState.shouldAttemptUnmute(
+        playing: true,
+        ended: false,
+        muted: false,
+        adShowing: false,
+        timeSinceLastAttempt: throttle,
+        throttle: throttle,
+      ),
+      isFalse,
+    );
+    // Muted because an ad is showing: the ad-blocker owns it, do not fight it.
+    expect(
+      PersistentWebViewState.shouldAttemptUnmute(
+        playing: true,
+        ended: false,
+        muted: true,
+        adShowing: true,
+        timeSinceLastAttempt: throttle,
+        throttle: throttle,
+      ),
+      isFalse,
+    );
+    // Re-mute right after a successful attempt is retried once throttled
+    // (this is the "all next videos muted until reload" latch fix).
+    expect(
+      PersistentWebViewState.shouldAttemptUnmute(
+        playing: true,
+        ended: false,
+        muted: true,
+        adShowing: false,
+        timeSinceLastAttempt: Duration.zero,
+        throttle: throttle,
+      ),
+      isFalse,
+    );
+  });
+
+  test('stuck-PiP un-stick only fires foregrounded, past grace, throttled', () {
+    const grace = Duration(milliseconds: 800);
+    const throttle = Duration(seconds: 3);
+    // Stuck with no window, foregrounded, past grace, throttle elapsed: fire.
+    expect(
+      PersistentWebViewState.shouldForceVideoInline(
+        pipStuck: true,
+        backgrounded: false,
+        stuckDuration: grace,
+        grace: grace,
+        timeSinceLastForce: throttle,
+        throttle: throttle,
       ),
       isTrue,
     );
-    // No URL known: never unmute blindly.
+    // Backgrounded: never fire (phantom-PiP keep-alive is intentional).
     expect(
-      PersistentWebViewState.needsUnmuteForUrl(
-        activeUrl: null,
-        confirmedUrl: 'https://youtube.com/watch?v=1',
+      PersistentWebViewState.shouldForceVideoInline(
+        pipStuck: true,
+        backgrounded: true,
+        stuckDuration: grace,
+        grace: grace,
+        timeSinceLastForce: throttle,
+        throttle: throttle,
+      ),
+      isFalse,
+    );
+    // A real PiP window reports pipStuck=false: never fire.
+    expect(
+      PersistentWebViewState.shouldForceVideoInline(
+        pipStuck: false,
+        backgrounded: false,
+        stuckDuration: grace,
+        grace: grace,
+        timeSinceLastForce: throttle,
+        throttle: throttle,
+      ),
+      isFalse,
+    );
+    // Brief stuck state (a legit PiP enter/exit transition): not yet.
+    expect(
+      PersistentWebViewState.shouldForceVideoInline(
+        pipStuck: true,
+        backgrounded: false,
+        stuckDuration: Duration.zero,
+        grace: grace,
+        timeSinceLastForce: throttle,
+        throttle: throttle,
+      ),
+      isFalse,
+    );
+    // Throttle not elapsed: no hammering the webview on every report.
+    expect(
+      PersistentWebViewState.shouldForceVideoInline(
+        pipStuck: true,
+        backgrounded: false,
+        stuckDuration: grace,
+        grace: grace,
+        timeSinceLastForce: Duration.zero,
+        throttle: throttle,
       ),
       isFalse,
     );

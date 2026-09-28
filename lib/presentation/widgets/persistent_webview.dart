@@ -43,11 +43,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   double _tabSwipeOffset = 0;
   bool _waitingToGoBack = false;
   bool _videoTabIntro = false;
-  /// Watch URL whose active video has been confirmed audible. Unmuting is
-  /// re-armed whenever the active watch URL differs from this (an SPA autoplay
-  /// advance to the next video always changes the URL), so a plain "already
-  /// unmuted" flag can never stick across videos and leave the next one muted.
-  String? _unmutedVideoUrl;
+  DateTime _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _unmuteThrottle = Duration(milliseconds: 1200);
+  DateTime? _pipStuckSince;
+  DateTime _lastInlineForce = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _pipStuckGrace = Duration(milliseconds: 800);
+  static const Duration _inlineForceThrottle = Duration(seconds: 3);
   bool isReady = false;
 
   /// True while the hub page is the visible layer (webview not ready / not
@@ -557,7 +558,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         final currentId = ref.read(playerProvider).currentVideo?.id;
         if (currentId != video.id) {
           _endedHandled = false;
-          _unmutedVideoUrl = null;
+          _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
           _userPausedInBackground = false;
           _systemPaused = false;
           _systemPausedElapsed = 0;
@@ -625,24 +626,59 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final durSec = (data['duration'] as num?)?.toDouble() ?? 0;
       final positionMs = posSec.isFinite ? posSec * 1000 : 0.0;
       final durationMs = durSec.isFinite ? durSec * 1000 : 0.0;
+      final muted = data['muted'] == true;
+      final adShowing = data['adShowing'] == true;
       // YouTube starts some videos muted (or the user previously muted); once
       // the video is actually playing, force-unmute it so audio is audible.
-      // Keyed on the active watch URL: once unmuting is *confirmed* audible we
-      // remember that URL and stop retrying, but any new URL (autoplay
-      // advancing to the next video, a reload, a repeat) re-arms the unmute.
-      // This fixes both videos that open muted because the first attempt ran
-      // before the element was ready (retried on the next report) and the next
-      // video in a queue staying muted because the flag never reset.
-      final activeUrl = _videoTabUrl ?? _currentUrl;
-      if (playing &&
-          !ended &&
-          needsUnmuteForUrl(
-            activeUrl: activeUrl,
-            confirmedUrl: _unmutedVideoUrl,
-          )) {
+      // Driven by the *live* muted state reported from the page (throttled),
+      // never a one-shot URL latch: YouTube can re-assert muted a moment after
+      // our unmute succeeds (its own async mute/gesture state), and a latch
+      // would then leave every following video stuck muted until a reload. By
+      // keying on `muted`, any re-mute is detected on the next report and
+      // retried until the element is actually audible.
+      if (shouldAttemptUnmute(
+        playing: playing,
+        ended: ended,
+        muted: muted,
+        adShowing: adShowing,
+        timeSinceLastAttempt:
+            DateTime.now().difference(_lastUnmuteAttempt),
+        throttle: _unmuteThrottle,
+      )) {
+        _lastUnmuteAttempt = DateTime.now();
         _unmuteVideo().then((audible) {
-          if (mounted && audible) _unmutedVideoUrl = activeUrl;
+          if (mounted && audible) {
+            _lastUnmuteAttempt = DateTime.now();
+          }
         });
+      }
+      // Stuck-PiP un-stick: iOS can leave `webkitPresentationMode` stuck at
+      // 'picture-in-picture' with no actual PiP window (e.g. a phantom-PiP keep-
+      // alive window dismissed when a video ends). The reused <video> then
+      // renders black inline — the "next video is black, close & reopen to fix"
+      // bug. Restored from the documented 2026-08-10 fix. Only fires while
+      // FOREGROUNDED (background phantom-PiP is intentional), only for the
+      // "stuck with no window" case (a real user PiP has pipActive -> the
+      // report's pipStuck is false, so it is never touched), and only after the
+      // stuck state persists past a short grace period, throttled.
+      final pipStuck = data['pipStuck'] == true;
+      if (pipStuck && !_appIsBackgrounded) {
+        _pipStuckSince ??= DateTime.now();
+      } else {
+        _pipStuckSince = null;
+      }
+      if (shouldForceVideoInline(
+        pipStuck: pipStuck,
+        backgrounded: _appIsBackgrounded,
+        stuckDuration: _pipStuckSince == null
+            ? Duration.zero
+            : DateTime.now().difference(_pipStuckSince!),
+        grace: _pipStuckGrace,
+        timeSinceLastForce: DateTime.now().difference(_lastInlineForce),
+        throttle: _inlineForceThrottle,
+      )) {
+        _lastInlineForce = DateTime.now();
+        _forceVideoInline();
       }
       var video = ref.read(playerProvider).currentVideo;
       // Fallback: if the video is actually playing but the `playerInfo` JS
@@ -799,9 +835,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!mounted) return;
     // Re-arm the unmute for the next item: whatever URL we route to next is a
     // new page, and its video must be allowed to start audible even if the
-    // previous video was already confirmed unmuted (or the same URL is being
-    // reloaded, which no visited-history / playerInfo reset would catch).
-    _unmutedVideoUrl = null;
+    // previous video was already unmuted (or the same URL is being resumed).
+    _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
     if (_routesToVideoTab(next.platformUrl) && _videoTabUrl != null) {
       if (_videoTabUrl == next.platformUrl) {
         // YouTube's own SPA autoplay usually wins the race and has already
@@ -844,14 +879,27 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// is backgrounded, iOS ends the PiP window and would soon suspend the
   /// webview. Waits for the next queued video to start playing, then re-applies
   /// the keep-alive (phantom-PiP for normal YouTube, silent loop for Music) so
-  /// playback survives the handoff.
+  /// playback survives the handoff. If the next video never starts on its own
+  /// (muted / paused autoplay), it is force-started before the keep-alive is
+  /// re-applied, instead of silently giving up and letting iOS suspend the
+  /// webview (which left the next video dead with a black + loader on reopen).
   Future<void> _reengageBackgroundKeepAlive() async {
-    for (var i = 0; i < 30; i++) {
+    var playing = false;
+    for (var i = 0; i < 15; i++) {
       await Future<void>.delayed(const Duration(milliseconds: 400));
       if (!mounted) return;
-      if (ref.read(playerProvider).isPlaying) break;
+      playing = ref.read(playerProvider).isPlaying;
+      if (playing) break;
     }
     if (!mounted || !_appIsBackgrounded || !_backgroundAudioEnabled) return;
+    if (!playing) {
+      // The next video hasn't started on its own. Give the freshly-loaded page
+      // a moment to attach its player, then force play + unmute so the
+      // keep-alive handoff isn't lost to a muted/paused autoplay.
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      if (!mounted) return;
+      _resumeOrStartActiveVideo();
+    }
     if (_isMusic) {
       BackgroundAudioKeepAlive.instance.start();
     } else {
@@ -900,15 +948,43 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     return clamped;
   }
 
-  /// Whether the unmute should run for the active watch URL. Re-arms whenever
-  /// the URL differs from the last one confirmed audible (autoplay advance,
-  /// reload, or a repeat), and never fires when no URL is known yet.
+  /// Whether the unmute should run now, based on the live player state.
+  /// Only when the active video is actually playing, is muted, and no ad is
+  /// showing (the ad-blocker owns the mute during ads), throttled so YouTube's
+  /// async re-mute is retried without hammering the webview every report.
   @visibleForTesting
-  static bool needsUnmuteForUrl({
-    required String? activeUrl,
-    required String? confirmedUrl,
+  static bool shouldAttemptUnmute({
+    required bool playing,
+    required bool ended,
+    required bool muted,
+    required bool adShowing,
+    required Duration timeSinceLastAttempt,
+    required Duration throttle,
   }) {
-    return activeUrl != null && activeUrl != confirmedUrl;
+    if (!playing || ended) return false;
+    if (!muted) return false;
+    if (muted && adShowing) return false;
+    return timeSinceLastAttempt >= throttle;
+  }
+
+  /// Whether the stuck-PiP un-stick should run now. Only when the report says
+  /// the video is "stuck with no window" (`pipStuck` is already
+  /// mode==PiP && no pictureInPictureElement), the app is foregrounded, the
+  /// stuck state has persisted past the grace period (so a legit PiP enter/exit
+  /// transition can't be canceled), and the throttle since the last force has
+  /// elapsed (so it can't hammer the webview on every state report).
+  @visibleForTesting
+  static bool shouldForceVideoInline({
+    required bool pipStuck,
+    required bool backgrounded,
+    required Duration stuckDuration,
+    required Duration grace,
+    required Duration timeSinceLastForce,
+    required Duration throttle,
+  }) {
+    if (!pipStuck || backgrounded) return false;
+    if (stuckDuration < grace) return false;
+    return timeSinceLastForce >= throttle;
   }
 
   /// Applies a remote (lock-screen / Control Center) seek: updates the player
@@ -1018,7 +1094,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_videoTabUrl == url) return;
     _videoTabUrl = url;
     _endedHandled = false;
-    _unmutedVideoUrl = null;
+    _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
     _lastPlayInitiatedAt = DateTime.now();
     ref.read(playerProvider.notifier).videoTabActive();
     _videoTabIntro = true;
@@ -1599,7 +1675,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     });
     PersistentWebViewState.hubVisible.value = false;
     _endedHandled = false;
-    _unmutedVideoUrl = null;
+    _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
     _loadingTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _isLoading = false);
     });
@@ -1688,6 +1764,22 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     ''');
   }
 
+  /// Lightweight stuck-PiP un-stick: sets the video back inline when it is
+  /// stuck in PiP presentation mode with no visible PiP window (the black
+  /// video case). Re-checks the stuck condition synchronously so it can never
+  /// fight a real PiP window (pictureInPictureElement is set there).
+  void _forceVideoInline() {
+    _activeController?.evaluateJavascript(source: '''
+      (function() {
+        var v = $_activeVideoJs;
+        if (!v || !v.webkitSetPresentationMode) return;
+        if (v.webkitPresentationMode !== 'picture-in-picture') return;
+        if (document.pictureInPictureElement) return;
+        try { v.webkitSetPresentationMode('inline'); } catch (e) {}
+      })();
+    ''');
+  }
+
   void togglePictureInPicture() {
     _activeController?.evaluateJavascript(source: '''
       (function() {
@@ -1710,11 +1802,35 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   /// Restores the video inline after phantom PiP (used on background to keep
   /// audio alive). Event-driven: waits for webkitpresentationmodechanged to
-  /// confirm 'inline', verifies rendering, and reloads the page as a last
-  /// resort — no DOM surgery, which corrupts YouTube's MediaSource pipeline.
+  /// confirm 'inline', verifies rendering, and only reloads the page as a true
+  /// last resort. The webview can be momentarily un-attached right after
+  /// resume (callAsyncJavaScript throws) or the mode-change event can lag, so
+  /// failures are retried instead of instantly reloading — an eager reload is
+  /// what dropped the user onto the black player + loader on open.
   Future<void> _restoreVideoInline() async {
+    for (var attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+      }
+      final ok = await _tryRestoreInlineOnce();
+      if (ok) return;
+    }
+    debugPrint('[MrPlay] inline restore failed after retries, reloading');
+    _activeController?.reload();
+    // After the reload, make sure the freshly-loaded watch page actually
+    // starts (and is audible) instead of sitting on its loader.
+    Future<void>.delayed(const Duration(milliseconds: 1500), () {
+      if (mounted) _resumeOrStartActiveVideo();
+    });
+  }
+
+  /// One inline-restore attempt. Returns true when there is nothing to restore
+  /// or the restore succeeded; false on timeout / no-render / API error / a
+  /// not-yet-attached webview, so the caller can retry.
+  Future<bool> _tryRestoreInlineOnce() async {
     final controller = _activeController;
-    if (controller == null) return;
+    if (controller == null) return true;
     try {
       final result = await controller.callAsyncJavaScript(functionBody: '''
         var videos = document.querySelectorAll('video');
@@ -1760,12 +1876,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final value = result?.value;
       final ok = value is Map && value['ok'] == true;
       if (!ok) {
-        debugPrint('[MrPlay] inline restore failed, reloading');
-        _activeController?.reload();
+        debugPrint('[MrPlay] inline restore attempt failed: '
+            '${value is Map ? value['reason'] : 'unknown'}');
       }
+      return ok;
     } catch (e) {
-      debugPrint('[MrPlay] _restoreVideoInline error: $e');
-      _activeController?.reload();
+      debugPrint('[MrPlay] _restoreVideoInline error (will retry): $e');
+      return false;
     }
   }
 
@@ -1882,17 +1999,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           if (!v) return null;
           var pipStuck = false;
           var pipActive = false;
+          var adShowing = false;
           try {
             pipStuck = (typeof v.webkitPresentationMode !== 'undefined') &&
                        v.webkitPresentationMode === 'picture-in-picture';
             pipActive = (typeof document.pictureInPictureElement !== 'undefined' &&
                          !!document.pictureInPictureElement);
           } catch (e) {}
+          try {
+            var playerEl = v.closest ? v.closest('.html5-video-player') : null;
+            if (!playerEl) playerEl = document.querySelector('.html5-video-player');
+            adShowing = !!(playerEl && playerEl.classList.contains('ad-showing'));
+          } catch (e) {}
           return {
             playing: !v.paused && !v.ended,
             position: isFinite(v.currentTime) ? v.currentTime : 0,
             duration: isFinite(v.duration) ? v.duration : 0,
             ended: !!v.ended,
+            muted: !!v.muted,
+            adShowing: adShowing,
             pip: pipStuck || pipActive,
             pipActive: pipActive,
             pipStuck: pipStuck && !pipActive

@@ -110,16 +110,24 @@ class YouTubeJS {
           if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
             var pipStuck = false;
             var pipActive = false;
+            var adShowing = false;
             try {
               var pm = typeof this.webkitPresentationMode !== 'undefined';
               pipStuck = pm && this.webkitPresentationMode === 'picture-in-picture';
               pipActive = (typeof document.pictureInPictureElement !== 'undefined' && !!document.pictureInPictureElement);
+            } catch (e) {}
+            try {
+              var playerEl = this.closest ? this.closest('.html5-video-player') : null;
+              if (!playerEl) playerEl = document.querySelector('.html5-video-player');
+              adShowing = !!(playerEl && playerEl.classList.contains('ad-showing'));
             } catch (e) {}
             window.flutter_inappwebview.callHandler('videoState', {
               playing: !this.paused && !this.ended,
               position: isFinite(this.currentTime) ? this.currentTime : 0,
               duration: isFinite(this.duration) ? this.duration : 0,
               ended: !!this.ended,
+              muted: !!this.muted,
+              adShowing: adShowing,
               pip: pipStuck || pipActive,
               pipActive: pipActive,
               pipStuck: pipStuck && !pipActive
