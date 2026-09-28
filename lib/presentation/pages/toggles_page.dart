@@ -64,12 +64,16 @@ class _TogglesPageState extends State<TogglesPage> {
 
   Future<void> _changeAdBlock(bool enabled) async {
     await SettingsRepository.setAdBlockEnabled(enabled);
+    // Apply immediately to the live webviews (no app restart needed).
+    await MrPlayApp.webViewKey.currentState?.applySettingsChanges();
     if (!mounted) return;
     setState(() => _adBlockEnabled = enabled);
   }
 
   Future<void> _changeBackgroundAudio(bool enabled) async {
     await SettingsRepository.setBackgroundAudioEnabled(enabled);
+    // Apply immediately to the live webviews (no app restart needed).
+    await MrPlayApp.webViewKey.currentState?.applySettingsChanges();
     if (!mounted) return;
     setState(() => _backgroundAudioEnabled = enabled);
   }

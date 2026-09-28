@@ -33,7 +33,7 @@ class MrPlayApp extends StatefulWidget {
       ValueNotifier(true);
 
   /// A backgrounded session older than this is reset when the app resumes.
-  static const Duration _sessionTimeout = Duration(hours: 1);
+  static const Duration _sessionTimeout = Duration(hours: 2);
 
   @override
   State<MrPlayApp> createState() => _MrPlayAppState();

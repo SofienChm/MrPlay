@@ -49,6 +49,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   DateTime _lastInlineForce = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _pipStuckGrace = Duration(milliseconds: 800);
   static const Duration _inlineForceThrottle = Duration(seconds: 3);
+  static const String _adBlockScriptGroup = 'mrplay-adblock';
   Timer? _pausedKeepAliveTimer;
   static const Duration _pausedKeepAliveInterval = Duration(seconds: 4);
   bool _wasPlayingAtSeek = false;
@@ -172,6 +173,91 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         await SettingsRepository.getBackgroundAudioEnabled();
     if (mounted && enabled != _backgroundAudioEnabled) {
       setState(() => _backgroundAudioEnabled = enabled);
+    }
+  }
+
+  /// The four ad-blocking user scripts, grouped so they can be added/removed at
+  /// runtime when the "Block ads & trackers" toggle is flipped (no app restart).
+  List<UserScript> _adBlockScripts() => [
+        UserScript(
+          source: ContentBlockerJS.stripAdDataScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          groupName: _adBlockScriptGroup,
+        ),
+        UserScript(
+          source: ContentBlockerJS.adRequestBlockerScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          groupName: _adBlockScriptGroup,
+        ),
+        UserScript(
+          source: ContentBlockerJS.genericAdBlockerScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          groupName: _adBlockScriptGroup,
+        ),
+        UserScript(
+          source: ContentBlockerJS.adFallbackSkipScript,
+          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+          groupName: _adBlockScriptGroup,
+        ),
+      ];
+
+  /// Re-applies the ad-block and background-audio settings without an app
+  /// restart, after the user toggles them in Settings. Ad-block scripts are
+  /// injected into the live webviews (and applied to the current pages) when
+  /// enabled, and removed (for future loads) when disabled. Background audio
+  /// only flips the runtime flag: the webviews are always created with PiP and
+  /// background-audio capability enabled, so the phantom-PiP keep-alive can
+  /// engage on the next background without recreating the webview.
+  Future<void> applySettingsChanges() async {
+    final adBlock = await SettingsRepository.getAdBlockEnabled();
+    final backgroundAudio = await SettingsRepository.getBackgroundAudioEnabled();
+    if (adBlock != _adBlockEnabled) {
+      _adBlockEnabled = adBlock;
+      if (mounted) setState(() {});
+      await _applyAdBlockRuntime();
+    }
+    if (backgroundAudio != _backgroundAudioEnabled) {
+      _backgroundAudioEnabled = backgroundAudio;
+      if (mounted) setState(() {});
+    }
+  }
+
+  /// Applies (or removes) the ad-block user scripts on the already-created
+  /// webviews. Runtime-added scripts only run on the next document start, so
+  /// when enabling we also evaluate each script on the current page.
+  Future<void> _applyAdBlockRuntime() async {
+    final scripts = [
+      ContentBlockerJS.stripAdDataScript,
+      ContentBlockerJS.adRequestBlockerScript,
+      ContentBlockerJS.genericAdBlockerScript,
+      ContentBlockerJS.adFallbackSkipScript,
+    ];
+    for (final controller in [_webViewController, _videoWebViewController]) {
+      if (controller == null) continue;
+      try {
+        if (_adBlockEnabled) {
+          await controller.addUserScripts(
+            userScripts: scripts
+                .map((source) => UserScript(
+                      source: source,
+                      injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      groupName: _adBlockScriptGroup,
+                    ))
+                .toList(),
+          );
+          for (final source in scripts) {
+            try {
+              await controller.evaluateJavascript(source: source);
+            } catch (_) {}
+          }
+        } else {
+          await controller.removeUserScriptsByGroupName(
+            groupName: _adBlockScriptGroup,
+          );
+        }
+      } catch (e) {
+        debugPrint('[MrPlay] apply ad-block runtime failed: $e');
+      }
     }
   }
 
@@ -2253,26 +2339,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             offstage: _currentUrl == null,
             child: InAppWebView(
             initialUserScripts: UnmodifiableListView([
-              if (_adBlockEnabled)
-                UserScript(
-                  source: ContentBlockerJS.stripAdDataScript,
-                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                ),
-              if (_adBlockEnabled)
-                UserScript(
-                  source: ContentBlockerJS.adRequestBlockerScript,
-                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                ),
-              if (_adBlockEnabled)
-                UserScript(
-                  source: ContentBlockerJS.genericAdBlockerScript,
-                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                ),
-              if (_adBlockEnabled)
-                UserScript(
-                  source: ContentBlockerJS.adFallbackSkipScript,
-                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                ),
+              if (_adBlockEnabled) ..._adBlockScripts(),
               UserScript(
                 source: YouTubeJS.visibilityKeepAliveScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -2298,8 +2365,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               javaScriptEnabled: true,
               allowsInlineMediaPlayback: true,
               mediaPlaybackRequiresUserGesture: false,
-              allowBackgroundAudioPlaying: _backgroundAudioEnabled,
-              allowsPictureInPictureMediaPlayback: _backgroundAudioEnabled,
+              allowBackgroundAudioPlaying: true,
+              allowsPictureInPictureMediaPlayback: true,
               allowsAirPlayForMediaPlayback: true,
               isFraudulentWebsiteWarningEnabled: false,
               userAgent:
@@ -2356,30 +2423,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     key: const ValueKey('video-tab'),
                     initialUrlRequest: URLRequest(url: WebUri(_videoTabUrl!)),
                     initialUserScripts: UnmodifiableListView([
-                      if (_adBlockEnabled)
-                        UserScript(
-                          source: ContentBlockerJS.stripAdDataScript,
-                          injectionTime:
-                              UserScriptInjectionTime.AT_DOCUMENT_START,
-                        ),
-                      if (_adBlockEnabled)
-                        UserScript(
-                          source: ContentBlockerJS.adRequestBlockerScript,
-                          injectionTime:
-                              UserScriptInjectionTime.AT_DOCUMENT_START,
-                        ),
-                      if (_adBlockEnabled)
-                        UserScript(
-                          source: ContentBlockerJS.genericAdBlockerScript,
-                          injectionTime:
-                              UserScriptInjectionTime.AT_DOCUMENT_START,
-                        ),
-                      if (_adBlockEnabled)
-                        UserScript(
-                          source: ContentBlockerJS.adFallbackSkipScript,
-                          injectionTime:
-                              UserScriptInjectionTime.AT_DOCUMENT_START,
-                        ),
+                      if (_adBlockEnabled) ..._adBlockScripts(),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -2413,9 +2457,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       javaScriptEnabled: true,
                       allowsInlineMediaPlayback: true,
                       mediaPlaybackRequiresUserGesture: false,
-                      allowBackgroundAudioPlaying: _backgroundAudioEnabled,
-                      allowsPictureInPictureMediaPlayback:
-                          _backgroundAudioEnabled,
+                      allowBackgroundAudioPlaying: true,
+                      allowsPictureInPictureMediaPlayback: true,
                       allowsAirPlayForMediaPlayback: true,
                       isFraudulentWebsiteWarningEnabled: false,
                       userAgent:
