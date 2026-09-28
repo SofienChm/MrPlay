@@ -18,13 +18,8 @@ import MediaPlayer
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    do {
-      try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback, options: [])
-      try AVAudioSession.sharedInstance().setActive(true)
-    } catch {
-      print("MrPlay: AVAudioSession error: \(error)")
-    }
-
+    // The AVAudioSession category/mode/activation is configured once by the
+    // audio_session plugin (lib/main.dart) so there is a single source of truth.
     observeAudioRouteChanges()
 
     setupSpotlightChannel()
