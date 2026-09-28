@@ -97,4 +97,57 @@ void main() {
       isTrue,
     );
   });
+
+  test('remote seek targets are clamped to the video duration', () {
+    const duration = Duration(minutes: 10);
+    expect(
+      PersistentWebViewState.clampSeekTarget(
+        Duration.zero,
+        duration,
+      ),
+      Duration.zero,
+    );
+    expect(
+      PersistentWebViewState.clampSeekTarget(
+        const Duration(seconds: -5),
+        duration,
+      ),
+      Duration.zero,
+    );
+    expect(
+      PersistentWebViewState.clampSeekTarget(
+        const Duration(minutes: 4, seconds: 30),
+        duration,
+      ),
+      const Duration(minutes: 4, seconds: 30),
+    );
+    expect(
+      PersistentWebViewState.clampSeekTarget(
+        const Duration(minutes: 15),
+        duration,
+      ),
+      duration,
+    );
+    // Unknown (zero) duration must not clamp, so seeking before metadata
+    // arrives still reaches the video element.
+    expect(
+      PersistentWebViewState.clampSeekTarget(
+        const Duration(minutes: 15),
+        Duration.zero,
+      ),
+      const Duration(minutes: 15),
+    );
+  });
+
+  test('unmute script never fights the ad-blocker or mutes unrelated widgets',
+      () {
+    final script = PersistentWebViewState.unmuteVideoScript;
+    // Must not unmute while an ad is showing (the ad-blocker keeps it muted).
+    expect(script, contains("classList.contains('ad-showing')"));
+    // The real unmute button click must stay scoped to the active player, so a
+    // muted feed preview's button can't be clicked by mistake.
+    expect(script, contains("player.querySelector('.ytp-unmute-widget button"));
+    // An already-audible video must be left untouched (no volume override).
+    expect(script, contains('if (!main.muted && main.volume > 0) return { audible: true };'));
+  });
 }

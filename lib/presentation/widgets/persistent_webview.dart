@@ -820,7 +820,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _onRemoteCommand(String command, {Duration? position}) {
     final state = ref.read(playerProvider);
-    final notifier = ref.read(playerProvider.notifier);
     final positionMs = position?.inMilliseconds ?? 0;
     switch (command) {
       case 'play':
@@ -837,27 +836,37 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
         break;
       case 'skipForward':
-        final next = state.position + const Duration(seconds: 15);
-        notifier.seekTo(next);
-        controlVideo('seek', position: next.inMilliseconds / 1000.0);
-        _resumeAfterRemoteSeek();
+        _applyRemoteSeek(state.position + const Duration(seconds: 15));
         break;
       case 'skipBackward':
-        final prev = state.position - const Duration(seconds: 15);
-        final clamped = prev.isNegative ? Duration.zero : prev;
-        notifier.seekTo(clamped);
-        controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
-        _resumeAfterRemoteSeek();
+        _applyRemoteSeek(state.position - const Duration(seconds: 15));
         break;
       case 'seek':
-        if (positionMs > 0) {
-          final target = Duration(milliseconds: positionMs);
-          notifier.seekTo(target);
-          controlVideo('seek', position: target.inMilliseconds / 1000.0);
-          _resumeAfterRemoteSeek();
+        if (positionMs >= 0) {
+          _applyRemoteSeek(Duration(milliseconds: positionMs));
         }
         break;
     }
+  }
+
+  /// Clamps a seek target to `[0, duration]`. Negative targets land at 0 and
+  /// targets past the end clamp to the duration; a zero/unknown duration is
+  /// left untouched so seeking still works before metadata arrives.
+  @visibleForTesting
+  static Duration clampSeekTarget(Duration target, Duration duration) {
+    var clamped = target.isNegative ? Duration.zero : target;
+    if (duration > Duration.zero && clamped > duration) clamped = duration;
+    return clamped;
+  }
+
+  /// Applies a remote (lock-screen / Control Center) seek: updates the player
+  /// position, seeks the active `<video>`, and lets [_resumeAfterRemoteSeek]
+  /// decide whether to re-start playback after iOS's scrub-pause.
+  void _applyRemoteSeek(Duration target) {
+    final clamped = clampSeekTarget(target, ref.read(playerProvider).duration);
+    ref.read(playerProvider.notifier).seekTo(clamped);
+    controlVideo('seek', position: clamped.inMilliseconds / 1000.0);
+    _resumeAfterRemoteSeek();
   }
 
   /// Debounced resume after a lock-screen / Control Center seek. iOS pauses the
@@ -1438,58 +1447,69 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
+  /// JS body for [_unmuteVideo]. Un-mutes the actively playing `<video>` and
+  /// unlocks YouTube's player — but ONLY when the video is muted and no ad is
+  /// showing. The ad-blocker (`adFallbackSkipScript`) deliberately keeps the
+  /// player muted during ads and re-mutes on any `volumechange`; unmuting here
+  /// would burst ad audio and set up a mute/unmute ping-pong. The unlock is
+  /// scoped to `#movie_player` so it can't click a muted feed preview's button.
+  @visibleForTesting
+  static const String unmuteVideoScript = '''
+    (function() {
+      var videos = document.querySelectorAll('video');
+      var main = null;
+      for (var i = 0; i < videos.length; i++) {
+        if (!videos[i].paused && !videos[i].ended) {
+          main = videos[i];
+          break;
+        }
+      }
+      if (!main && videos.length > 0) main = videos[0];
+      if (!main) return { audible: false };
+      var player = null;
+      try { player = document.getElementById('movie_player'); } catch (e) {}
+      var adShowing = false;
+      try { adShowing = !!(player && player.classList.contains('ad-showing')); } catch (e) {}
+      if (!main.muted && main.volume > 0) return { audible: true };
+      if (adShowing) return { audible: false };
+      main.muted = false;
+      main.defaultMuted = false;
+      main.volume = 1;
+      // Unlock YouTube's player so autoplay can advance. Its own API is the
+      // reliable path; clicking the real unmute button (hidden or not) is the
+      // fallback. Only touch the player when we actually had to unmute, so a
+      // user's preferred volume is never overridden on an already-audible video.
+      try {
+        if (player) {
+          if (typeof player.unMute === 'function') { player.unMute(); }
+          else if (typeof player.setVolume === 'function') { player.setVolume(100); }
+        }
+      } catch (e) {}
+      try {
+        var btn = player && player.querySelector('.ytp-unmute-widget button, [class*="unmute"] button');
+        if (btn && typeof btn.click === 'function') { btn.click(); }
+      } catch (e) {}
+      return { audible: !main.muted && main.volume > 0 };
+    })();
+  ''';
+
   /// Un-mutes the actively playing video and unlocks YouTube's player.
   ///
   /// YouTube sometimes starts playback muted (or the user previously muted it),
-  /// showing the "tap to unmute" overlay. Just clearing `muted` on the `<video>`
-  /// element makes it audible but leaves YouTube's own player state locked in
-  /// "awaiting gesture" — which stops a mix from auto-advancing to the next
-  /// video in the background. So we also trigger YouTube's own unmute (player
-  /// API, falling back to clicking the real button, which fires even when the
-  /// widget is CSS-hidden) to clear that state. Returns whether the active
-  /// video is now audible, so callers can retry until it is.
+  /// showing the "tap to unmute" overlay. Clearing `muted` on the `<video>`
+  /// element alone leaves YouTube's own player state locked in "awaiting
+  /// gesture" — which stops a mix from auto-advancing to the next video in the
+  /// background. So we also trigger YouTube's own unmute (player API, falling
+  /// back to clicking the real button, which fires even when the widget is
+  /// CSS-hidden) to clear that state. Skips while an ad is showing so it never
+  /// fights the ad-blocker. Returns whether the active video is now audible, so
+  /// callers can retry until it is.
   Future<bool> _unmuteVideo() async {
     final controller = _activeController;
     if (controller == null) return false;
     try {
       final result = await controller.callAsyncJavaScript(
-        functionBody: '''
-          (function() {
-            var videos = document.querySelectorAll('video');
-            var main = null;
-            for (var i = 0; i < videos.length; i++) {
-              if (!videos[i].paused && !videos[i].ended) {
-                main = videos[i];
-                break;
-              }
-            }
-            if (!main && videos.length > 0) main = videos[0];
-            if (!main) return { audible: false };
-            if (main.muted || main.volume === 0) {
-              main.muted = false;
-              main.defaultMuted = false;
-              main.volume = 1;
-            }
-            // Unlock YouTube's player so autoplay can advance. Its own API is
-            // the reliable path; clicking the real unmute button (hidden or not)
-            // is the fallback that also clears the internal "tap to unmute"
-            // state YouTube uses to gate the next video.
-            try {
-              var player = document.getElementById('movie_player');
-              if (player) {
-                if (typeof player.unMute === 'function') { player.unMute(); }
-                else if (typeof player.setVolume === 'function') { player.setVolume(100); }
-              }
-            } catch (e) {}
-            try {
-              var btn = document.querySelector(
-                '.ytp-unmute-widget button, .ytp-unmute button, [class*="unmute"] button'
-              );
-              if (btn && typeof btn.click === 'function') { btn.click(); }
-            } catch (e) {}
-            return { audible: !main.muted && main.volume > 0 };
-          })();
-        ''',
+        functionBody: unmuteVideoScript,
       );
       final value = result?.value;
       return value is Map && value['audible'] == true;
