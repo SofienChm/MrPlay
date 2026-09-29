@@ -99,6 +99,102 @@ void main() {
     );
   });
 
+  test('blank and ad popups are blocked, legit popups allowed', () {
+    // about:blank popups (the ad-popup redirect pattern) must be blocked.
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: WebUri('about:blank'),
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    // Popup/popunder ad networks must be blocked.
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: WebUri('https://ads.propellerads.com/x'),
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    // Real content platforms must never be blocked.
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: WebUri('https://www.youtube.com/'),
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isTrue,
+    );
+    expect(
+      PersistentWebViewState.shouldLoadPopupUrl(
+        url: WebUri('https://www.twitch.tv/'),
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isTrue,
+    );
+  });
+
+  test('navigations to ad domains are cancelled, legit ones allowed', () {
+    // Ad redirects / popup landing pages are cancelled in the webview.
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'https',
+        host: 'click.doubleclick.net',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'http',
+        host: 'cdn.popads.net',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    // Dangerous schemes are cancelled.
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'javascript',
+        host: '',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'data',
+        host: '',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isFalse,
+    );
+    // Core flows: platforms, YouTube, video content CDNs all pass.
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'https',
+        host: 'www.youtube.com',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isTrue,
+    );
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'https',
+        host: 'm.youtube.com',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isTrue,
+    );
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'https',
+        host: 'rr2---sn-googlevideo.com',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+      ),
+      isTrue,
+    );
+  });
+
   test('remote seek targets are clamped to the video duration', () {
     const duration = Duration(minutes: 10);
     expect(

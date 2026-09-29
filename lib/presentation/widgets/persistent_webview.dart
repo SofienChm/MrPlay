@@ -130,6 +130,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   @visibleForTesting
   static bool isAdDomain(String host) {
     final h = host.toLowerCase();
+    // Ad/tracker/redirect networks used by popup-flood sites. Kept to clearly
+    // ad-serving domains so legit content platforms (youtube.com, twitch.tv,
+    // ...) and googlevideo.com (real video CDN) are never matched.
     const adDomains = [
       'doubleclick.net',
       'googlesyndication.com',
@@ -138,6 +141,40 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       'adservice.google.com',
       'pagead2.googlesyndication.com',
       'tpc.googlesyndication.com',
+      'amazon-adsystem.com',
+      'adnxs.com',
+      'adform.net',
+      'taboola.com',
+      'outbrain.com',
+      'pubmatic.com',
+      'criteo.com',
+      'rubiconproject.com',
+      'adsrvr.org',
+      'tremorhub.com',
+      'springserve.com',
+      // Popup / popunder ad networks — the "jump a lot of popups" culprits.
+      'popads.net',
+      'popcash.net',
+      'popunder.net',
+      'propellerads.com',
+      'adsterra.com',
+      'exoclick.com',
+      'exosrv.com',
+      'juicyads.com',
+      'admaven.com',
+      'ad-maven.com',
+      'mgid.com',
+      'revcontent.com',
+      'popmyads.com',
+      'adscendmedia.com',
+      'contextweb.com',
+      'openx.net',
+      'smartadserver.com',
+      'zedo.com',
+      'quantserve.com',
+      'scorecardresearch.com',
+      'casalemedia.com',
+      'serving-sys.com',
     ];
     for (final d in adDomains) {
       if (h == d || h.endsWith('.$d')) return true;
@@ -535,7 +572,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     required bool Function(String) isAdDomain,
   }) {
     if (url == null) return false;
-    return !isAdDomain(url.host);
+    final host = url.host;
+    // Block blank popups (about:blank) too: popup-flood sites open a blank
+    // window and redirect it to an ad landing page afterwards, which the final
+    // host check alone can't catch.
+    if (host.isEmpty) return false;
+    return !isAdDomain(host);
+  }
+
+  /// Whether a webview-initiated navigation may proceed. Allows normal web
+  /// schemes but cancels navigations to ad domains (popup floods and redirect
+  /// chains that try to hijack the webview onto an ad landing page) and
+  /// dangerous schemes (javascript/data/blob). Dart-initiated loads (hub →
+  /// platform, opening a video) target legit domains and always pass.
+  @visibleForTesting
+  static bool shouldAllowNavigation({
+    required String? scheme,
+    required String? host,
+    required bool Function(String) isAdDomain,
+  }) {
+    if (scheme == 'http' ||
+        scheme == 'https' ||
+        scheme == 'about' ||
+        scheme == 'file') {
+      if (host != null && host.isNotEmpty && isAdDomain(host)) return false;
+      return true;
+    }
+    if (scheme == 'javascript' ||
+        scheme == 'data' ||
+        scheme == 'blob') {
+      return false;
+    }
+    return true;
   }
 
   /// Only m.youtube.com watch pages get routed into the dedicated video tab.
@@ -2380,21 +2448,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             onReceivedHttpError: _onReceivedHttpError,
             shouldOverrideUrlLoading: (controller, navigationAction) async {
               final url = navigationAction.request.url;
-              if (url != null) {
-                final scheme = url.scheme.toLowerCase();
-                if (scheme == 'http' ||
-                    scheme == 'https' ||
-                    scheme == 'about' ||
-                    scheme == 'file') {
-                  return NavigationActionPolicy.ALLOW;
-                }
-                if (scheme == 'javascript' ||
-                    scheme == 'data' ||
-                    scheme == 'blob') {
-                  return NavigationActionPolicy.CANCEL;
-                }
-              }
-              return NavigationActionPolicy.ALLOW;
+              final allowed = shouldAllowNavigation(
+                scheme: url?.scheme.toLowerCase(),
+                host: url?.host,
+                isAdDomain: isAdDomain,
+              );
+              return allowed
+                  ? NavigationActionPolicy.ALLOW
+                  : NavigationActionPolicy.CANCEL;
             },
             onCreateWindow: _handleCreateWindow,
             ),
@@ -2473,21 +2534,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     shouldOverrideUrlLoading:
                         (controller, navigationAction) async {
                       final url = navigationAction.request.url;
-                      if (url != null) {
-                        final scheme = url.scheme.toLowerCase();
-                        if (scheme == 'http' ||
-                            scheme == 'https' ||
-                            scheme == 'about' ||
-                            scheme == 'file') {
-                          return NavigationActionPolicy.ALLOW;
-                        }
-                        if (scheme == 'javascript' ||
-                            scheme == 'data' ||
-                            scheme == 'blob') {
-                          return NavigationActionPolicy.CANCEL;
-                        }
-                      }
-                      return NavigationActionPolicy.ALLOW;
+                      final allowed = shouldAllowNavigation(
+                        scheme: url?.scheme.toLowerCase(),
+                        host: url?.host,
+                        isAdDomain: isAdDomain,
+                      );
+                      return allowed
+                          ? NavigationActionPolicy.ALLOW
+                          : NavigationActionPolicy.CANCEL;
                     },
                     onCreateWindow: _handleCreateWindow,
                   ),
