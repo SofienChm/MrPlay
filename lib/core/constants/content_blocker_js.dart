@@ -503,4 +503,73 @@ class ContentBlockerJS {
       } catch (e) {}
     })();
   ''';
+
+  /// Always-on script-injected popup blocker (Safari/Brave/Aloha-style).
+  ///
+  /// Overrides `window.open` so only popups that are a direct, recent response
+  /// to the user tapping an actual link (`target="_blank"` style) — or that
+  /// target a trusted host (Google/YouTube auth) — are allowed through to the
+  /// native new-window gate. Arbitrary popups fired by a page's own click/load
+  /// handlers (the "click anywhere → new ad window" flood, `about:blank`
+  /// windows that get redirected afterwards, timer/onload popups) are dropped
+  /// here, before the native gate even sees them. Kept independent of the
+  /// "Block ads & trackers" toggle because it is pop-up blocking, not ad
+  /// content removal — the same behavior a plain browser ships with.
+  static const String popupBlockerScript = '''
+    (function() {
+      try {
+        if (window.__mrPopupGuard) return;
+        window.__mrPopupGuard = true;
+        var _origOpen = window.open;
+        if (typeof _origOpen !== 'function') return;
+
+        var TRUSTED_HOSTS = /(^|\\.)(youtube\\.com|youtu\\.be|google\\.com|googleapis\\.com|accounts\\.google\\.com)\$/i;
+        var TAP_WINDOW = 700;
+        var FLOOD_GAP = 1200;
+        var lastTapAt = 0;
+        var lastAnchorUrl = '';
+        var lastAllowedAt = 0;
+
+        function trackTap(e) {
+          try {
+            lastTapAt = Date.now();
+            var t = e.target;
+            var a = (t && t.closest) ? t.closest('a[href]') : null;
+            lastAnchorUrl = a ? a.href : '';
+          } catch (err) {}
+        }
+        document.addEventListener('touchend', trackTap, true);
+        document.addEventListener('click', trackTap, true);
+        document.addEventListener('keydown', function() {
+          lastTapAt = Date.now();
+          lastAnchorUrl = '';
+        }, true);
+
+        window.open = function(url, name, features) {
+          try {
+            var now = Date.now();
+            // No recent real user gesture -> script-injected popup (timer,
+            // onload, background). Block.
+            if (now - lastTapAt > TAP_WINDOW) return null;
+            var urlStr = (url && typeof url.href === 'string') ? url.href : String(url || '');
+            var resolved = urlStr;
+            var host = '';
+            try { resolved = new URL(urlStr, location.href).href; } catch (e) {}
+            try { host = new URL(resolved).hostname; } catch (e) {}
+            // Only allow a popup that matches the link the user actually tapped
+            // (or a trusted auth host). An arbitrary popup fired by the page's
+            // own click handler is the popup-flood pattern -> block.
+            var anchorMatch = lastAnchorUrl !== '' && resolved.indexOf(lastAnchorUrl) === 0;
+            if (!anchorMatch && !TRUSTED_HOSTS.test(host)) return null;
+            // Flood guard: at most one popup per short window.
+            if (now - lastAllowedAt < FLOOD_GAP) return null;
+            lastAllowedAt = now;
+            return _origOpen.apply(this, arguments);
+          } catch (e) {
+            return null;
+          }
+        };
+      } catch (e) {}
+    })();
+  ''';
 }

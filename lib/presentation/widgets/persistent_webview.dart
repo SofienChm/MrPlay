@@ -50,6 +50,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   static const Duration _pipStuckGrace = Duration(milliseconds: 800);
   static const Duration _inlineForceThrottle = Duration(seconds: 3);
   static const String _adBlockScriptGroup = 'mrplay-adblock';
+  DateTime _lastPopupAllowedAt = DateTime.fromMillisecondsSinceEpoch(0);
+  static const Duration _popupFloodGap = Duration(milliseconds: 1200);
   Timer? _pausedKeepAliveTimer;
   static const Duration _pausedKeepAliveInterval = Duration(seconds: 4);
   bool _wasPlayingAtSeek = false;
@@ -603,8 +605,26 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!shouldLoadPopupUrl(url: url, isAdDomain: isAdDomain)) {
       return true;
     }
+    // Flood guard: even a legit-looking popup is dropped if popups have been
+    // opening rapidly (the JS popupBlockerScript filters most of these; this is
+    // the native backstop, e.g. target="_blank" floods that skip window.open).
+    if (!shouldAllowPopup(
+      sinceLastAllowed: DateTime.now().difference(_lastPopupAllowedAt),
+      floodGap: _popupFloodGap,
+    )) {
+      return true;
+    }
+    _lastPopupAllowedAt = DateTime.now();
     controller.loadUrl(urlRequest: URLRequest(url: url!));
     return true;
+  }
+
+  @visibleForTesting
+  static bool shouldAllowPopup({
+    required Duration sinceLastAllowed,
+    required Duration floodGap,
+  }) {
+    return sinceLastAllowed >= floodGap;
   }
 
   @visibleForTesting
@@ -2456,6 +2476,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             initialUserScripts: UnmodifiableListView([
               if (_adBlockEnabled) ..._adBlockScripts(),
               UserScript(
+                source: ContentBlockerJS.popupBlockerScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
                 source: YouTubeJS.visibilityKeepAliveScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
@@ -2532,6 +2556,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     initialUrlRequest: URLRequest(url: WebUri(_videoTabUrl!)),
                     initialUserScripts: UnmodifiableListView([
                       if (_adBlockEnabled) ..._adBlockScripts(),
+                      UserScript(
+                        source: ContentBlockerJS.popupBlockerScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,

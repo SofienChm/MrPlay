@@ -195,6 +195,45 @@ void main() {
     );
   });
 
+  test('script popup blocker only allows user-intended popups', () {
+    final script = ContentBlockerJS.popupBlockerScript;
+    // Arbitrary script popups (no recent real tap) are blocked.
+    expect(script, contains('if (now - lastTapAt > TAP_WINDOW) return null;'));
+    // A popup must match the link the user actually tapped...
+    expect(
+      script,
+      contains('var anchorMatch = lastAnchorUrl !== \'\' && '
+          'resolved.indexOf(lastAnchorUrl) === 0;'),
+    );
+    // ...or a trusted auth host; anything else is blocked.
+    expect(
+      script,
+      contains('if (!anchorMatch && !TRUSTED_HOSTS.test(host)) return null;'),
+    );
+    // Flood guard limits one popup per short window.
+    expect(script, contains('if (now - lastAllowedAt < FLOOD_GAP) return null;'));
+  });
+
+  test('popup flood guard allows one popup per window', () {
+    const gap = Duration(milliseconds: 1200);
+    // First popup (nothing recently): allowed.
+    expect(
+      PersistentWebViewState.shouldAllowPopup(
+        sinceLastAllowed: gap,
+        floodGap: gap,
+      ),
+      isTrue,
+    );
+    // Rapid follow-up popup (the flood): blocked.
+    expect(
+      PersistentWebViewState.shouldAllowPopup(
+        sinceLastAllowed: Duration(milliseconds: 200),
+        floodGap: gap,
+      ),
+      isFalse,
+    );
+  });
+
   test('remote seek targets are clamped to the video duration', () {
     const duration = Duration(minutes: 10);
     expect(
