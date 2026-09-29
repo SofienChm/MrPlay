@@ -2478,6 +2478,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               UserScript(
                 source: ContentBlockerJS.popupBlockerScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                forMainFrameOnly: false,
               ),
               UserScript(
                 source: YouTubeJS.visibilityKeepAliveScript,
@@ -2508,6 +2509,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               allowsPictureInPictureMediaPlayback: true,
               allowsAirPlayForMediaPlayback: true,
               isFraudulentWebsiteWarningEnabled: false,
+              supportMultipleWindows: true,
               userAgent:
                   'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
             ),
@@ -2559,6 +2561,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       UserScript(
                         source: ContentBlockerJS.popupBlockerScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                        forMainFrameOnly: false,
                       ),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
@@ -2597,6 +2600,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       allowsPictureInPictureMediaPlayback: true,
                       allowsAirPlayForMediaPlayback: true,
                       isFraudulentWebsiteWarningEnabled: false,
+                      supportMultipleWindows: true,
                       userAgent:
                           'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
                     ),

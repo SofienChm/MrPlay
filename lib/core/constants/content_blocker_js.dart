@@ -538,6 +538,9 @@ class ContentBlockerJS {
             lastAnchorUrl = a ? a.href : '';
           } catch (err) {}
         }
+        document.addEventListener('pointerdown', trackTap, true);
+        document.addEventListener('mousedown', trackTap, true);
+        document.addEventListener('touchstart', trackTap, true);
         document.addEventListener('touchend', trackTap, true);
         document.addEventListener('click', trackTap, true);
         document.addEventListener('keydown', function() {
