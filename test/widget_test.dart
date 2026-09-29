@@ -195,6 +195,49 @@ void main() {
     );
   });
 
+  test('ad-domain navigations pass when popup blocking is off', () {
+    // With the toggle off (default) the app behaves like a plain browser:
+    // ad-domain redirects are no longer cancelled...
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'https',
+        host: 'click.doubleclick.net',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+        checkAdDomains: false,
+      ),
+      isTrue,
+    );
+    // ...but dangerous schemes are still always cancelled.
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'javascript',
+        host: '',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+        checkAdDomains: false,
+      ),
+      isFalse,
+    );
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'data',
+        host: '',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+        checkAdDomains: false,
+      ),
+      isFalse,
+    );
+    // Legit content still passes either way.
+    expect(
+      PersistentWebViewState.shouldAllowNavigation(
+        scheme: 'https',
+        host: 'm.youtube.com',
+        isAdDomain: PersistentWebViewState.isAdDomain,
+        checkAdDomains: false,
+      ),
+      isTrue,
+    );
+  });
+
   test('script popup blocker only allows user-intended popups', () {
     final script = ContentBlockerJS.popupBlockerScript;
     // Arbitrary script popups (no recent real tap) are blocked.

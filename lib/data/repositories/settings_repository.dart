@@ -5,6 +5,7 @@ class SettingsRepository {
   static const String _defaultPlatformKey = 'default_platform';
   static const String _lastPlatformUrlKey = 'last_platform_url';
   static const String _adBlockKey = 'ad_block_enabled';
+  static const String _blockPopupsKey = 'block_popups_enabled';
   static const String _backgroundAudioKey = 'background_audio_enabled';
   static const String _historyKey = 'history_enabled';
   static const String _fullscreenOnRotationKey = 'fullscreen_on_rotation';
@@ -52,6 +53,16 @@ class SettingsRepository {
   static Future<void> setAdBlockEnabled(bool enabled) async {
     final prefs = await _prefs;
     await prefs.setBool(_adBlockKey, enabled);
+  }
+
+  static Future<bool> getBlockPopupsEnabled() async {
+    final prefs = await _prefs;
+    return prefs.getBool(_blockPopupsKey) ?? true;
+  }
+
+  static Future<void> setBlockPopupsEnabled(bool enabled) async {
+    final prefs = await _prefs;
+    await prefs.setBool(_blockPopupsKey, enabled);
   }
 
   static Future<bool> getBackgroundAudioEnabled() async {

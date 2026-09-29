@@ -50,6 +50,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   static const Duration _pipStuckGrace = Duration(milliseconds: 800);
   static const Duration _inlineForceThrottle = Duration(seconds: 3);
   static const String _adBlockScriptGroup = 'mrplay-adblock';
+  static const String _blockPopupsScriptGroup = 'mrplay-popupblock';
   DateTime _lastPopupAllowedAt = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _popupFloodGap = Duration(milliseconds: 1200);
   Timer? _pausedKeepAliveTimer;
@@ -64,6 +65,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   static final ValueNotifier<bool> hubVisible = ValueNotifier(true);
   bool _isLoading = false;
   bool _adBlockEnabled = false;
+  /// Whether script-injected popups and ad-domain navigations are blocked.
+  /// On by default; the user can turn it off from Settings at any time.
+  bool _popupBlockEnabled = true;
   bool _backgroundAudioEnabled = false;
   String? _pendingUrl;
   String? _currentUrl;
@@ -195,6 +199,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     MediaControlsService.instance.setRemoteCommandHandler(_onRemoteCommand);
     _subscribeToAudioInterruptions();
     _loadAdBlockSetting();
+    _loadBlockPopupsSetting();
     _loadBackgroundAudioSetting();
   }
 
@@ -205,6 +210,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     final enabled = await SettingsRepository.getAdBlockEnabled();
     if (mounted && enabled != _adBlockEnabled) {
       setState(() => _adBlockEnabled = enabled);
+    }
+  }
+
+  /// Reads the "Block pop-ups" preference from Settings. On by default; the
+  /// user can turn it off from Settings at any time.
+  Future<void> _loadBlockPopupsSetting() async {
+    final enabled = await SettingsRepository.getBlockPopupsEnabled();
+    if (mounted && enabled != _popupBlockEnabled) {
+      setState(() => _popupBlockEnabled = enabled);
     }
   }
 
@@ -253,11 +267,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// engage on the next background without recreating the webview.
   Future<void> applySettingsChanges() async {
     final adBlock = await SettingsRepository.getAdBlockEnabled();
+    final blockPopups = await SettingsRepository.getBlockPopupsEnabled();
     final backgroundAudio = await SettingsRepository.getBackgroundAudioEnabled();
     if (adBlock != _adBlockEnabled) {
       _adBlockEnabled = adBlock;
       if (mounted) setState(() {});
       await _applyAdBlockRuntime();
+    }
+    if (blockPopups != _popupBlockEnabled) {
+      _popupBlockEnabled = blockPopups;
+      if (mounted) setState(() {});
+      await _applyBlockPopupsRuntime();
     }
     if (backgroundAudio != _backgroundAudioEnabled) {
       _backgroundAudioEnabled = backgroundAudio;
@@ -300,6 +320,41 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         }
       } catch (e) {
         debugPrint('[MrPlay] apply ad-block runtime failed: $e');
+      }
+    }
+  }
+
+  /// Applies (or removes) the popup-blocker user script on the already-created
+  /// webviews. Like the ad-block scripts, a runtime-added script only runs on
+  /// the next document start, so when enabling we also evaluate it on the
+  /// current page (it is idempotent via its `window.__mrPopupGuard` latch).
+  Future<void> _applyBlockPopupsRuntime() async {
+    for (final controller in [_webViewController, _videoWebViewController]) {
+      if (controller == null) continue;
+      try {
+        if (_popupBlockEnabled) {
+          await controller.addUserScripts(
+            userScripts: [
+              UserScript(
+                source: ContentBlockerJS.popupBlockerScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                forMainFrameOnly: false,
+                groupName: _blockPopupsScriptGroup,
+              ),
+            ],
+          );
+          try {
+            await controller.evaluateJavascript(
+              source: ContentBlockerJS.popupBlockerScript,
+            );
+          } catch (_) {}
+        } else {
+          await controller.removeUserScriptsByGroupName(
+            groupName: _blockPopupsScriptGroup,
+          );
+        }
+      } catch (e) {
+        debugPrint('[MrPlay] apply popup-block runtime failed: $e');
       }
     }
   }
@@ -602,20 +657,26 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     CreateWindowAction createWindowAction,
   ) async {
     final url = createWindowAction.request.url;
-    if (!shouldLoadPopupUrl(url: url, isAdDomain: isAdDomain)) {
-      return true;
+    if (url == null) return true;
+    // With popup blocking off the app behaves like a plain browser: any
+    // new-window target (OAuth "Continue with ..." and other legit popups) is
+    // opened inside the main WebView, exactly like the App-Store build did.
+    if (_popupBlockEnabled) {
+      if (!shouldLoadPopupUrl(url: url, isAdDomain: isAdDomain)) {
+        return true;
+      }
+      // Flood guard: even a legit-looking popup is dropped if popups have been
+      // opening rapidly (the JS popupBlockerScript filters most of these; this is
+      // the native backstop, e.g. target="_blank" floods that skip window.open).
+      if (!shouldAllowPopup(
+        sinceLastAllowed: DateTime.now().difference(_lastPopupAllowedAt),
+        floodGap: _popupFloodGap,
+      )) {
+        return true;
+      }
+      _lastPopupAllowedAt = DateTime.now();
     }
-    // Flood guard: even a legit-looking popup is dropped if popups have been
-    // opening rapidly (the JS popupBlockerScript filters most of these; this is
-    // the native backstop, e.g. target="_blank" floods that skip window.open).
-    if (!shouldAllowPopup(
-      sinceLastAllowed: DateTime.now().difference(_lastPopupAllowedAt),
-      floodGap: _popupFloodGap,
-    )) {
-      return true;
-    }
-    _lastPopupAllowedAt = DateTime.now();
-    controller.loadUrl(urlRequest: URLRequest(url: url!));
+    controller.loadUrl(urlRequest: URLRequest(url: url));
     return true;
   }
 
@@ -644,19 +705,28 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Whether a webview-initiated navigation may proceed. Allows normal web
   /// schemes but cancels navigations to ad domains (popup floods and redirect
   /// chains that try to hijack the webview onto an ad landing page) and
-  /// dangerous schemes (javascript/data/blob). Dart-initiated loads (hub →
-  /// platform, opening a video) target legit domains and always pass.
+  /// dangerous schemes (javascript/data/blob). The ad-domain check is
+  /// toggle-gated (`checkAdDomains`): with popup blocking off the app behaves
+  /// like a plain browser, so only dangerous schemes are ever cancelled.
+  /// Dart-initiated loads (hub → platform, opening a video) target legit
+  /// domains and always pass.
   @visibleForTesting
   static bool shouldAllowNavigation({
     required String? scheme,
     required String? host,
     required bool Function(String) isAdDomain,
+    bool checkAdDomains = true,
   }) {
     if (scheme == 'http' ||
         scheme == 'https' ||
         scheme == 'about' ||
         scheme == 'file') {
-      if (host != null && host.isNotEmpty && isAdDomain(host)) return false;
+      if (checkAdDomains &&
+          host != null &&
+          host.isNotEmpty &&
+          isAdDomain(host)) {
+        return false;
+      }
       return true;
     }
     if (scheme == 'javascript' ||
@@ -2475,11 +2545,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             child: InAppWebView(
             initialUserScripts: UnmodifiableListView([
               if (_adBlockEnabled) ..._adBlockScripts(),
-              UserScript(
-                source: ContentBlockerJS.popupBlockerScript,
-                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                forMainFrameOnly: false,
-              ),
+              if (_popupBlockEnabled)
+                UserScript(
+                  source: ContentBlockerJS.popupBlockerScript,
+                  injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                  forMainFrameOnly: false,
+                ),
               UserScript(
                 source: YouTubeJS.visibilityKeepAliveScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -2525,6 +2596,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                 scheme: url?.scheme.toLowerCase(),
                 host: url?.host,
                 isAdDomain: isAdDomain,
+                checkAdDomains: _popupBlockEnabled,
               );
               return allowed
                   ? NavigationActionPolicy.ALLOW
@@ -2558,11 +2630,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                     initialUrlRequest: URLRequest(url: WebUri(_videoTabUrl!)),
                     initialUserScripts: UnmodifiableListView([
                       if (_adBlockEnabled) ..._adBlockScripts(),
-                      UserScript(
-                        source: ContentBlockerJS.popupBlockerScript,
-                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
-                        forMainFrameOnly: false,
-                      ),
+                      if (_popupBlockEnabled)
+                        UserScript(
+                          source: ContentBlockerJS.popupBlockerScript,
+                          injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                          forMainFrameOnly: false,
+                        ),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
@@ -2617,6 +2690,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                         scheme: url?.scheme.toLowerCase(),
                         host: url?.host,
                         isAdDomain: isAdDomain,
+                        checkAdDomains: _popupBlockEnabled,
                       );
                       return allowed
                           ? NavigationActionPolicy.ALLOW

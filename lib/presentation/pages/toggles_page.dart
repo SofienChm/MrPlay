@@ -14,6 +14,7 @@ class TogglesPage extends StatefulWidget {
 
 class _TogglesPageState extends State<TogglesPage> {
   bool _adBlockEnabled = false;
+  bool _blockPopupsEnabled = true;
   bool _backgroundAudioEnabled = false;
   bool _showShorts = true;
   bool _showPosts = true;
@@ -35,6 +36,7 @@ class _TogglesPageState extends State<TogglesPage> {
 
   Future<void> _loadSettings() async {
     final adBlock = await SettingsRepository.getAdBlockEnabled();
+    final blockPopups = await SettingsRepository.getBlockPopupsEnabled();
     final backgroundAudio =
         await SettingsRepository.getBackgroundAudioEnabled();
     final history = await SettingsRepository.getHistoryEnabled();
@@ -43,6 +45,7 @@ class _TogglesPageState extends State<TogglesPage> {
     if (_disposed || !mounted) return;
     setState(() {
       _adBlockEnabled = adBlock;
+      _blockPopupsEnabled = blockPopups;
       _backgroundAudioEnabled = backgroundAudio;
       _historyEnabled = history;
       _fullscreenOnRotation = fullscreenOnRotation;
@@ -68,6 +71,14 @@ class _TogglesPageState extends State<TogglesPage> {
     await MrPlayApp.webViewKey.currentState?.applySettingsChanges();
     if (!mounted) return;
     setState(() => _adBlockEnabled = enabled);
+  }
+
+  Future<void> _changeBlockPopups(bool enabled) async {
+    await SettingsRepository.setBlockPopupsEnabled(enabled);
+    // Apply immediately to the live webviews (no app restart needed).
+    await MrPlayApp.webViewKey.currentState?.applySettingsChanges();
+    if (!mounted) return;
+    setState(() => _blockPopupsEnabled = enabled);
   }
 
   Future<void> _changeBackgroundAudio(bool enabled) async {
@@ -133,6 +144,16 @@ class _TogglesPageState extends State<TogglesPage> {
             trailing: Switch(
               value: _adBlockEnabled,
               onChanged: (value) => _changeAdBlock(value),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.pages_outlined),
+            title: const Text('Block pop-ups'),
+            subtitle: const Text(
+                'On by default. Stops script pop-ups and ad redirects.'),
+            trailing: Switch(
+              value: _blockPopupsEnabled,
+              onChanged: (value) => _changeBlockPopups(value),
             ),
           ),
           ListTile(
