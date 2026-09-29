@@ -69,6 +69,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   Timer? _loadingTimer;
   Timer? _nowPlayingThrottle;
   bool _endedHandled = false;
+  /// True while the app is backgrounded and the queue just advanced to the
+  /// next video, but that video hasn't started playing yet. Used on resume to
+  /// auto-start a video the background handoff left stuck on its loader.
+  bool _backgroundHandoffPending = false;
   bool _appIsBackgrounded = false;
   // Whether a system-forced pause (iOS suspends the webview's media when the
   // app backgrounds / the screen locks) may be auto-resumed to keep audio
@@ -399,8 +403,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else if (state == AppLifecycleState.paused) {
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
+      final shouldKickStuckVideo = _backgroundHandoffPending &&
+          !_systemPaused &&
+          !_userPausedInBackground &&
+          _backgroundAudioEnabled;
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
+      _backgroundHandoffPending = false;
       _stopPausedKeepAlive();
       // Stop the keep-alive when the app is back in the foreground and the
       // video is not playing (the silent loop is no longer needed). For a
@@ -416,6 +425,38 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // first; the restore is event-driven (webkitpresentationmodechanged)
       // with a page reload as a last resort.
       Future.delayed(const Duration(milliseconds: 300), _restoreVideoInline);
+      // If the background queue handoff left the current video stuck on its
+      // loader (not playing, not ended), start it — the user would otherwise
+      // have to pause and play again manually. Bounded retries stop the moment
+      // the video plays or the user/system pauses.
+      if (shouldKickStuckVideo) {
+        Future.delayed(const Duration(milliseconds: 1200), () {
+          if (mounted) _ensureResumedVideoPlays();
+        });
+      }
+    }
+  }
+
+  /// Starts a video the background handoff left stuck on its loading spinner
+  /// (not playing, not ended, and not paused by the user or the system).
+  /// Retries briefly in case the page is still loading after a PiP restore.
+  void _ensureResumedVideoPlays({int attempt = 0}) {
+    if (!mounted) return;
+    if (_userPausedInBackground || _systemPaused) return;
+    final state = ref.read(playerProvider);
+    if (state.currentVideo == null || state.isPlaying) return;
+    _activeController?.evaluateJavascript(source: '''
+      (function() {
+        var v = $_activeVideoJs;
+        if (!v || v.ended) return;
+        if (v.paused) { v.play().catch(function(){}); }
+      })();
+    ''');
+    _unmuteVideo();
+    if (attempt < 2) {
+      Future.delayed(const Duration(milliseconds: 800), () {
+        if (mounted) _ensureResumedVideoPlays(attempt: attempt + 1);
+      });
     }
   }
 
@@ -801,6 +842,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (playing && !ended) {
         _lastKnownPlayingAt = DateTime.now();
         _stopPausedKeepAlive();
+        _backgroundHandoffPending = false;
         // A fresh play cycle re-arms the ended-latch, so a replayed video (even
         // the same URL) can advance the queue again when it ends. _handleEnded
         // sets the latch; navigation alone no longer clears it (that caused a
@@ -1104,6 +1146,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       loadUrl(next.platformUrl);
     }
     if (_appIsBackgrounded && _backgroundAudioEnabled) {
+      // The next video must start for the background audio to survive; flag it
+      // so a resume can auto-start it if the handoff left it stuck on a loader.
+      _backgroundHandoffPending = true;
       _reengageBackgroundKeepAlive();
     }
   }
@@ -1288,6 +1333,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _backgroundResumeAllowed = false;
     _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     _userPausedInBackground = true;
+    _backgroundHandoffPending = false;
     _wasPlayingAtSeek = false;
     if (!_appIsBackgrounded) {
       BackgroundAudioKeepAlive.instance.stop();
@@ -1339,6 +1385,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _lastKnownPlayingAt = DateTime.now();
     _backgroundResumeAllowed = true;
     _userPausedInBackground = false;
+    _backgroundHandoffPending = false;
     _stopPausedKeepAlive();
     ref.read(playerProvider.notifier).resume();
     if (_appIsBackgrounded && _backgroundAudioEnabled && !_isMusic) {
