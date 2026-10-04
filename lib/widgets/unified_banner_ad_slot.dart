@@ -34,11 +34,15 @@ class UnifiedBannerAdSlot extends StatefulWidget {
 
 class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     with WidgetsBindingObserver {
+  static const Duration _initialRetryDelay = Duration(seconds: 30);
+  static const int _maxRetries = 3;
+
   BannerAd? _bannerAd;
   Widget? _adWidget;
   bool _adLoaded = false;
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
+  int _retryCount = 0;
   Timer? _retryTimer;
 
   /// The effective unit ID: explicit override wins, otherwise the manual
@@ -50,6 +54,9 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
         : AdConfig.bannerAdUnitId;
   }
 
+  /// True while the slot is on screen and eligible to load ads.
+  bool get _isActive => widget.isVisible && !_isDismissed && !_isAppBackgrounded;
+
   @override
   void initState() {
     super.initState();
@@ -58,14 +65,35 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   }
 
   @override
+  void didUpdateWidget(UnifiedBannerAdSlot oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final wasActive =
+        oldWidget.isVisible && !_isDismissed && !_isAppBackgrounded;
+    if (!wasActive && _isActive) {
+      if (!_adLoaded && _bannerAd == null) _loadBannerAd();
+    } else if (wasActive && !_isActive) {
+      _retryTimer?.cancel();
+    }
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final bg = state == AppLifecycleState.paused;
     if (bg != _isAppBackgrounded) {
       setState(() => _isAppBackgrounded = bg);
+      if (bg) {
+        _retryTimer?.cancel();
+      } else if (!_adLoaded && _bannerAd == null) {
+        _loadBannerAd();
+      }
     }
   }
 
-  void _loadBannerAd() {
+  void _loadBannerAd({bool isRetry = false}) {
+    if (!_isActive) return;
+    if (!isRetry) _retryCount = 0;
+
+    _bannerAd?.dispose();
     final unitId = _resolvedAdUnitId;
     debugPrint('MrPlay banner loading from $unitId '
         '(slot=${widget.slot.name})');
@@ -76,6 +104,7 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
       listener: BannerAdListener(
         onAdLoaded: (ad) {
           if (!mounted) return;
+          _retryCount = 0;
           _adWidget = AdWidget(key: ValueKey(ad.hashCode), ad: ad as BannerAd);
           setState(() => _adLoaded = true);
         },
@@ -86,9 +115,20 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
               'code=${error.code} domain=${error.domain} message=${error.message}');
           if (!mounted) return;
           setState(() => _bannerAd = null);
+          if (!_isActive) return;
+          if (_retryCount >= _maxRetries) {
+            debugPrint('MrPlay banner giving up on $unitId after '
+                '$_maxRetries retries');
+            return;
+          }
           _retryTimer?.cancel();
-          _retryTimer = Timer(const Duration(seconds: 30), () {
-            if (mounted && !_adLoaded) _loadBannerAd();
+          final delay = Duration(
+              seconds: _initialRetryDelay.inSeconds * (1 << _retryCount));
+          _retryCount++;
+          _retryTimer = Timer(delay, () {
+            if (mounted && _isActive && !_adLoaded) {
+              _loadBannerAd(isRetry: true);
+            }
           });
         },
       ),
@@ -96,6 +136,9 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   }
 
   void _handleDismiss() {
+    _retryTimer?.cancel();
+    _bannerAd?.dispose();
+    _bannerAd = null;
     setState(() => _isDismissed = true);
   }
 
