@@ -13,9 +13,9 @@ class TogglesPage extends StatefulWidget {
 }
 
 class _TogglesPageState extends State<TogglesPage> {
-  bool _adBlockEnabled = false;
+  bool _adBlockEnabled = true;
   bool _blockPopupsEnabled = true;
-  bool _backgroundAudioEnabled = false;
+  bool _backgroundAudioEnabled = true;
   bool _showShorts = true;
   bool _showPosts = true;
   bool _fullscreenOnRotation = true;

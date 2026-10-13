@@ -47,7 +47,7 @@ class SettingsRepository {
 
   static Future<bool> getAdBlockEnabled() async {
     final prefs = await _prefs;
-    return prefs.getBool(_adBlockKey) ?? false;
+    return prefs.getBool(_adBlockKey) ?? true;
   }
 
   static Future<void> setAdBlockEnabled(bool enabled) async {
@@ -67,7 +67,7 @@ class SettingsRepository {
 
   static Future<bool> getBackgroundAudioEnabled() async {
     final prefs = await _prefs;
-    return prefs.getBool(_backgroundAudioKey) ?? false;
+    return prefs.getBool(_backgroundAudioKey) ?? true;
   }
 
   static Future<void> setBackgroundAudioEnabled(bool enabled) async {
