@@ -64,6 +64,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// while the hub shows its own ad slot.
   static final ValueNotifier<bool> hubVisible = ValueNotifier(true);
   bool _isLoading = false;
+  /// Full-screen black loader shown from a hub platform tap until the page
+  /// finishes loading (or fails), so a slow connection never looks like a crash.
+  bool _platformLoading = false;
   bool _adBlockEnabled = false;
   /// Whether script-injected popups and ad-domain navigations are blocked.
   /// On by default; the user can turn it off from Settings at any time.
@@ -762,7 +765,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   Future<void> _onLoadStop(
       InAppWebViewController controller, WebUri? url) async {
     _loadingTimer?.cancel();
-    if (mounted) setState(() => _isLoading = false);
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _platformLoading = false;
+      });
+    }
     final urlStr = url.toString();
     if (_routesToVideoTab(urlStr)) {
       if (_videoTabUrl != null && _videoTabUrl == urlStr) {
@@ -2084,6 +2092,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     setState(() {
       isReady = true;
       _isLoading = true;
+      _platformLoading = true;
+      _loadError = null;
     });
     PersistentWebViewState.hubVisible.value = false;
     _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -2113,8 +2123,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   ) {
     if (request.isForMainFrame != false) {
       if (mounted) {
-        setState(
-            () => _loadError = 'Could not load the page: ${error.description}');
+        setState(() {
+          _platformLoading = false;
+          _loadError = 'Could not load the page: ${error.description}';
+        });
       }
     }
   }
@@ -2127,6 +2139,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (request.isForMainFrame != false) {
       if (mounted) {
         setState(() {
+          _platformLoading = false;
           _loadError = 'Server error ${response.statusCode ?? 'unknown'}';
         });
       }
@@ -2712,7 +2725,31 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               ),
             ),
           ),
-        if (_isLoading)
+        if (_platformLoading && _loadError == null)
+          Positioned.fill(
+            child: Container(
+              color: Colors.black,
+              child: Stack(
+                children: [
+                  const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.red,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                  Positioned(
+                    top: MediaQuery.of(context).padding.top + 8,
+                    left: 8,
+                    child: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.white70),
+                      onPressed: _goToHub,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        if (_isLoading && !_platformLoading)
           Positioned(
             top: 60,
             right: 16,
@@ -2867,6 +2904,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       setState(() {
         isReady = false;
         _isLoading = false;
+        _platformLoading = false;
         _loadError = null;
       });
     }
