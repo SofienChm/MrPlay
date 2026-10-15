@@ -10,4 +10,8 @@ class AdConfig {
   /// `AdSize.banner`.
   static const String hubBannerAdUnitId =
       'ca-app-pub-2351054385499645/4819742051';
+
+  /// Native Advanced slot on the hub page (small template).
+  static const String hubNativeAdUnitId =
+      'ca-app-pub-2351054385499645/9057816022';
 }

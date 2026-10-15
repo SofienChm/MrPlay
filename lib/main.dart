@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -37,23 +36,12 @@ Future<void> main() async {
   runApp(const ProviderScope(child: MrPlayApp()));
 }
 
-/// Debug-only: paste your device's hashed ID (printed in the iOS log as
-/// "To enable debug mode for this device, set: UMPDebugSettings.testDeviceIdentifiers = [...]").
-const List<String> _umpTestDeviceIds = <String>[];
-
 /// Runs the Google UMP consent flow (GDPR/EEA/UK). Shows the consent form only
 /// when required; never blocks app start on failure.
 Future<void> _gatherConsent() async {
   final done = Completer<void>();
   ConsentInformation.instance.requestConsentInfoUpdate(
-    ConsentRequestParameters(
-      consentDebugSettings: kDebugMode
-          ? ConsentDebugSettings(
-              debugGeography: DebugGeography.debugGeographyEea,
-              testIdentifiers: _umpTestDeviceIds,
-            )
-          : null,
-    ),
+    ConsentRequestParameters(),
     () async {
       try {
         await ConsentForm.loadAndShowConsentFormIfRequired((_) {

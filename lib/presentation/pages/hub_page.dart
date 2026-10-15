@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/hub_backgrounds.dart';
@@ -16,7 +15,7 @@ import 'stats_page.dart';
 import 'history_page.dart';
 import 'playlists_page.dart';
 import '../../app.dart';
-import '../../widgets/unified_banner_ad_slot.dart';
+import '../../widgets/native_ad_slot.dart';
 
 class HubPage extends StatefulWidget {
   const HubPage({super.key});
@@ -302,11 +301,7 @@ class _HubPageState extends State<HubPage> {
               ),
               const SizedBox(height: 24),
               Center(
-                child: UnifiedBannerAdSlot(
-                  slot: BannerSlot.hub,
-                  adSize: AdSize.banner,
-                  showDismissButton: false,
-                ),
+                child: NativeAdSlot(),
               ),
               const SizedBox(height: 16),
               Expanded(

@@ -35,7 +35,7 @@ class UnifiedBannerAdSlot extends StatefulWidget {
 class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     with WidgetsBindingObserver {
   static const Duration _initialRetryDelay = Duration(seconds: 30);
-  static const int _maxRetries = 3;
+  static const Duration _maxRetryDelay = Duration(minutes: 5);
 
   BannerAd? _bannerAd;
   Widget? _adWidget;
@@ -116,16 +116,11 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
           if (!mounted) return;
           setState(() => _bannerAd = null);
           if (!_isActive) return;
-          if (_retryCount >= _maxRetries) {
-            debugPrint('MrPlay banner giving up on $unitId after '
-                '$_maxRetries retries');
-            return;
-          }
           _retryTimer?.cancel();
-          final delay = Duration(
-              seconds: _initialRetryDelay.inSeconds * (1 << _retryCount));
+          final delay = _initialRetryDelay * (1 << _retryCount.clamp(0, 4));
           _retryCount++;
-          _retryTimer = Timer(delay, () {
+          _retryTimer = Timer(delay > _maxRetryDelay ? _maxRetryDelay : delay,
+              () {
             if (mounted && _isActive && !_adLoaded) {
               _loadBannerAd(isRetry: true);
             }
