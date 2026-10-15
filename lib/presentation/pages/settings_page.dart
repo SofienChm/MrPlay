@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../app.dart';
@@ -26,6 +27,7 @@ class _SettingsPageState extends State<SettingsPage> {
   int _accent = SettingsRepository.defaultAccentColor;
   int _hubBackground = 0;
   bool _disposed = false;
+  bool _privacyOptionsRequired = false;
 
   static const List<Color> _accentChoices = [
     Color(0xFF2196F3),
@@ -42,6 +44,17 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _loadSettings();
+    _loadPrivacyOptionsStatus();
+  }
+
+  Future<void> _loadPrivacyOptionsStatus() async {
+    try {
+      final status =
+          await ConsentInformation.instance.getPrivacyOptionsRequirementStatus();
+      if (_disposed || !mounted) return;
+      setState(() => _privacyOptionsRequired =
+          status == PrivacyOptionsRequirementStatus.required);
+    } catch (_) {}
   }
 
   @override
@@ -260,6 +273,13 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const _SectionHeader(title: 'Privacy & Security'),
+          if (_privacyOptionsRequired)
+            _SettingsTile(
+              icon: Icons.ads_click,
+              title: 'Ad Privacy Options',
+              subtitle: 'Review your ad consent choices',
+              onTap: () => ConsentForm.showPrivacyOptionsForm((_) {}),
+            ),
           _SettingsTile(
             icon: Icons.toggle_on_outlined,
             title: 'Toggles',

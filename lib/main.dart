@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -14,8 +17,9 @@ import 'data/models/playlist_item.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await MobileAds.instance.initialize();
+  await _gatherConsent();
   await _requestTrackingPermission();
+  await MobileAds.instance.initialize();
 
   final session = await AudioSession.instance;
   await session.configure(const AudioSessionConfiguration(
@@ -31,6 +35,39 @@ Future<void> main() async {
   Hive.registerAdapter(PlaylistAdapter());
   Hive.registerAdapter(PlaylistItemAdapter());
   runApp(const ProviderScope(child: MrPlayApp()));
+}
+
+/// Debug-only: paste your device's hashed ID (printed in the iOS log as
+/// "To enable debug mode for this device, set: UMPDebugSettings.testDeviceIdentifiers = [...]").
+const List<String> _umpTestDeviceIds = <String>[];
+
+/// Runs the Google UMP consent flow (GDPR/EEA/UK). Shows the consent form only
+/// when required; never blocks app start on failure.
+Future<void> _gatherConsent() async {
+  final done = Completer<void>();
+  ConsentInformation.instance.requestConsentInfoUpdate(
+    ConsentRequestParameters(
+      consentDebugSettings: kDebugMode
+          ? ConsentDebugSettings(
+              debugGeography: DebugGeography.debugGeographyEea,
+              testIdentifiers: _umpTestDeviceIds,
+            )
+          : null,
+    ),
+    () async {
+      try {
+        await ConsentForm.loadAndShowConsentFormIfRequired((_) {
+          if (!done.isCompleted) done.complete();
+        });
+      } catch (_) {
+        if (!done.isCompleted) done.complete();
+      }
+    },
+    (_) {
+      if (!done.isCompleted) done.complete();
+    },
+  );
+  await done.future.timeout(const Duration(seconds: 15), onTimeout: () {});
 }
 
 /// Requests App Tracking Transparency authorization for personalized AdMob ads
