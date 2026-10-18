@@ -29,6 +29,7 @@ class _NativeAdSlotState extends State<NativeAdSlot>
   bool _isAppBackgrounded = false;
   int _retryCount = 0;
   Timer? _retryTimer;
+  String? _lastError; // TEMP debug: remove once native ad is confirmed working
 
   @override
   void initState() {
@@ -94,6 +95,7 @@ class _NativeAdSlotState extends State<NativeAdSlot>
           setState(() {
             _nativeAd = null;
             _adLoaded = false;
+            _lastError = 'Native ad error ${error.code}: ${error.message}';
           });
           if (_isAppBackgrounded) return;
           _retryTimer?.cancel();
@@ -121,6 +123,13 @@ class _NativeAdSlotState extends State<NativeAdSlot>
   @override
   Widget build(BuildContext context) {
     if (!_adLoaded || _nativeAd == null || _isAppBackgrounded) {
+      if (_lastError != null && !_isAppBackgrounded) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(_lastError!,
+              style: const TextStyle(color: Colors.redAccent, fontSize: 11)),
+        );
+      }
       return const SizedBox.shrink();
     }
     return Padding(
