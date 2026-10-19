@@ -300,10 +300,6 @@ class _HubPageState extends State<HubPage> {
                 ),
               ),
               const SizedBox(height: 24),
-              Center(
-                child: NativeAdSlot(),
-              ),
-              const SizedBox(height: 16),
               Expanded(
                 child: _showResults && _filteredPlatforms.isEmpty
                     ? Center(
@@ -365,6 +361,11 @@ class _HubPageState extends State<HubPage> {
                         ),
                       ),
               ),
+              const SizedBox(height: 12),
+              const Center(
+                child: NativeAdSlot(),
+              ),
+              const SizedBox(height: 12),
             ],
           ),
           ),
