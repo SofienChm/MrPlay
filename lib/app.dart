@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'services/analytics_service.dart';
 import 'package:home_widget/home_widget.dart';
 import 'core/theme/app_theme.dart';
 import 'data/repositories/settings_repository.dart';
@@ -176,6 +177,7 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
               theme: AppTheme.lightTheme(accent),
               darkTheme: AppTheme.darkTheme(accent),
               themeMode: themeMode,
+              navigatorObservers: [AnalyticsService.observer],
               home: Scaffold(
             body: Stack(
               children: [

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/video.dart';
+import '../services/analytics_service.dart';
 import '../services/recent_activity_service.dart';
 import '../services/spotlight_service.dart';
 import '../services/playback_stats_service.dart';
@@ -61,6 +62,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
       duration: Duration.zero,
     );
     RecentActivityService.instance.recordVideo(video);
+    AnalyticsService.logEvent('video_play', {
+      'platform': video.platform.isEmpty ? 'unknown' : video.platform,
+      'source': 'player',
+    });
     SpotlightService.index(
       title: video.title,
       subtitle: video.platform.isEmpty ? 'MrPlay' : video.platform,
@@ -81,6 +86,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
       duration: Duration.zero,
     );
     RecentActivityService.instance.recordVideo(video);
+    AnalyticsService.logEvent('video_play', {
+      'platform': video.platform.isEmpty ? 'unknown' : video.platform,
+      'source': 'video_tab',
+    });
     SpotlightService.index(
       title: video.title,
       subtitle: video.platform.isEmpty ? 'MrPlay' : video.platform,
