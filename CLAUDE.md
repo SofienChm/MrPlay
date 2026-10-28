@@ -31,3 +31,7 @@ Flutter, iOS-only app (Riverpod, flutter_inappwebview, Hive, AdMob). Branch `v2-
 - Injected JS lives in Dart strings (e.g. content blocker, YouTube cleanup) — edit carefully, escape quotes.
 - Commits: `type: short message` (feat/fix/chore).
 - Never commit secrets; AdMob app ID in Info.plist is a TEST id until release.
+
+## Ads rules
+- NEVER disable, geo-block, or skip ad requests for any country (including Tunisia/Algeria), even if eCPM or match rate is low. Improve fill via mediation/more ad networks (Meta, AppLovin, Unity...) and more formats instead.
+- Only simple non-intrusive ads (banner/native). NO rewarded, app-open, or interstitial ads.

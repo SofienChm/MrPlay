@@ -12,7 +12,7 @@ class NativeAdSlot extends StatefulWidget {
   const NativeAdSlot({
     super.key,
     this.adUnitId,
-    this.height = 100,
+    this.height = 136,
   });
 
   @override
@@ -58,28 +58,7 @@ class _NativeAdSlotState extends State<NativeAdSlot>
     _nativeAd = NativeAd(
       adUnitId: unitId,
       request: const AdRequest(),
-      nativeTemplateStyle: NativeTemplateStyle(
-        templateType: TemplateType.small,
-        mainBackgroundColor: const Color(0xFF2D2D2D),
-        cornerRadius: 12,
-        callToActionTextStyle: NativeTemplateTextStyle(
-          textColor: Colors.white,
-          backgroundColor: const Color(0xFF2196F3),
-          size: 14,
-        ),
-        primaryTextStyle: NativeTemplateTextStyle(
-          textColor: Colors.white,
-          size: 14,
-        ),
-        secondaryTextStyle: NativeTemplateTextStyle(
-          textColor: Colors.white70,
-          size: 12,
-        ),
-        tertiaryTextStyle: NativeTemplateTextStyle(
-          textColor: Colors.white54,
-          size: 12,
-        ),
-      ),
+      factoryId: 'mrplayNative',
       listener: NativeAdListener(
         onAdLoaded: (ad) {
           if (!mounted) return;

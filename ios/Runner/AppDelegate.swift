@@ -5,6 +5,8 @@ import WebKit
 import CoreSpotlight
 import UniformTypeIdentifiers
 import MediaPlayer
+import GoogleMobileAds
+import google_mobile_ads
 
 @UIApplicationMain
 @objc class AppDelegate: FlutterAppDelegate {
@@ -27,6 +29,8 @@ import MediaPlayer
     setupSiriChannel()
 
     GeneratedPluginRegistrant.register(with: self)
+    FLTGoogleMobileAdsPlugin.registerNativeAdFactory(
+      self, factoryId: "mrplayNative", nativeAdFactory: MrPlayNativeAdFactory())
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -296,5 +300,78 @@ import MediaPlayer
       arguments.append(positionMs)
     }
     mediaChannel?.invokeMethod("remoteCommand", arguments: arguments)
+  }
+}
+/// Compact native ad layout for the hub: 120x120 media view on the left,
+/// headline / body / call-to-action on the right.
+class MrPlayNativeAdFactory: NSObject, FLTNativeAdFactory {
+  func createNativeAd(_ nativeAd: GADNativeAd, customOptions: [AnyHashable: Any]? = nil) -> GADNativeAdView? {
+    let adView = GADNativeAdView()
+    adView.backgroundColor = UIColor(red: 0.176, green: 0.176, blue: 0.176, alpha: 1)
+    adView.layer.cornerRadius = 12
+    adView.clipsToBounds = true
+
+    let media = GADMediaView()
+    media.translatesAutoresizingMaskIntoConstraints = false
+    media.contentMode = .scaleAspectFill
+    media.clipsToBounds = true
+    media.layer.cornerRadius = 8
+    media.mediaContent = nativeAd.mediaContent
+
+    let headline = UILabel()
+    headline.text = nativeAd.headline
+    headline.font = .boldSystemFont(ofSize: 14)
+    headline.textColor = .white
+    headline.numberOfLines = 2
+
+    let body = UILabel()
+    body.text = nativeAd.body
+    body.font = .systemFont(ofSize: 12)
+    body.textColor = UIColor(white: 1, alpha: 0.7)
+    body.numberOfLines = 2
+    body.isHidden = nativeAd.body == nil
+
+    let cta = UIButton(type: .system)
+    cta.setTitle(nativeAd.callToAction, for: .normal)
+    cta.setTitleColor(.white, for: .normal)
+    cta.titleLabel?.font = .boldSystemFont(ofSize: 14)
+    cta.backgroundColor = UIColor(red: 0.129, green: 0.588, blue: 0.953, alpha: 1)
+    cta.layer.cornerRadius = 8
+    cta.isUserInteractionEnabled = false
+    cta.isHidden = nativeAd.callToAction == nil
+    cta.heightAnchor.constraint(equalToConstant: 32).isActive = true
+
+    let badge = UILabel()
+    badge.text = "Ad"
+    badge.font = .boldSystemFont(ofSize: 10)
+    badge.textColor = UIColor(white: 1, alpha: 0.54)
+
+    let spacer = UIView()
+    spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
+
+    let stack = UIStackView(arrangedSubviews: [badge, headline, body, spacer, cta])
+    stack.axis = .vertical
+    stack.spacing = 4
+    stack.translatesAutoresizingMaskIntoConstraints = false
+
+    adView.addSubview(media)
+    adView.addSubview(stack)
+    NSLayoutConstraint.activate([
+      media.leadingAnchor.constraint(equalTo: adView.leadingAnchor, constant: 8),
+      media.centerYAnchor.constraint(equalTo: adView.centerYAnchor),
+      media.widthAnchor.constraint(equalToConstant: 120),
+      media.heightAnchor.constraint(equalToConstant: 120),
+      stack.leadingAnchor.constraint(equalTo: media.trailingAnchor, constant: 10),
+      stack.trailingAnchor.constraint(equalTo: adView.trailingAnchor, constant: -10),
+      stack.topAnchor.constraint(equalTo: adView.topAnchor, constant: 8),
+      stack.bottomAnchor.constraint(equalTo: adView.bottomAnchor, constant: -8),
+    ])
+
+    adView.mediaView = media
+    adView.headlineView = headline
+    adView.bodyView = body
+    adView.callToActionView = cta
+    adView.nativeAd = nativeAd
+    return adView
   }
 }
