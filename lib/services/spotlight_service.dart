@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class SpotlightService {
@@ -28,18 +29,18 @@ class SpotlightService {
         'subtitle': subtitle,
         'url': url,
       });
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] spotlight index failed: $e'); }
   }
 
   static Future<void> remove(String url) async {
     try {
       await _channel.invokeMethod('remove', {'url': url});
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] spotlight remove failed: $e'); }
   }
 
   static Future<void> clear() async {
     try {
       await _channel.invokeMethod('clear');
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] spotlight clear failed: $e'); }
   }
 }

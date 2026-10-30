@@ -54,7 +54,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (_disposed || !mounted) return;
       setState(() => _privacyOptionsRequired =
           status == PrivacyOptionsRequirementStatus.required);
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] privacy options check failed: $e'); }
   }
 
   @override

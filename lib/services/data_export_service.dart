@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -125,7 +126,7 @@ class DataExportService {
               await WatchLaterRepository.add(fav);
             }
             imported++;
-          } catch (_) {}
+          } catch (e) { debugPrint('[MrPlay] import item skipped: $e'); }
         }
       }
 
@@ -177,7 +178,7 @@ class DataExportService {
             ),
           );
           imported++;
-        } catch (_) {}
+        } catch (e) { debugPrint('[MrPlay] import item skipped: $e'); }
       }
 
       return imported;

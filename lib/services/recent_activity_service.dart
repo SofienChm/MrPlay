@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 
 import 'package:home_widget/home_widget.dart';
@@ -83,6 +84,6 @@ class RecentActivityService {
       await _configureWidget();
       await HomeWidget.saveWidgetData(_widgetDataKey, jsonEncode(entries));
       await HomeWidget.updateWidget(iOSName: _widgetKind);
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] home widget update failed: $e'); }
   }
 }

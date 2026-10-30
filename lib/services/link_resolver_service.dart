@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:convert';
 import 'dart:io';
 
@@ -122,7 +123,7 @@ class LinkResolverService {
         } finally {
           client.close(force: true);
         }
-      } catch (_) {}
+      } catch (e) { debugPrint('[MrPlay] link resolver cleanup failed: $e'); }
     }
 
     if (videoId.isNotEmpty || platform == 'Rumble') {

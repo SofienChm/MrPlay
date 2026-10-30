@@ -23,9 +23,19 @@ Future<void> main() async {
     debugPrint('Firebase init failed: $e');
   }
 
+  // Order matters (consent -> ATT -> ads init, all before the audio session is
+  // configured below so ad audio can't override it). Each step is bounded so a
+  // bad network can't hold the first screen hostage.
+  await _waitUntilAppActive();
   await _gatherConsent();
   await _requestTrackingPermission();
-  await MobileAds.instance.initialize();
+  try {
+    await MobileAds.instance
+        .initialize()
+        .timeout(const Duration(seconds: 8));
+  } catch (e) {
+    debugPrint('[MrPlay] MobileAds init failed or timed out: $e');
+  }
 
   final session = await AudioSession.instance;
   await session.configure(const AudioSessionConfiguration(
@@ -47,9 +57,11 @@ Future<void> main() async {
 /// when required; never blocks app start on failure.
 Future<void> _gatherConsent() async {
   final done = Completer<void>();
+  final infoReady = Completer<void>();
   ConsentInformation.instance.requestConsentInfoUpdate(
     ConsentRequestParameters(),
     () async {
+      if (!infoReady.isCompleted) infoReady.complete();
       try {
         await ConsentForm.loadAndShowConsentFormIfRequired((_) {
           if (!done.isCompleted) done.complete();
@@ -59,10 +71,30 @@ Future<void> _gatherConsent() async {
       }
     },
     (_) {
+      if (!infoReady.isCompleted) infoReady.complete();
       if (!done.isCompleted) done.complete();
     },
   );
-  await done.future.timeout(const Duration(seconds: 15), onTimeout: () {});
+  // Only the network request is short-bounded; once the info arrived, give the
+  // user plenty of time to read the consent form before moving on.
+  var infoArrived = true;
+  await infoReady.future.timeout(const Duration(seconds: 6), onTimeout: () {
+    infoArrived = false;
+  });
+  if (infoArrived) {
+    await done.future.timeout(const Duration(seconds: 120), onTimeout: () {});
+  }
+}
+
+/// The UMP form and the ATT prompt only appear while the app is active; asking
+/// before iOS reports it as resumed can silently skip them. Waits briefly.
+Future<void> _waitUntilAppActive() async {
+  for (var i = 0; i < 30; i++) {
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      return;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+  }
 }
 
 /// Requests App Tracking Transparency authorization for personalized AdMob ads
@@ -74,5 +106,5 @@ Future<void> _requestTrackingPermission() async {
     if (status == TrackingStatus.notDetermined) {
       await AppTrackingTransparency.requestTrackingAuthorization();
     }
-  } catch (_) {}
+  } catch (e) { debugPrint('[MrPlay] ATT request failed: $e'); }
 }

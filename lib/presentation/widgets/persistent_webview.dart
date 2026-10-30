@@ -350,7 +350,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             await controller.evaluateJavascript(
               source: ContentBlockerJS.popupBlockerScript,
             );
-          } catch (_) {}
+          } catch (e) { debugPrint('[MrPlay] popup blocker injection failed: $e'); }
         } else {
           await controller.removeUserScriptsByGroupName(
             groupName: _blockPopupsScriptGroup,
@@ -2270,7 +2270,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       } else {
         await controller.reload();
       }
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] webview recovery reload failed: $e'); }
     if (video) {
       Future<void>.delayed(const Duration(milliseconds: 1500), () {
         if (mounted) _resumeOrStartActiveVideo();
@@ -2557,7 +2557,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             _videoWebViewController?.evaluateJavascript(
               source: VideoTabJS.swipeCollapseScript,
             );
-          } catch (_) {}
+          } catch (e) { debugPrint('[MrPlay] swipe collapse script injection failed: $e'); }
         });
       }
     });

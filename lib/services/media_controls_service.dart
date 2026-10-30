@@ -86,13 +86,13 @@ class MediaControlsService {
         'durationMs': duration.inMilliseconds.toDouble(),
         'isPlaying': isPlaying,
       });
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] media controls update failed: $e'); }
   }
 
   Future<void> setPlaying(bool isPlaying) async {
     try {
       await _channel.invokeMethod('setPlaying', {'isPlaying': isPlaying});
-    } catch (_) {}
+    } catch (e) { debugPrint('[MrPlay] media controls play state failed: $e'); }
   }
 
   Future<void> clearNowPlaying() async {
