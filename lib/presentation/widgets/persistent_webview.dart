@@ -485,6 +485,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // first; the restore is event-driven (webkitpresentationmodechanged)
       // with a page reload as a last resort.
       Future.delayed(const Duration(milliseconds: 300), _restoreVideoInline);
+      // Safety net for a video left on YouTube's loader after the app was in the
+      // background (another app took the audio, paused from the lock screen...).
+      Future.delayed(const Duration(seconds: 4), _recoverStuckVideo);
       // If the background queue handoff left the current video stuck on its
       // loader (not playing, not ended), start it — the user would otherwise
       // have to pause and play again manually. Bounded retries stop the moment
@@ -2390,6 +2393,71 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
   }
 
+  /// After returning to the app, detects a video that is stuck loading (not
+  /// enough data to play, so YouTube shows its spinner and play does nothing)
+  /// and recovers it: first by nudging it with a seek to the same position,
+  /// then, if it is still stuck, by reloading the page and seeking back to where
+  /// it was. Two attempts at most; a healthy video is never touched.
+  Future<void> _recoverStuckVideo({int attempt = 0}) async {
+    if (!mounted || _appIsBackgrounded) return;
+    final controller = _activeController;
+    if (controller == null) return;
+    if (ref.read(playerProvider).currentVideo == null) return;
+    double pos = 0;
+    try {
+      final result = await controller.evaluateJavascript(source: '''
+        (function() {
+          var v = $_activeVideoJs;
+          if (!v) return null;
+          return {
+            stuck: !v.ended && v.readyState < 3,
+            pos: isFinite(v.currentTime) ? v.currentTime : 0
+          };
+        })();
+      ''');
+      if (result is! Map || result['stuck'] != true) return;
+      pos = (result['pos'] as num?)?.toDouble() ?? 0;
+    } catch (e) {
+      debugPrint('[MrPlay] stuck-video check failed: $e');
+      return;
+    }
+    debugPrint('[MrPlay] video stuck loading after resume '
+        '(attempt $attempt, pos=$pos)');
+    if (attempt == 0) {
+      final wantPlay = ref.read(playerProvider).isPlaying;
+      try {
+        await controller.evaluateJavascript(source: '''
+          (function() {
+            var v = $_activeVideoJs;
+            if (!v) return;
+            try { v.currentTime = v.currentTime; } catch (e) {}
+            ${wantPlay ? 'v.play().catch(function(){});' : ''}
+          })();
+        ''');
+      } catch (_) {}
+      Future<void>.delayed(const Duration(seconds: 2),
+          () => _recoverStuckVideo(attempt: 1));
+      return;
+    }
+    final wasPlaying = ref.read(playerProvider).isPlaying;
+    try {
+      await controller.reload();
+    } catch (e) {
+      debugPrint('[MrPlay] stuck-video reload failed: $e');
+      return;
+    }
+    for (final delay in const [3000, 6000]) {
+      Future<void>.delayed(Duration(milliseconds: delay), () {
+        if (!mounted || _appIsBackgrounded) return;
+        controlVideo('seek', position: pos);
+        if (delay == 3000) {
+          // Respect the user's pause: YouTube autoplays on load.
+          wasPlaying ? _resumeOrStartActiveVideo() : controlVideo('pause');
+        }
+      });
+    }
+  }
+
   /// Enters phantom PiP on background and makes sure the video is actually
   /// playing inside the PiP session. iOS pauses the webview video when the app
   /// backgrounds; the PiP handoff alone leaves it paused (no audio). We wait for
@@ -2694,6 +2762,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                       ),
                       UserScript(
                         source: VideoTabJS.swipeCollapseScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
+                      UserScript(
+                        source: VideoTabJS.doubleTapSeekScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                       ),
                       UserScript(

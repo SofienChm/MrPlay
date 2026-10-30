@@ -402,4 +402,101 @@ class VideoTabJS {
       window.__mrSwipeCleanup = cleanup;
     })();
   ''';
+
+  /// Double-tap on the inline (non-fullscreen) player to skip: left side goes
+  /// back 10s, right side forward 10s, like the YouTube app. Fullscreen is left
+  /// to YouTube's own handling so a double-tap there can't skip twice. Taps on
+  /// buttons/controls are ignored and a lone tap is never touched, so the
+  /// normal tap-to-show-controls behaviour stays intact.
+  static const String doubleTapSeekScript = '''
+    (function() {
+      if (location.hostname.indexOf('youtube.com') === -1) return;
+      if (window.__mrDoubleTapInstalled) return;
+      window.__mrDoubleTapInstalled = true;
+
+      var SEEK = 10;
+      var lastTime = 0;
+      var lastX = 0;
+      var lastY = 0;
+
+      function findPlayer(el) {
+        while (el && el !== document.documentElement) {
+          if (el.tagName === 'VIDEO') return el.closest('.html5-video-player') || el.parentElement;
+          if (el.id === 'movie_player' ||
+              (el.classList && el.classList.contains('html5-video-player'))) return el;
+          el = el.parentElement;
+        }
+        return null;
+      }
+
+      function isControl(el) {
+        return !!(el.closest && el.closest(
+          'button, a, input, [role="button"], .ytp-chrome-bottom, .ytp-chrome-top, ' +
+          '.ytp-progress-bar-container, .ytp-popup, .ytp-ce-element, .ytp-endscreen-content'));
+      }
+
+      function activeVideo() {
+        var videos = document.querySelectorAll('video');
+        for (var i = 0; i < videos.length; i++) {
+          if (!videos[i].paused && !videos[i].ended) return videos[i];
+        }
+        return videos.length > 0 ? videos[0] : null;
+      }
+
+      function isFullscreen(v) {
+        return !!(document.fullscreenElement || document.webkitFullscreenElement ||
+                  (v && v.webkitDisplayingFullscreen));
+      }
+
+      function flash(player, left, text) {
+        try {
+          var d = document.createElement('div');
+          d.textContent = text;
+          d.style.cssText = 'position:absolute;top:0;bottom:0;width:38%;' +
+            (left ? 'left:0;border-radius:0 50% 50% 0;' : 'right:0;border-radius:50% 0 0 50%;') +
+            'display:flex;align-items:center;justify-content:center;' +
+            'background:rgba(255,255,255,0.18);color:#fff;font:600 15px -apple-system,sans-serif;' +
+            'pointer-events:none;z-index:70;opacity:1;transition:opacity 0.5s ease;';
+          player.appendChild(d);
+          setTimeout(function() { d.style.opacity = '0'; }, 250);
+          setTimeout(function() { if (d.parentNode) d.parentNode.removeChild(d); }, 800);
+        } catch (e) {}
+      }
+
+      document.addEventListener('touchend', function(e) {
+        if (!e.changedTouches || e.changedTouches.length !== 1) return;
+        if (e.touches && e.touches.length > 0) { lastTime = 0; return; }
+        var target = e.target;
+        var player = findPlayer(target);
+        if (!player || isControl(target)) { lastTime = 0; return; }
+        var v = activeVideo();
+        if (isFullscreen(v)) return;
+
+        var t = e.changedTouches[0];
+        var now = Date.now();
+        var isDouble = lastTime > 0 && (now - lastTime) < 300 &&
+          Math.abs(t.clientX - lastX) < 70 && Math.abs(t.clientY - lastY) < 70;
+        if (!isDouble) {
+          lastTime = now;
+          lastX = t.clientX;
+          lastY = t.clientY;
+          return;
+        }
+        lastTime = 0;
+
+        if (!v || !isFinite(v.duration)) return;
+        var rect = player.getBoundingClientRect();
+        if (rect.width <= 0) return;
+        var rel = (t.clientX - rect.left) / rect.width;
+        if (rel > 0.38 && rel < 0.62) return;
+        var left = rel <= 0.38;
+        try {
+          v.currentTime = Math.max(0, Math.min(v.duration, v.currentTime + (left ? -SEEK : SEEK)));
+        } catch (err) { return; }
+        flash(player, left, left ? '-' + SEEK + 's' : '+' + SEEK + 's');
+        e.preventDefault();
+        e.stopPropagation();
+      }, { capture: true, passive: false });
+    })();
+  ''';
 }
