@@ -2245,6 +2245,39 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _pausedKeepAliveTimer = null;
   }
 
+  DateTime _lastProcessRecovery = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// iOS kills a WKWebView's content process under memory pressure, leaving a
+  /// blank/frozen page that nothing reloads. Reload the page we were on.
+  /// Skipped in the background (the resume path already restores the video)
+  /// and rate-limited so a page that keeps crashing can't reload in a loop.
+  Future<void> _recoverWebProcess(
+    InAppWebViewController controller, {
+    required bool video,
+  }) async {
+    if (!mounted || _appIsBackgrounded) return;
+    final now = DateTime.now();
+    if (now.difference(_lastProcessRecovery) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastProcessRecovery = now;
+    debugPrint('[MrPlay] web content process terminated (video=$video), '
+        'reloading');
+    final url = video ? _videoTabUrl : _currentUrl;
+    try {
+      if (url != null && url.isNotEmpty) {
+        await controller.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+      } else {
+        await controller.reload();
+      }
+    } catch (_) {}
+    if (video) {
+      Future<void>.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted) _resumeOrStartActiveVideo();
+      });
+    }
+  }
+
   void togglePictureInPicture() {
     _activeController?.evaluateJavascript(source: '''
       (function() {
@@ -2616,6 +2649,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                   : NavigationActionPolicy.CANCEL;
             },
             onCreateWindow: _handleCreateWindow,
+            onWebContentProcessDidTerminate: (controller) =>
+                _recoverWebProcess(controller, video: false),
             ),
           ),
         ),
@@ -2710,6 +2745,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                           : NavigationActionPolicy.CANCEL;
                     },
                     onCreateWindow: _handleCreateWindow,
+                    onWebContentProcessDidTerminate: (controller) =>
+                        _recoverWebProcess(controller, video: true),
                   ),
                 ),
               ),
