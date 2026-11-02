@@ -44,7 +44,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   bool _waitingToGoBack = false;
   bool _videoTabIntro = false;
   DateTime _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
-  static const Duration _unmuteThrottle = Duration(milliseconds: 1200);
+  static const Duration _unmuteThrottle = Duration(milliseconds: 500);
   DateTime? _pipStuckSince;
   DateTime _lastInlineForce = DateTime.fromMillisecondsSinceEpoch(0);
   static const Duration _pipStuckGrace = Duration(milliseconds: 800);

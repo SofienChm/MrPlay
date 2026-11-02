@@ -306,7 +306,14 @@ class ContentBlockerJS {
   static const String adFallbackSkipScript = '''
     (function() {
       try {
-        var _state = { weMuted: false };
+        var _state = { weMuted: false, lastAdAt: 0 };
+
+        // True when a muted video right after an ad should be restored: either
+        // we muted it, or an ad was live a moment ago (our state can be lost
+        // when YouTube rebuilds the player between videos).
+        function _shouldRestoreMute() {
+          return _state.weMuted || (_state.lastAdAt > 0 && Date.now() - _state.lastAdAt < 15000);
+        }
 
         function _player() {
           return document.querySelector('.html5-video-player');
@@ -409,6 +416,7 @@ class ContentBlockerJS {
               return;
             }
 
+            _state.lastAdAt = Date.now();
             if (_adStart === 0) _adStart = Date.now();
             // Stuck-ad watchdog: if an ad stays "showing" but never resolves —
             // its duration never becomes finite, usually because the ad's own
@@ -494,7 +502,7 @@ class ContentBlockerJS {
             }
             var v = _video();
             if (!v) return;
-            if (v.muted === true && !_adShowing() && _state.weMuted) {
+            if (v.muted === true && !_adShowing() && _shouldRestoreMute()) {
               _state.weMuted = false;
               v.muted = false;
             }
