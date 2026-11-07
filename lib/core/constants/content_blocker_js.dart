@@ -34,6 +34,13 @@ class ContentBlockerJS {
           } catch (e) {}
         }
 
+        // Responses that carry player data (and so ad data). `get_watch` is what
+        // YouTube uses to load the next video during SPA navigation.
+        function isPlayerUrl(u) {
+          return u.indexOf('/youtubei/v1/player') !== -1 ||
+                 u.indexOf('/youtubei/v1/get_watch') !== -1;
+        }
+
         try {
           var _stored = window.ytInitialPlayerResponse || null;
           Object.defineProperty(window, 'ytInitialPlayerResponse', {
@@ -55,7 +62,7 @@ class ContentBlockerJS {
             try {
               var _target = arguments[0];
               var _url = typeof _target === 'string' ? _target : (_target && _target.url) || '';
-              if (typeof _url === 'string' && _url.indexOf('/youtubei/v1/player') !== -1) {
+              if (typeof _url === 'string' && isPlayerUrl(_url)) {
                 return _origFetch.apply(this, arguments).then(function(resp) {
                   try {
                     if (!resp || !resp.clone) return resp;
@@ -108,7 +115,7 @@ class ContentBlockerJS {
         var _xhrSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function(body) {
           var _src = this.__mrAdUrl;
-          if (typeof _src === 'string' && _src.indexOf('/youtubei/v1/player') !== -1) {
+          if (typeof _src === 'string' && isPlayerUrl(_src)) {
             try {
               var _xhr = this;
               this.addEventListener('load', function() {
