@@ -192,7 +192,7 @@ class YouTubeJS {
         '.open-in-app'
       ];
 
-      function removeAppUI() {
+      function removeAppLinks() {
         document.querySelectorAll('a[href^="youtube://"], a[href^="vnd.youtube://"], a[href^="yt://"]').forEach(function(a) {
           a.remove();
         });
@@ -201,6 +201,11 @@ class YouTubeJS {
             el.remove();
           });
         });
+      }
+
+      // The text scan reads textContent of every button/link, so it is the
+      // expensive part: run it at most once per quiet 400ms, not per mutation.
+      function removeAppByText() {
         document.querySelectorAll('button, a, ytd-button-renderer, ytm-button-renderer').forEach(function(el) {
           var t = (el.textContent || '').toLowerCase();
           if (t.indexOf('open in the youtube app') > -1 || t.indexOf('open in youtube app') > -1 || t.indexOf('watch in the youtube app') > -1 || t.indexOf('get the youtube app') > -1) {
@@ -209,8 +214,25 @@ class YouTubeJS {
         });
       }
 
-      removeAppUI();
-      new MutationObserver(removeAppUI).observe(document.documentElement, { childList: true, subtree: true });
+      removeAppLinks();
+      removeAppByText();
+      var _linksQueued = false;
+      var _textTimer = null;
+      new MutationObserver(function() {
+        if (!_linksQueued) {
+          _linksQueued = true;
+          requestAnimationFrame(function() {
+            _linksQueued = false;
+            removeAppLinks();
+          });
+        }
+        if (!_textTimer) {
+          _textTimer = setTimeout(function() {
+            _textTimer = null;
+            removeAppByText();
+          }, 400);
+        }
+      }).observe(document.documentElement, { childList: true, subtree: true });
     })();
   ''';
 
@@ -233,7 +255,15 @@ class YouTubeJS {
         } catch (e) {}
       }
       hidePopups();
-      new MutationObserver(hidePopups).observe(document.documentElement, { childList: true, subtree: true });
+      var _popupQueued = false;
+      new MutationObserver(function() {
+        if (_popupQueued) return;
+        _popupQueued = true;
+        requestAnimationFrame(function() {
+          _popupQueued = false;
+          hidePopups();
+        });
+      }).observe(document.documentElement, { childList: true, subtree: true });
       setInterval(hidePopups, 1000);
     })();
   ''';
@@ -325,7 +355,15 @@ class VideoTabJS {
         });
       }
       hide();
-      new MutationObserver(hide).observe(document.documentElement, { childList: true, subtree: true });
+      var _hideQueued = false;
+      new MutationObserver(function() {
+        if (_hideQueued) return;
+        _hideQueued = true;
+        requestAnimationFrame(function() {
+          _hideQueued = false;
+          hide();
+        });
+      }).observe(document.documentElement, { childList: true, subtree: true });
     })();
   ''';
 

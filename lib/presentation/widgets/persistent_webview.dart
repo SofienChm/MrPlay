@@ -302,6 +302,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (controller == null) continue;
       try {
         if (_adBlockEnabled) {
+          // Clear the off switch first: the scripts are idempotent, so on a
+          // page where they already ran this simply re-activates them.
+          try {
+            await controller.evaluateJavascript(
+                source: 'window.__mrAdBlockOff = false;');
+          } catch (_) {}
           await controller.addUserScripts(
             userScripts: scripts
                 .map((source) => UserScript(
@@ -320,6 +326,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           await controller.removeUserScriptsByGroupName(
             groupName: _adBlockScriptGroup,
           );
+          // Removing the scripts only affects future loads; the wrappers
+          // already on the live page are switched off via this flag instead
+          // of a reload (which would interrupt playback).
+          try {
+            await controller.evaluateJavascript(
+                source: 'window.__mrAdBlockOff = true;');
+          } catch (_) {}
         }
       } catch (e) {
         debugPrint('[MrPlay] apply ad-block runtime failed: $e');
@@ -856,26 +869,51 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   void _handleWatchPage(InAppWebViewController controller, String urlStr) {
     if (urlStr.contains('youtube.com')) {
       if (urlStr.contains('/watch')) {
-        Future.delayed(const Duration(milliseconds: 1500), () async {
-          if (!mounted) return;
-          await controller.evaluateJavascript(source: '''
-            (function() {
-              var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
-              var videoId = window.location.search.match(/[?&]v=([^&]+)/);
-              var title = titleEl ? titleEl.textContent.trim().substring(0, 200) : '';
-              if (title && window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
-                window.flutter_inappwebview.callHandler('playerInfo', {
-                  id: videoId ? videoId[1] : '',
-                  title: title,
-                  thumbnailUrl: videoId ? 'https://i.ytimg.com/vi/' + videoId[1] + '/hqdefault.jpg' : '',
-                  videoUrl: window.location.href,
-                  platform: 'YouTube'
-                });
-              }
-            })();
-          ''');
-        });
+        _reportWatchInfo(controller);
       }
+    }
+  }
+
+  /// Reads the page title and sends it to `playerInfo`. The title element may
+  /// not be rendered yet on the first look (slow load / SPA navigation), so it
+  /// retries a few times instead of leaving the placeholder title for good.
+  /// The JS returns true once it reported (or when the page is no longer a
+  /// watch page), which stops the retries.
+  Future<void> _reportWatchInfo(
+    InAppWebViewController controller, {
+    int attempt = 0,
+  }) async {
+    await Future<void>.delayed(
+        Duration(milliseconds: attempt == 0 ? 1500 : 2000));
+    if (!mounted) return;
+    var done = false;
+    try {
+      final result = await controller.evaluateJavascript(source: '''
+        (function() {
+          if (window.location.pathname.indexOf('/watch') === -1) return true;
+          var titleEl = document.querySelector('h1.title, .slim-video-information-title, .ytp-title, #title h1');
+          var videoId = window.location.search.match(/[?&]v=([^&]+)/);
+          var title = titleEl ? titleEl.textContent.trim().substring(0, 200) : '';
+          if (title && window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+            window.flutter_inappwebview.callHandler('playerInfo', {
+              id: videoId ? videoId[1] : '',
+              title: title,
+              thumbnailUrl: videoId ? 'https://i.ytimg.com/vi/' + videoId[1] + '/hqdefault.jpg' : '',
+              videoUrl: window.location.href,
+              platform: 'YouTube'
+            });
+            return true;
+          }
+          return false;
+        })();
+      ''');
+      done = result == true;
+    } catch (e) {
+      debugPrint('[MrPlay] watch info read failed: $e');
+      return;
+    }
+    if (!done && attempt < 3) {
+      _reportWatchInfo(controller, attempt: attempt + 1);
     }
   }
 
@@ -2435,7 +2473,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           })();
         ''');
       } catch (_) {}
-      Future<void>.delayed(const Duration(seconds: 2),
+      // Give a slow connection time to finish buffering before resorting to
+      // a full page reload.
+      Future<void>.delayed(const Duration(seconds: 5),
           () => _recoverStuckVideo(attempt: 1));
       return;
     }

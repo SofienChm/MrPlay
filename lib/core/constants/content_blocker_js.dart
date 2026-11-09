@@ -7,6 +7,13 @@ class ContentBlockerJS {
   static const String _adBlockedHostsPattern =
       r'(doubleclick\.net|googlesyndication\.com|googleadservices\.com|adservice\.google|amazon-adsystem\.com|adnxs\.com|adform\.net|taboola\.com|outbrain\.com|pubmatic\.com|criteo\.com|rubiconproject\.com|adsrvr\.org|tremorhub\.com|springserve\.com)';
 
+  /// Same-origin YouTube ad endpoints (impression/tracking pings and pagead
+  /// scripts) that no host rule can catch. Matches both relative
+  /// (`/pagead/...`) and absolute (`https://m.youtube.com/pagead/...`) URLs.
+  /// Player/next/browse endpoints are deliberately not listed.
+  static const String _adBlockedPathsPattern =
+      r'(^|youtube\.com)\/(pagead\/|api\/stats\/ads|ptracking)';
+
   /// Layer 1 — strips ad/mid-roll data out of the player response before the
   /// player ever reads it. It scrubs the `ytInitialPlayerResponse` assignment
   /// (plus a legacy `ytplayer` embedded-response trap) and reparses
@@ -17,11 +24,17 @@ class ContentBlockerJS {
   /// broken/undefined one.
   static const String stripAdDataScript = '''
     (function() {
+      // Idempotent: re-evaluating on a live page (ad-block toggled back on)
+      // must not stack another fetch/XHR wrapper. `__mrAdBlockOff` is the
+      // runtime off switch flipped from Dart when the toggle is disabled.
+      if (window.__mrStripInstalled) return;
+      window.__mrStripInstalled = true;
       try {
         var AD_KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams'];
 
         function stripAds(obj) {
           try {
+            if (window.__mrAdBlockOff === true) return;
             if (!obj || typeof obj !== 'object') return;
             for (var i = 0; i < AD_KEYS.length; i++) {
               try { delete obj[AD_KEYS[i]]; } catch (e) {}
@@ -35,10 +48,12 @@ class ContentBlockerJS {
         }
 
         // Responses that carry player data (and so ad data). `get_watch` is what
-        // YouTube uses to load the next video during SPA navigation.
+        // YouTube uses to load the next video during SPA navigation;
+        // `reel_item_watch` is the same for each Short in the Shorts feed.
         function isPlayerUrl(u) {
           return u.indexOf('/youtubei/v1/player') !== -1 ||
-                 u.indexOf('/youtubei/v1/get_watch') !== -1;
+                 u.indexOf('/youtubei/v1/get_watch') !== -1 ||
+                 u.indexOf('/youtubei/v1/reel/reel_item_watch') !== -1;
         }
 
         try {
@@ -62,7 +77,7 @@ class ContentBlockerJS {
             try {
               var _target = arguments[0];
               var _url = typeof _target === 'string' ? _target : (_target && _target.url) || '';
-              if (typeof _url === 'string' && isPlayerUrl(_url)) {
+              if (typeof _url === 'string' && isPlayerUrl(_url) && window.__mrAdBlockOff !== true) {
                 return _origFetch.apply(this, arguments).then(function(resp) {
                   try {
                     if (!resp || !resp.clone) return resp;
@@ -115,7 +130,7 @@ class ContentBlockerJS {
         var _xhrSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function(body) {
           var _src = this.__mrAdUrl;
-          if (typeof _src === 'string' && isPlayerUrl(_src)) {
+          if (typeof _src === 'string' && isPlayerUrl(_src) && window.__mrAdBlockOff !== true) {
             try {
               var _xhr = this;
               this.addEventListener('load', function() {
@@ -154,9 +169,11 @@ class ContentBlockerJS {
                 if (v && v.config && v.config.args &&
                     typeof v.config.args.raw_player_response === 'string' &&
                     v.config.args.raw_player_response.indexOf('{') === 0) {
-                  v.config.args.raw_player_response = JSON.stringify(
-                    stripAds(JSON.parse(v.config.args.raw_player_response))
-                  );
+                  // stripAds mutates in place and returns nothing, so keep the
+                  // parsed object and stringify that (never `undefined`).
+                  var _prp = JSON.parse(v.config.args.raw_player_response);
+                  stripAds(_prp);
+                  v.config.args.raw_player_response = JSON.stringify(_prp);
                 }
               } catch (e) {}
               _ytpStored = v;
@@ -175,8 +192,16 @@ class ContentBlockerJS {
   /// googlevideo.com (real video CDN) is never touched.
   static const String adRequestBlockerScript = '''
     (function() {
+      if (window.__mrReqBlockInstalled) return;
+      window.__mrReqBlockInstalled = true;
       try {
         var BLOCKED_HOSTS = /$_adBlockedHostsPattern/i;
+        var BLOCKED_PATHS = /$_adBlockedPathsPattern/i;
+
+        function isBlocked(u) {
+          if (window.__mrAdBlockOff === true) return false;
+          return BLOCKED_HOSTS.test(u) || BLOCKED_PATHS.test(u);
+        }
 
         var _origFetch = window.fetch;
         if (typeof _origFetch === 'function') {
@@ -184,7 +209,7 @@ class ContentBlockerJS {
             try {
               var _target = arguments[0];
               var _url = typeof _target === 'string' ? _target : (_target && _target.url) || '';
-              if (typeof _url === 'string' && BLOCKED_HOSTS.test(_url)) {
+              if (typeof _url === 'string' && isBlocked(_url)) {
                 return Promise.reject(new TypeError('Blocked by MrPlay'));
               }
               return _origFetch.apply(this, arguments);
@@ -198,7 +223,7 @@ class ContentBlockerJS {
         var _xhrSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.open = function(method, url) {
           try {
-            this.__mrAdBlocked = !!(url && BLOCKED_HOSTS.test('' + url));
+            this.__mrAdBlocked = !!(url && isBlocked('' + url));
           } catch (e) {
             this.__mrAdBlocked = false;
           }
@@ -219,6 +244,8 @@ class ContentBlockerJS {
 
   static const String genericAdBlockerScript = '''
     (function() {
+      if (window.__mrDomBlockInstalled) return;
+      window.__mrDomBlockInstalled = true;
       var BLOCKED_HOSTS = /$_adBlockedHostsPattern/i;
 
       var SELECTORS = [
@@ -251,6 +278,15 @@ class ContentBlockerJS {
         'ytd-banner-promo-renderer',
         'ytd-ad-slot-renderer',
         'ytd-in-feed-ad-layout-renderer',
+        'ytm-promoted-sparkles-web-renderer',
+        'ytm-promoted-video-renderer',
+        'ytm-display-ad-renderer',
+        'ytm-ad-slot-renderer',
+        'ytm-in-feed-ad-layout-renderer',
+        'ytm-video-masthead-ad-renderer',
+        'ytm-companion-slot',
+        'ytm-companion-ad-renderer',
+        'ad-slot-renderer',
         '.video-ads',
         '.ytp-ad-module',
         '.ytp-ad-overlay-container',
@@ -280,22 +316,32 @@ class ContentBlockerJS {
         } catch (e) {}
       }
 
+      var SELECTOR = SELECTORS.join(',');
+
       function blockAds() {
         try {
-          SELECTORS.forEach(function(sel) {
-            document.querySelectorAll(sel).forEach(hide);
-          });
+          if (window.__mrAdBlockOff === true) return;
+          document.querySelectorAll(SELECTOR).forEach(hide);
           hideAdIframes();
         } catch (e) {}
       }
 
       blockAds();
+      // One pass per frame no matter how many mutation batches arrive (YouTube
+      // mutates constantly); the old code queued a full pass per batch.
+      var _blockScheduled = false;
       new MutationObserver(function() {
-        requestAnimationFrame(blockAds);
+        if (_blockScheduled) return;
+        _blockScheduled = true;
+        requestAnimationFrame(function() {
+          _blockScheduled = false;
+          blockAds();
+        });
       }).observe(document.documentElement, { childList: true, subtree: true });
 
       setInterval(function() {
-        var btn = document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern');
+        if (window.__mrAdBlockOff === true) return;
+        var btn =document.querySelector('.ytp-ad-skip-button, .ytp-skip-ad-button, .ytp-ad-skip-button-modern');
         if (btn) btn.click();
       }, 500);
     })();
@@ -304,14 +350,16 @@ class ContentBlockerJS {
   /// Layer 3 — masked instant-skip safety net. Acts only on a *live* re-check
   /// of `ad-showing`, prefers a real skip-button click, and jumps `currentTime`
   /// to end the ad. Safety comes from the synchronous `ad-showing` re-check
-  /// (YouTube never flags real content as an ad) plus a 600s cap, so even long
-  /// unskippable pre-rolls get cut without risking real videos. Ad presence
+  /// (YouTube never flags real content as an ad) plus a 180s cap, so unskippable
+  /// pre-rolls get cut without risking real videos. Ad presence
   /// drives the flow via a MutationObserver on the player's class attribute;
   /// the only interval is the unmute safety net. Everything is inside one outer
   /// try/catch: any failure simply means no ad-blocking that session, never
   /// broken playback.
   static const String adFallbackSkipScript = '''
     (function() {
+      if (window.__mrFallbackInstalled) return;
+      window.__mrFallbackInstalled = true;
       try {
         var _state = { weMuted: false, lastAdAt: 0 };
 
@@ -409,7 +457,9 @@ class ContentBlockerJS {
 
         function _handle() {
           try {
-            if (!_adShowing()) {
+            // Ad-block switched off at runtime: behave as "no ad" so any mute
+            // or mask we applied is undone and nothing is skipped.
+            if (window.__mrAdBlockOff === true || !_adShowing()) {
               _adStart = 0;
               _maskDisabled = false;
               _clearMask();
@@ -456,11 +506,12 @@ class ContentBlockerJS {
             // synchronously right above, and at this moment the element's
             // duration is the *ad's*, never the real video's (YouTube never
             // flags real content as an ad). Ending the ad pod via currentTime
-            // is therefore safe, and the 600s cap still guards against any
-            // pathological duration read while the skip safety net is live.
+            // is therefore safe, and the 180s cap still guards against a stale
+            // `ad-showing` class right as the real video loads (ads are short;
+            // longer ones are skippable and take the button path above).
             if (v && p.classList.contains('ad-showing')) {
               var d = v.duration;
-              if (typeof d === 'number' && isFinite(d) && d > 0 && d <= 600) {
+              if (typeof d === 'number' && isFinite(d) && d > 0 && d <= 180) {
                 v.currentTime = d;
               }
             }
@@ -481,16 +532,17 @@ class ContentBlockerJS {
 
         function _bootstrap() {
           try {
-            if (_player()) { _attach(); return; }
-            var docObs = new MutationObserver(function() {
+            if (_player()) _attach();
+            // Stays connected: YouTube replaces the player element on SPA
+            // navigation, and a watcher bound to the old one would never see
+            // the next video's ads. _attach() is a no-op for an element that
+            // already has its watcher, so this only acts on a fresh player.
+            new MutationObserver(function() {
               try {
-                if (_player()) {
-                  try { docObs.disconnect(); } catch (e) {}
-                  _attach();
-                }
+                var p = _player();
+                if (p && !p.__mrAdWatcher) _attach();
               } catch (e) {}
-            });
-            docObs.observe(document.documentElement, { childList: true, subtree: true });
+            }).observe(document.documentElement, { childList: true, subtree: true });
           } catch (e) {}
         }
 
@@ -503,6 +555,7 @@ class ContentBlockerJS {
         // safety net: a mute that was ours but lost track of state gets undone.
         setInterval(function() {
           try {
+            _attach();
             if (_adShowing()) {
               _handle();
               return;
