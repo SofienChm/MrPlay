@@ -2044,7 +2044,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// scoped to `#movie_player` so it can't click a muted feed preview's button.
   @visibleForTesting
   static const String unmuteVideoScript = '''
-    (function() {
+    return (function() {
       var videos = document.querySelectorAll('video');
       var main = null;
       for (var i = 0; i < videos.length; i++) {
