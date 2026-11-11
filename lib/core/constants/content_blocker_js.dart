@@ -232,7 +232,16 @@ class ContentBlockerJS {
         XMLHttpRequest.prototype.send = function() {
           try {
             if (this.__mrAdBlocked) {
-              this.responseText = '';
+              // Fail the request like a network error instead of leaving it
+              // pending forever: player code awaiting it would otherwise hang
+              // (an ad that never resolves blocks the real video).
+              var _blockedXhr = this;
+              setTimeout(function() {
+                try {
+                  _blockedXhr.dispatchEvent(new ProgressEvent('error'));
+                  _blockedXhr.dispatchEvent(new ProgressEvent('loadend'));
+                } catch (e) {}
+              }, 0);
               return;
             }
           } catch (e) {}

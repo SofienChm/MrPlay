@@ -83,6 +83,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// auto-start a video the background handoff left stuck on its loader.
   bool _backgroundHandoffPending = false;
   bool _appIsBackgrounded = false;
+  bool _appIsInactive = false;
   // Whether a system-forced pause (iOS suspends the webview's media when the
   // app backgrounds / the screen locks) may be auto-resumed to keep audio
   // playing. User-initiated pauses clear this so they are not fought. Used for
@@ -476,7 +477,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.inactive) {
-      _appIsBackgrounded = true;
+      // Inactive is also Control Center / Notification Center pulled over the
+      // still-visible app. Treating it as background made a play/pause there
+      // push the video into phantom PiP, so only `paused` means background.
+      _appIsInactive = true;
     } else if (state == AppLifecycleState.paused) {
       _enterBackground();
     } else if (state == AppLifecycleState.resumed) {
@@ -485,6 +489,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           !_userPausedInBackground &&
           _backgroundAudioEnabled;
       _appIsBackgrounded = false;
+      _appIsInactive = false;
       _userPausedInBackground = false;
       _stoppedUnexpectedlyInBackground = false;
       _backgroundHandoffPending = false;
@@ -835,6 +840,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       });
       return;
     }
+    if (_isMusicUrl(urlStr) &&
+        urlStr.contains('/watch') &&
+        _videoTabUrl != null) {
+      closePlayer();
+    }
     _handleWatchPage(controller, urlStr);
   }
 
@@ -981,7 +991,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!_acceptsPlayerEvents(source)) return;
     try {
       var playing = data['playing'] == true;
-      final ended = data['ended'] == true;
+      // The ad-blocker ends an unskippable ad by jumping to its end, which
+      // fires `ended` while `ad-showing` is still set - that is the ad ending,
+      // not the video, so it must not advance the queue.
+      final ended = data['ended'] == true && data['adShowing'] != true;
       final pip = data['pip'] == true;
       if (playing && !ended) {
         _lastKnownPlayingAt = DateTime.now();
@@ -1050,14 +1063,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // report's pipStuck is false, so it is never touched), and only after the
       // stuck state persists past a short grace period, throttled.
       final pipStuck = data['pipStuck'] == true;
-      if (pipStuck && !_appIsBackgrounded) {
+      if (pipStuck && !_appIsBackgrounded && !_appIsInactive) {
         _pipStuckSince ??= DateTime.now();
       } else {
         _pipStuckSince = null;
       }
       if (shouldForceVideoInline(
         pipStuck: pipStuck,
-        backgrounded: _appIsBackgrounded,
+        backgrounded: _appIsBackgrounded || _appIsInactive,
         stuckDuration: _pipStuckSince == null
             ? Duration.zero
             : DateTime.now().difference(_pipStuckSince!),
@@ -1118,7 +1131,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           }
           _userPausedInBackground = false;
         } else if (ended) {
-          BackgroundAudioKeepAlive.instance.stop();
+          // In the background keep the silent loop through the song change:
+          // YouTube Music loads the next song itself, and dropping the loop
+          // here lets iOS suspend the webview before it starts.
+          if (!_appIsBackgrounded || !_backgroundAudioEnabled) {
+            BackgroundAudioKeepAlive.instance.stop();
+          }
           PlaybackStatsService.instance.flush();
           final id = video?.id ?? '';
           if (id.isNotEmpty) PlaybackStatsService.instance.clearProgress(id);
@@ -1272,7 +1290,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_endedHandled) return;
     _endedHandled = true;
     final items = await QueueRepository.getAll();
-    if (items.isEmpty) return;
+    if (items.isEmpty) {
+      // No MrPlay queue: the page's own autoplay picks the next item. Keep the
+      // webview alive in the background so that autoplay can actually start.
+      if (mounted && _appIsBackgrounded && _backgroundAudioEnabled) {
+        BackgroundAudioKeepAlive.instance.start();
+      }
+      return;
+    }
     final next = items.first;
     await QueueRepository.remove(next.id);
     exitPiP();
@@ -2185,6 +2210,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   }
 
   void loadUrl(String url) {
+    // YouTube Music plays in the browse webview, but while a YouTube video tab
+    // exists all player events / remote commands are bound to that tab. Close
+    // it so the two can't play at once and controls follow the music.
+    if (_isMusicUrl(url) && _videoTabUrl != null) closePlayer();
     if (_routesToVideoTab(url)) {
       // Playing a saved/history video from an overlay page (Library,
       // Watch History): reveal the webview layer BEFORE opening the video

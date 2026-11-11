@@ -50,12 +50,14 @@ class BackgroundAudioKeepAlive {
       await _player.setReleaseMode(ReleaseMode.loop);
       await _player.setVolume(0);
       await _player.play(AssetSource('audio/silence.wav'));
-      if (generation != _startGeneration) {
+      // Cancelled by stop() - unless a newer start() already took over, whose
+      // loop this stale start must not kill.
+      if (generation != _startGeneration && !_running) {
         await _player.stop();
       }
     } catch (e) {
       debugPrint('[MrPlay] background keep-alive start failed: $e');
-      _running = false;
+      if (generation == _startGeneration) _running = false;
     }
   }
 
