@@ -90,7 +90,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // rather than phantom-PiP.
   bool _backgroundResumeAllowed = false;
   bool _userPausedInBackground = false;
-  // Latched true when the system pauses us (another app / a call takes the
+  // The video stopped on its own while backgrounded (Bluetooth/route loss, a
+  // video swap, a stalled autoplay) without a user or interruption pause. The
+  // webview must be kept reachable so a lock-screen play can still resume it.
+  bool _stoppedUnexpectedlyInBackground = false;
+  // Latched true when the system pauses us (another app / a call takes the (another app / a call takes the
   // audio session). While latched, the state poll / JS events must not re-mark
   // Now Playing as "playing", so Control Center shows the true paused state and
   // the elapsed time stays put. Cleared on explicit user resume or a new video.
@@ -482,6 +486,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _backgroundAudioEnabled;
       _appIsBackgrounded = false;
       _userPausedInBackground = false;
+      _stoppedUnexpectedlyInBackground = false;
       _backgroundHandoffPending = false;
       _stopPausedKeepAlive();
       // Stop the keep-alive when the app is back in the foreground and the
@@ -981,6 +986,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (playing && !ended) {
         _lastKnownPlayingAt = DateTime.now();
         _stopPausedKeepAlive();
+        _stoppedUnexpectedlyInBackground = false;
         _backgroundHandoffPending = false;
         // A fresh play cycle re-arms the ended-latch, so a replayed video (even
         // the same URL) can advance the queue again when it ends. _handleEnded
@@ -1062,6 +1068,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _lastInlineForce = DateTime.now();
         _forceVideoInline();
       }
+      final wasPlaying = ref.read(playerProvider).isPlaying;
       var video = ref.read(playerProvider).currentVideo;
       // Fallback: if the video is actually playing but the `playerInfo` JS
       // (title extraction) never reported in, build the Video from the current
@@ -1087,6 +1094,19 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             Duration(milliseconds: positionMs.round()),
           );
         }
+      }
+      if (shouldHoldWebViewAfterStop(
+        wasPlaying: wasPlaying,
+        playing: playing,
+        ended: ended,
+        backgrounded: _appIsBackgrounded,
+        backgroundAudioEnabled: _backgroundAudioEnabled,
+        isMusic: _isMusic,
+        userPaused: _userPausedInBackground,
+        systemPaused: _systemPaused,
+        handoffPending: _backgroundHandoffPending,
+      )) {
+        _holdWebViewWhilePaused();
       }
       if (_isMusic) {
         // YouTube Music: keep the silent loop alive while playing and
@@ -1338,7 +1358,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (_isMusic) {
       BackgroundAudioKeepAlive.instance.start();
     } else {
-      _enterPhantomPiP();
+      await _enterPhantomPiP();
+    }
+    // The next video still isn't playing even after the forced start: keep the
+    // webview reachable so a lock-screen play can start it.
+    if (mounted && !ref.read(playerProvider).isPlaying) {
+      _holdWebViewWhilePaused();
     }
   }
 
@@ -1400,6 +1425,40 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!muted) return false;
     if (muted && adShowing) return false;
     return timeSinceLastAttempt >= throttle;
+  }
+
+  /// Whether a video that just stopped while backgrounded needs the webview
+  /// kept reachable. True only for an unexpected stop of a regular video: it
+  /// was playing, now isn't, it didn't end, and neither the user, a system
+  /// interruption nor a queue handoff accounts for it. YouTube Music is
+  /// excluded (its silent loop and auto-resume already cover it).
+  @visibleForTesting
+  static bool shouldHoldWebViewAfterStop({
+    required bool wasPlaying,
+    required bool playing,
+    required bool ended,
+    required bool backgrounded,
+    required bool backgroundAudioEnabled,
+    required bool isMusic,
+    required bool userPaused,
+    required bool systemPaused,
+    required bool handoffPending,
+  }) {
+    if (!wasPlaying || playing || ended) return false;
+    if (!backgrounded || !backgroundAudioEnabled || isMusic) return false;
+    return !userPaused && !systemPaused && !handoffPending;
+  }
+
+  /// Keeps the webview reachable after the video stopped on its own in the
+  /// background (Bluetooth disconnect, video swap, stalled autoplay). Without
+  /// this iOS suspends the WebContent process once nothing is playing, and the
+  /// lock-screen play button reaches Dart but never the page.
+  void _holdWebViewWhilePaused() {
+    if (!_appIsBackgrounded || !_backgroundAudioEnabled) return;
+    _stoppedUnexpectedlyInBackground = true;
+    _reassertAudioSession();
+    BackgroundAudioKeepAlive.instance.start();
+    _startPausedKeepAlive();
   }
 
   /// Whether the stuck-PiP un-stick should run now. Only when the report says
@@ -1472,6 +1531,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _backgroundResumeAllowed = false;
     _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     _userPausedInBackground = true;
+    _stoppedUnexpectedlyInBackground = false;
     _backgroundHandoffPending = false;
     _wasPlayingAtSeek = false;
     if (!_appIsBackgrounded) {
@@ -1526,14 +1586,30 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _userPausedInBackground = false;
     _backgroundHandoffPending = false;
     _stopPausedKeepAlive();
+    _stoppedUnexpectedlyInBackground = false;
     ref.read(playerProvider.notifier).resume();
-    if (_appIsBackgrounded && _backgroundAudioEnabled && !_isMusic) {
-      // Resuming from the lock screen: re-engage the phantom-PiP keep-alive,
-      // which both resumes the paused video and keeps the WebContent process
-      // alive for continued background playback.
-      _enterPhantomPiP();
+    if (_appIsBackgrounded && _backgroundAudioEnabled) {
+      _resumeFromBackground();
     } else {
       controlVideo('play');
+    }
+  }
+
+  /// Lock-screen / Control Center play while backgrounded. The audio session
+  /// and silent loop are re-established FIRST: after a route change or an
+  /// interruption they may be dead, and without live audio iOS has already
+  /// suspended the WebContent process, so any JS sent to it would never run.
+  Future<void> _resumeFromBackground() async {
+    await _reassertAudioSession();
+    await BackgroundAudioKeepAlive.instance.start();
+    if (!mounted) return;
+    if (_isMusic) {
+      controlVideo('play');
+    } else {
+      // Re-engage the phantom-PiP keep-alive, which both resumes the paused
+      // video and keeps the WebContent process alive for continued background
+      // playback.
+      await _enterPhantomPiP();
     }
   }
 
@@ -2273,7 +2349,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _stopPausedKeepAlive();
         return;
       }
-      if (ref.read(playerProvider).isPlaying || !_userPausedInBackground) {
+      if (ref.read(playerProvider).isPlaying ||
+          !(_userPausedInBackground || _stoppedUnexpectedlyInBackground)) {
         _stopPausedKeepAlive();
         return;
       }

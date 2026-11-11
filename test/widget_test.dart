@@ -418,6 +418,45 @@ void main() {
     );
   });
 
+  test('webview is held only for an unexpected background stop of a video', () {
+    bool hold({
+      bool wasPlaying = true,
+      bool playing = false,
+      bool ended = false,
+      bool backgrounded = true,
+      bool backgroundAudioEnabled = true,
+      bool isMusic = false,
+      bool userPaused = false,
+      bool systemPaused = false,
+      bool handoffPending = false,
+    }) =>
+        PersistentWebViewState.shouldHoldWebViewAfterStop(
+          wasPlaying: wasPlaying,
+          playing: playing,
+          ended: ended,
+          backgrounded: backgrounded,
+          backgroundAudioEnabled: backgroundAudioEnabled,
+          isMusic: isMusic,
+          userPaused: userPaused,
+          systemPaused: systemPaused,
+          handoffPending: handoffPending,
+        );
+    // Bluetooth drop / video swap: was playing, stopped, nobody paused it.
+    expect(hold(), isTrue);
+    // Still playing, never was playing, or ended: nothing to hold.
+    expect(hold(playing: true), isFalse);
+    expect(hold(wasPlaying: false), isFalse);
+    expect(hold(ended: true), isFalse);
+    // Foreground, background audio off, or Music: other paths own these.
+    expect(hold(backgrounded: false), isFalse);
+    expect(hold(backgroundAudioEnabled: false), isFalse);
+    expect(hold(isMusic: true), isFalse);
+    // Accounted for by the user, a system interruption, or a queue handoff.
+    expect(hold(userPaused: true), isFalse);
+    expect(hold(systemPaused: true), isFalse);
+    expect(hold(handoffPending: true), isFalse);
+  });
+
   test('stuck-PiP un-stick only fires foregrounded, past grace, throttled', () {
     const grace = Duration(milliseconds: 800);
     const throttle = Duration(seconds: 3);
