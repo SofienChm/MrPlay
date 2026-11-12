@@ -141,9 +141,55 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       for (var i = 0; i < videos.length; i++) {
         if (!videos[i].paused && !videos[i].ended) return videos[i];
       }
+      var main = document.querySelector('#movie_player video, .html5-video-player video');
+      if (main) return main;
       return videos.length > 0 ? videos[0] : null;
     })()
   ''';
+
+  /// Plays a silent looping `<audio>` inside the page. While a video is paused
+  /// in the background nothing in the WebContent process is playing, so WebKit
+  /// suspends that process after a while and a lock-screen play can no longer
+  /// reach the page (the app-side silent loop only keeps the app process
+  /// alive). A playing page audio element keeps the WebContent process awake.
+  static const String _pageKeepAliveStartJs = '''
+    (function() {
+      try {
+        var a = window.__mrSilentAudio;
+        if (!a) {
+          var n = 8000, buf = new ArrayBuffer(44 + n), d = new DataView(buf);
+          var w = function(o, s) { for (var i = 0; i < s.length; i++) d.setUint8(o + i, s.charCodeAt(i)); };
+          w(0, 'RIFF'); d.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
+          d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
+          d.setUint32(24, 8000, true); d.setUint32(28, 8000, true);
+          d.setUint16(32, 1, true); d.setUint16(34, 8, true);
+          w(36, 'data'); d.setUint32(40, n, true);
+          for (var i = 0; i < n; i++) d.setUint8(44 + i, 128);
+          a = new Audio(URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
+          a.loop = true;
+          window.__mrSilentAudio = a;
+        }
+        a.muted = false;
+        var p = a.play();
+        if (p && p.catch) p.catch(function() {});
+      } catch (e) {}
+    })();
+  ''';
+
+  static const String _pageKeepAliveStopJs = '''
+    (function() {
+      try {
+        var a = window.__mrSilentAudio;
+        if (a && !a.paused) a.pause();
+      } catch (e) {}
+    })();
+  ''';
+
+  /// When the user paused, playback that starts again on its own within this
+  /// window while backgrounded (a late phantom-PiP play, a queue-handoff force
+  /// start, the page itself) is undone instead of overriding the pause.
+  static const Duration _userPauseGuard = Duration(seconds: 15);
+  DateTime _userPausedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
   @visibleForTesting
   static bool isAdDomain(String host) {
@@ -494,6 +540,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _stoppedUnexpectedlyInBackground = false;
       _backgroundHandoffPending = false;
       _stopPausedKeepAlive();
+      _activeController?.evaluateJavascript(source: _pageKeepAliveStopJs);
       // Stop the keep-alive when the app is back in the foreground and the
       // video is not playing (the silent loop is no longer needed). For a
       // regular video, drop the loop even while playing: in the foreground the
@@ -991,6 +1038,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!_acceptsPlayerEvents(source)) return;
     try {
       var playing = data['playing'] == true;
+      if (playing &&
+          data['ended'] != true &&
+          _appIsBackgrounded &&
+          _userPausedInBackground &&
+          DateTime.now().difference(_userPausedAt) < _userPauseGuard) {
+        controlVideo('pause');
+        return;
+      }
       // The ad-blocker ends an unskippable ad by jumping to its end, which
       // fires `ended` while `ad-showing` is still set - that is the ad ending,
       // not the video, so it must not advance the queue.
@@ -1372,6 +1427,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (playing) break;
     }
     if (!mounted || !_appIsBackgrounded || !_backgroundAudioEnabled) return;
+    // The user (or the system) paused during the handoff wait: don't force the
+    // video back on. userInitiatedPause already keeps the webview reachable.
+    if (_userPausedInBackground || _systemPaused) return;
     if (!playing) {
       // The next video hasn't started on its own. Give the freshly-loaded page
       // a moment to attach its player, then force play + unmute so the
@@ -1482,6 +1540,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!_appIsBackgrounded || !_backgroundAudioEnabled) return;
     _stoppedUnexpectedlyInBackground = true;
     _reassertAudioSession();
+    _activeController?.evaluateJavascript(source: _pageKeepAliveStartJs);
     BackgroundAudioKeepAlive.instance.start();
     _startPausedKeepAlive();
   }
@@ -1556,6 +1615,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _backgroundResumeAllowed = false;
     _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     _userPausedInBackground = true;
+    _userPausedAt = DateTime.now();
     _stoppedUnexpectedlyInBackground = false;
     _backgroundHandoffPending = false;
     _wasPlayingAtSeek = false;
@@ -1563,6 +1623,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       BackgroundAudioKeepAlive.instance.stop();
       _stopPausedKeepAlive();
     } else if (_backgroundAudioEnabled && !_systemPaused) {
+      // Started before the pause below so the page never has a moment with
+      // no media playing (that is when WebKit lets its process suspend).
+      _activeController?.evaluateJavascript(source: _pageKeepAliveStartJs);
       // Pausing while backgrounded ends the phantom-PiP keep-alive (iOS closes
       // the PiP window on pause), which lets iOS suspend the WebView — and then
       // the lock screen / Control Center play button can no longer reach it
@@ -1618,6 +1681,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     } else {
       controlVideo('play');
     }
+    // YouTube can re-mute a video resumed by a script play. Unmute right after
+    // the resume instead of waiting for the throttled state-report retry.
+    _lastUnmuteAttempt = DateTime.fromMillisecondsSinceEpoch(0);
+    for (final ms in const [400, 1200]) {
+      Future<void>.delayed(Duration(milliseconds: ms), () {
+        if (mounted && !_userPausedInBackground) _unmuteVideo();
+      });
+    }
   }
 
   /// Lock-screen / Control Center play while backgrounded. The audio session
@@ -1634,7 +1705,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       // Re-engage the phantom-PiP keep-alive, which both resumes the paused
       // video and keeps the WebContent process alive for continued background
       // playback.
-      await _enterPhantomPiP();
+      await _enterPhantomPiP(userPlay: true);
     }
   }
 
@@ -2051,14 +2122,25 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         _lastPlayInitiatedAt = DateTime.now();
         controller.evaluateJavascript(source: '''
           (function() {
+            window.__mrUserPaused = false;
             var v = $_activeVideoJs;
             if (v) v.play().catch(function(){});
           })();
+          $_pageKeepAliveStopJs
         ''');
         break;
       case 'pause':
+        // `__mrUserPaused` tells an in-flight phantom-PiP handoff not to
+        // restart the video; any real playback clears it again.
         controller.evaluateJavascript(source: '''
           (function() {
+            window.__mrUserPaused = true;
+            if (!window.__mrPauseGuard) {
+              window.__mrPauseGuard = true;
+              document.addEventListener('playing', function(e) {
+                if (e.target !== window.__mrSilentAudio) window.__mrUserPaused = false;
+              }, true);
+            }
             var v = $_activeVideoJs;
             if (v) v.pause();
           })();
@@ -2612,20 +2694,28 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// sports a cold PiP pipeline, so the handoff can lose the race against
   /// suspension (audio dies for that one background until the user hits play
   /// from the notification center).
-  Future<void> _enterPhantomPiP() async {
-    if (await _tryEnterPhantomPiP()) return;
+  Future<void> _enterPhantomPiP({bool userPlay = false}) async {
+    if (await _tryEnterPhantomPiP(userPlay: userPlay)) return;
     await Future<void>.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
-    if (!await _tryEnterPhantomPiP()) {
+    if (!userPlay && _userPausedInBackground) return;
+    if (!await _tryEnterPhantomPiP(userPlay: userPlay)) {
       debugPrint('[MrPlay] phantom PiP retry failed');
     }
   }
 
-  Future<bool> _tryEnterPhantomPiP() async {
+  /// [userPlay] marks an explicit play (lock screen / Control Center); without
+  /// it, a user pause that lands while PiP is being entered wins and the video
+  /// is left paused.
+  Future<bool> _tryEnterPhantomPiP({bool userPlay = false}) async {
     final controller = _activeController;
     if (controller == null) return false;
     try {
       final result = await controller.callAsyncJavaScript(functionBody: '''
+        if ($userPlay) {
+          window.__mrUserPaused = false;
+          $_pageKeepAliveStopJs
+        }
         var videos = document.querySelectorAll('video');
         var video = null;
         for (var i = 0; i < videos.length; i++) {
@@ -2658,6 +2748,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               resolve();
             }
           });
+        }
+        if (window.__mrUserPaused === true) {
+          return { ok: true, reason: 'user-paused' };
         }
         if (video.paused) {
           for (var attempt = 0; attempt < 2; attempt++) {

@@ -370,7 +370,19 @@ class ContentBlockerJS {
       if (window.__mrFallbackInstalled) return;
       window.__mrFallbackInstalled = true;
       try {
-        var _state = { weMuted: false, lastAdAt: 0 };
+        // `mutedEls`: every element muted for an ad. The page can hold more than
+        // one <video>, so restoring only the "active" one could leave the real
+        // video muted (it surfaced on the next play after a pause).
+        var _state = { weMuted: false, lastAdAt: 0, mutedEls: [] };
+
+        function _restoreMuted() {
+          var els = _state.mutedEls;
+          _state.mutedEls = [];
+          _state.weMuted = false;
+          for (var i = 0; i < els.length; i++) {
+            try { if (els[i].muted) els[i].muted = false; } catch (e) {}
+          }
+        }
 
         // True when a muted video right after an ad should be restored: either
         // we muted it, or an ad was live a moment ago (our state can be lost
@@ -443,6 +455,7 @@ class ContentBlockerJS {
             if (!video) return;
             video.muted = true;
             _state.weMuted = true;
+            if (_state.mutedEls.indexOf(video) === -1) _state.mutedEls.push(video);
             if (!video.__mrAdVolBound) {
               video.__mrAdVolBound = true;
               try {
@@ -472,13 +485,7 @@ class ContentBlockerJS {
               _adStart = 0;
               _maskDisabled = false;
               _clearMask();
-              if (_state.weMuted) {
-                var v = _video();
-                if (v) {
-                  _state.weMuted = false;
-                  v.muted = false;
-                }
-              }
+              if (_state.weMuted) _restoreMuted();
               return;
             }
 
@@ -567,6 +574,10 @@ class ContentBlockerJS {
             _attach();
             if (_adShowing()) {
               _handle();
+              return;
+            }
+            if (_state.mutedEls.length > 0) {
+              _restoreMuted();
               return;
             }
             var v = _video();
