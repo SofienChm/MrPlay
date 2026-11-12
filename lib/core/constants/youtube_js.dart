@@ -122,7 +122,7 @@ class YouTubeJS {
               adShowing = !!(playerEl && playerEl.classList.contains('ad-showing'));
             } catch (e) {}
             window.flutter_inappwebview.callHandler('videoState', {
-              playing: !this.paused && !this.ended,
+              playing: !this.paused && !this.ended && this.playbackRate > 0,
               position: isFinite(this.currentTime) ? this.currentTime : 0,
               duration: isFinite(this.duration) ? this.duration : 0,
               ended: !!this.ended,

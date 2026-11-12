@@ -148,6 +148,32 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     })()
   ''';
 
+  /// Background "soft pause": a regular YouTube video paused from the lock
+  /// screen is frozen at playbackRate 0 instead of really paused. A really
+  /// paused `<video>` in a backgrounded page loses its PiP session, the page
+  /// gets suspended, and a later `play()` is blocked or comes back muted. At
+  /// rate 0 the element still counts as playing for iOS (page and PiP stay
+  /// alive) but is silent and its time doesn't move; play just restores the
+  /// rate. Converted to a real pause when the app comes back to the
+  /// foreground.
+  static const String _softResumeJs = '''
+    (function() {
+      var s = window.__mrSoftPaused;
+      if (!s) return;
+      window.__mrSoftPaused = null;
+      try { s.el.playbackRate = s.rate || 1; } catch (e) {}
+    })();
+  ''';
+
+  static const String _softPauseToRealJs = '''
+    (function() {
+      var s = window.__mrSoftPaused;
+      if (!s) return;
+      window.__mrSoftPaused = null;
+      try { s.el.pause(); s.el.playbackRate = s.rate || 1; } catch (e) {}
+    })();
+  ''';
+
   /// When the user paused, playback that starts again on its own within this
   /// window while backgrounded (a late phantom-PiP play, a queue-handoff force
   /// start, the page itself) is undone instead of overriding the pause.
@@ -499,6 +525,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _backgroundAudioEnabled;
       _appIsBackgrounded = false;
       _appIsInactive = false;
+      if (_userPausedInBackground) {
+        _activeController?.evaluateJavascript(source: _softPauseToRealJs);
+      }
       _userPausedInBackground = false;
       _stoppedUnexpectedlyInBackground = false;
       _backgroundHandoffPending = false;
@@ -1599,7 +1628,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _startPausedKeepAlive();
     }
     ref.read(playerProvider.notifier).pause();
-    controlVideo('pause');
+    // Background pause of a regular YouTube video: soft pause (see
+    // [_softResumeJs]) so the lock-screen play always works and isn't muted.
+    final soft = _appIsBackgrounded &&
+        _backgroundAudioEnabled &&
+        !_isMusic &&
+        !_systemPaused;
+    controlVideo(soft ? 'softPause' : 'pause');
     // Tell iOS right away (rate 0, frozen time) instead of waiting for the
     // next state report, so the lock screen shows paused immediately.
     final state = ref.read(playerProvider);
@@ -2095,8 +2130,41 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         controller.evaluateJavascript(source: '''
           (function() {
             window.__mrUserPaused = false;
+            $_softResumeJs
             var v = $_activeVideoJs;
-            if (v) v.play().catch(function(){});
+            if (v && v.paused) v.play().catch(function(){});
+          })();
+        ''');
+        break;
+      case 'softPause':
+        controller.evaluateJavascript(source: '''
+          (function() {
+            window.__mrUserPaused = true;
+            var v = $_activeVideoJs;
+            if (!v) return;
+            if (!v.paused && !v.ended) {
+              try {
+                var r = v.playbackRate;
+                v.playbackRate = 0;
+                if (v.playbackRate === 0) {
+                  window.__mrSoftPaused = { el: v, rate: r > 0 ? r : 1 };
+                  // Anything that really pauses it (PiP window button, a call,
+                  // closing the player) gets its normal speed back.
+                  if (!v.__mrSoftPauseBound) {
+                    v.__mrSoftPauseBound = true;
+                    v.addEventListener('pause', function() {
+                      var s = window.__mrSoftPaused;
+                      if (s && s.el === v) {
+                        window.__mrSoftPaused = null;
+                        try { v.playbackRate = s.rate; } catch (e) {}
+                      }
+                    });
+                  }
+                  return;
+                }
+              } catch (e) {}
+            }
+            v.pause();
           })();
         ''');
         break;
@@ -2691,6 +2759,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final result = await controller.callAsyncJavaScript(functionBody: '''
         if ($userPlay) {
           window.__mrUserPaused = false;
+          $_softResumeJs
         }
         var videos = document.querySelectorAll('video');
         var video = null;
@@ -2737,6 +2806,16 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
               if (attempt === 1) return { ok: false, reason: 'play-rejected' };
               await new Promise(function(r) { setTimeout(r, 200); });
             }
+          }
+        }
+        // A lock-screen play must come back audible (YouTube mutes a play it
+        // didn't start itself). Never during an ad - the ad-blocker owns that.
+        if ($userPlay && !video.paused && video.muted) {
+          var mp = null;
+          try { mp = document.getElementById('movie_player'); } catch (e) {}
+          if (!(mp && mp.classList.contains('ad-showing'))) {
+            video.muted = false;
+            try { if (mp && typeof mp.unMute === 'function') mp.unMute(); } catch (e) {}
           }
         }
         return { ok: !video.paused, reason: video.paused ? 'still-paused' : 'playing' };
@@ -2799,7 +2878,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             adShowing = !!(playerEl && playerEl.classList.contains('ad-showing'));
           } catch (e) {}
           return {
-            playing: !v.paused && !v.ended,
+            playing: !v.paused && !v.ended && v.playbackRate > 0,
             position: isFinite(v.currentTime) ? v.currentTime : 0,
             duration: isFinite(v.duration) ? v.duration : 0,
             ended: !!v.ended,
