@@ -1,4 +1,85 @@
 class YouTubeJS {
+  /// Lock-screen / Notification Center / Control Center play-pause bridge.
+  ///
+  /// WebKit owns the lock-screen controls: it publishes Now Playing for the
+  /// page's media and delivers play/pause to the page's Media Session action
+  /// handlers as a trusted remote-control gesture, so a play from the lock
+  /// screen is allowed (and not muted) even after a long background pause -
+  /// unlike a script `play()` injected from the app. This keeps our own
+  /// play/pause handlers registered (WebKit drops handlers set before media
+  /// plays, so they are re-set on every `playing`), still runs the page's own
+  /// handler, and tells the app what the user asked for (`mediaCommand`).
+  static const String mediaSessionBridgeScript = '''
+    (function() {
+      if (window.__mrMediaBridge) return;
+      window.__mrMediaBridge = true;
+      try {
+        var ms = navigator.mediaSession;
+        if (!ms || typeof ms.setActionHandler !== 'function') return;
+        var orig = ms.setActionHandler.bind(ms);
+        var pageHandlers = {};
+
+        function activeVideo() {
+          var videos = document.querySelectorAll('video');
+          for (var i = 0; i < videos.length; i++) {
+            if (!videos[i].paused && !videos[i].ended) return videos[i];
+          }
+          return document.querySelector('#movie_player video, .html5-video-player video') ||
+                 (videos.length > 0 ? videos[0] : null);
+        }
+
+        function notify(action) {
+          try {
+            if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+              window.flutter_inappwebview.callHandler('mediaCommand', { action: action });
+            }
+          } catch (e) {}
+        }
+
+        function handlerFor(action) {
+          return function(details) {
+            window.__mrUserPaused = (action === 'pause');
+            notify(action);
+            var v = activeVideo();
+            if (v) {
+              try {
+                if (action === 'play') {
+                  if (v.playbackRate === 0) v.playbackRate = 1;
+                  var p = v.play();
+                  if (p && p.catch) p.catch(function() {});
+                } else {
+                  v.pause();
+                }
+              } catch (e) {}
+            }
+            var h = pageHandlers[action];
+            if (h) { try { h(details); } catch (e) {} }
+          };
+        }
+
+        ms.setActionHandler = function(action, handler) {
+          if (action === 'play' || action === 'pause') {
+            pageHandlers[action] = handler || null;
+            return;
+          }
+          return orig(action, handler);
+        };
+
+        function install() {
+          try {
+            orig('play', handlerFor('play'));
+            orig('pause', handlerFor('pause'));
+          } catch (e) {}
+        }
+        install();
+        document.addEventListener('playing', function() {
+          window.__mrUserPaused = false;
+          install();
+        }, true);
+      } catch (e) {}
+    })();
+  ''';
+
   static const String visibilityKeepAliveScript = '''
     (function() {
       if (location.hostname.indexOf('youtube.com') === -1) return;

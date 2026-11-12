@@ -48,7 +48,7 @@ import google_mobile_ads
             reasonRaw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue else {
         return
       }
-      guard MPNowPlayingInfoCenter.default().nowPlayingInfo != nil else { return }
+      NSLog("[MrPlay][lock] audio route lost (headphones/Bluetooth), pausing")
       self?.sendRemoteCommand("pause")
     }
   }
@@ -215,8 +215,13 @@ import google_mobile_ads
         result(FlutterMethodNotImplemented)
       }
     }
-    setupRemoteCommands()
+    // v2-tabs-version2: WebKit owns the lock-screen / Control Center controls
+    // for the page media (trusted remote commands). Registering our own
+    // targets too made every tap run twice and blocked lock-screen play.
+    if useNativeRemoteCommands { setupRemoteCommands() }
   }
+
+  private let useNativeRemoteCommands = false
 
   private func setNowPlaying(_ info: [String: Any]) {
     var now = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]

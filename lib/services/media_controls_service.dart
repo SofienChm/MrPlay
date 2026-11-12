@@ -15,6 +15,13 @@ class MediaControlsService {
 
   static const MethodChannel _channel = MethodChannel('com.mrplay/media');
 
+  /// When false (v2-tabs-version2 experiment), WebKit owns Now Playing and the
+  /// lock-screen controls for the page's media, so the app no longer writes
+  /// MPNowPlayingInfoCenter (two writers made the lock-screen timer and state
+  /// fight). Flip to true to restore the native lock-screen integration
+  /// (and `useNativeRemoteCommands` in AppDelegate.swift).
+  static const bool nativeNowPlaying = false;
+
   void Function(String command, {Duration? position})? _remoteHandler;
   int _artworkGeneration = 0;
 
@@ -45,6 +52,7 @@ class MediaControlsService {
     required bool isPlaying,
     String? artworkUrl,
   }) async {
+    if (!nativeNowPlaying) return;
     try {
       await _channel.invokeMethod('setNowPlaying', {
         'title': title,
@@ -80,6 +88,7 @@ class MediaControlsService {
     required Duration duration,
     required bool isPlaying,
   }) async {
+    if (!nativeNowPlaying) return;
     try {
       await _channel.invokeMethod('setNowPlaying', {
         'positionMs': position.inMilliseconds.toDouble(),
@@ -90,12 +99,14 @@ class MediaControlsService {
   }
 
   Future<void> setPlaying(bool isPlaying) async {
+    if (!nativeNowPlaying) return;
     try {
       await _channel.invokeMethod('setPlaying', {'isPlaying': isPlaying});
     } catch (e) { debugPrint('[MrPlay] media controls play state failed: $e'); }
   }
 
   Future<void> clearNowPlaying() async {
+    if (!nativeNowPlaying) return;
     // Invalidate any in-flight artwork fetch so it can't re-paint Now Playing
     // after the player was dismissed.
     _artworkGeneration++;

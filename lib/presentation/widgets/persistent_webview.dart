@@ -689,6 +689,24 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       },
     );
     controller.addJavaScriptHandler(
+      handlerName: 'mediaCommand',
+      callback: (args) {
+        if (!_acceptsPlayerEvents(controller)) return;
+        if (args.isEmpty || args.first is! Map) return;
+        final action =
+            (args.first as Map<String, dynamic>)['action'] as String?;
+        debugPrint('[MrPlay][lock] page media command=$action '
+            'bg=$_appIsBackgrounded playing=${ref.read(playerProvider).isPlaying}');
+        // The page has already paused/played the video itself (trusted WebKit
+        // remote command); only sync our state and background keep-alive.
+        if (action == 'pause') {
+          userInitiatedPause(pageHandled: true);
+        } else if (action == 'play') {
+          resumePlayback(pageHandled: true);
+        }
+      },
+    );
+    controller.addJavaScriptHandler(
       handlerName: 'videoTabSwipe',
       callback: (args) {
         if (_acceptsPlayerEvents(controller)) _minimizeVideoTab();
@@ -1448,6 +1466,11 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _onRemoteCommand(String command, {Duration? position}) {
     final state = ref.read(playerProvider);
+    debugPrint('[MrPlay][lock] native command=$command '
+        'bg=$_appIsBackgrounded playing=${state.isPlaying}');
+    // Lock-screen controls are WebKit's now; the only native command left is
+    // the headphone/Bluetooth-disconnect pause, which needs a tracked video.
+    if (state.currentVideo == null) return;
     final positionMs = position?.inMilliseconds ?? 0;
     switch (command) {
       case 'play':
@@ -1606,7 +1629,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Pauses playback as an explicit user action (lock screen / Control Center
   /// / sleep timer). While backgrounded, system-forced pauses are auto-resumed
   /// (for YouTube Music); user pauses must not be fought.
-  void userInitiatedPause() {
+  void userInitiatedPause({bool pageHandled = false}) {
     _backgroundResumeAllowed = false;
     _lastKnownPlayingAt = DateTime.fromMillisecondsSinceEpoch(0);
     _userPausedInBackground = true;
@@ -1628,13 +1651,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _startPausedKeepAlive();
     }
     ref.read(playerProvider.notifier).pause();
-    // Background pause of a regular YouTube video: soft pause (see
-    // [_softResumeJs]) so the lock-screen play always works and isn't muted.
-    final soft = _appIsBackgrounded &&
-        _backgroundAudioEnabled &&
-        !_isMusic &&
-        !_systemPaused;
-    controlVideo(soft ? 'softPause' : 'pause');
+    // Lock-screen play/pause now goes through WebKit's own trusted remote
+    // command (see YouTubeJS.mediaSessionBridgeScript), so a real pause is
+    // safe again - no speed-0 soft pause.
+    if (!pageHandled) controlVideo('pause');
     // Tell iOS right away (rate 0, frozen time) instead of waiting for the
     // next state report, so the lock screen shows paused immediately.
     final state = ref.read(playerProvider);
@@ -1672,7 +1692,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   /// User-initiated resume (mini player / full player / remote play). Clears
   /// the system-pause latch and resumes playback.
-  void resumePlayback() {
+  void resumePlayback({bool pageHandled = false}) {
     _systemPaused = false;
     _systemPausedElapsed = 0;
     _lastPlayInitiatedAt = DateTime.now();
@@ -1684,8 +1704,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     _stoppedUnexpectedlyInBackground = false;
     ref.read(playerProvider.notifier).resume();
     if (_appIsBackgrounded && _backgroundAudioEnabled) {
+      // Also a fallback when the page already played: re-asserts the audio
+      // session and only calls play() if the video is still paused.
       _resumeFromBackground();
-    } else {
+    } else if (!pageHandled) {
       controlVideo('play');
     }
     // YouTube can re-mute a video resumed by a script play. Unmute right after
@@ -2960,6 +2982,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                   forMainFrameOnly: false,
                 ),
               UserScript(
+                source: YouTubeJS.mediaSessionBridgeScript,
+                injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+              ),
+              UserScript(
                 source: YouTubeJS.visibilityKeepAliveScript,
                 injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
               ),
@@ -3046,6 +3072,10 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
                           injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
                           forMainFrameOnly: false,
                         ),
+                      UserScript(
+                        source: YouTubeJS.mediaSessionBridgeScript,
+                        injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
+                      ),
                       UserScript(
                         source: YouTubeJS.visibilityKeepAliveScript,
                         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,

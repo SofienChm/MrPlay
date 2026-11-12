@@ -1,6 +1,10 @@
 # MrPlay — Claude guide
 
-Flutter, iOS-only app (Riverpod, flutter_inappwebview, Hive, AdMob). Branch `v2-tabs`, main is `master`.
+Flutter, iOS-only app (Riverpod, flutter_inappwebview, Hive, AdMob). Main is `master`.
+
+## Branches
+- `v2-tabs` — the STABLE version, already online (App Store). Only hotfixes there.
+- `v2-tabs-version2` — experimental work: WebKit owns the lock-screen / Notification Center controls (no native MPRemoteCommandCenter targets). Merge into `v2-tabs` only after device testing.
 
 ## Token-saving rules (read first)
 - Do NOT read or list anything in `claudeignore.md` (build output, logs, lockfiles, generated files, images).
