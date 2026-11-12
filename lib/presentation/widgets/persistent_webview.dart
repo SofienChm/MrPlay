@@ -107,6 +107,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // True while the tracked video is a YouTube Music (music.youtube.com) page.
   bool _isMusic = false;
   int _lastNowPlayingMs = 0;
+  bool? _lastNowPlayingPlaying;
   Timer? _statePoll;
   StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
 
@@ -145,44 +146,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       if (main) return main;
       return videos.length > 0 ? videos[0] : null;
     })()
-  ''';
-
-  /// Plays a silent looping `<audio>` inside the page. While a video is paused
-  /// in the background nothing in the WebContent process is playing, so WebKit
-  /// suspends that process after a while and a lock-screen play can no longer
-  /// reach the page (the app-side silent loop only keeps the app process
-  /// alive). A playing page audio element keeps the WebContent process awake.
-  static const String _pageKeepAliveStartJs = '''
-    (function() {
-      try {
-        var a = window.__mrSilentAudio;
-        if (!a) {
-          var n = 8000, buf = new ArrayBuffer(44 + n), d = new DataView(buf);
-          var w = function(o, s) { for (var i = 0; i < s.length; i++) d.setUint8(o + i, s.charCodeAt(i)); };
-          w(0, 'RIFF'); d.setUint32(4, 36 + n, true); w(8, 'WAVE'); w(12, 'fmt ');
-          d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
-          d.setUint32(24, 8000, true); d.setUint32(28, 8000, true);
-          d.setUint16(32, 1, true); d.setUint16(34, 8, true);
-          w(36, 'data'); d.setUint32(40, n, true);
-          for (var i = 0; i < n; i++) d.setUint8(44 + i, 128);
-          a = new Audio(URL.createObjectURL(new Blob([buf], { type: 'audio/wav' })));
-          a.loop = true;
-          window.__mrSilentAudio = a;
-        }
-        a.muted = false;
-        var p = a.play();
-        if (p && p.catch) p.catch(function() {});
-      } catch (e) {}
-    })();
-  ''';
-
-  static const String _pageKeepAliveStopJs = '''
-    (function() {
-      try {
-        var a = window.__mrSilentAudio;
-        if (a && !a.paused) a.pause();
-      } catch (e) {}
-    })();
   ''';
 
   /// When the user paused, playback that starts again on its own within this
@@ -540,7 +503,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _stoppedUnexpectedlyInBackground = false;
       _backgroundHandoffPending = false;
       _stopPausedKeepAlive();
-      _activeController?.evaluateJavascript(source: _pageKeepAliveStopJs);
       // Stop the keep-alive when the app is back in the foreground and the
       // video is not playing (the silent loop is no longer needed). For a
       // regular video, drop the loop even while playing: in the foreground the
@@ -1314,8 +1276,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     required int durationMs,
     required bool playing,
   }) {
-    if (positionMs - _lastNowPlayingMs < 1000) return;
+    // A play/pause change is sent at once: while paused the position never
+    // moves, so the throttle alone left iOS on rate 1 and the lock-screen
+    // timer kept running after a pause.
+    final stateChanged = playing != _lastNowPlayingPlaying;
+    if (!stateChanged && (positionMs - _lastNowPlayingMs).abs() < 1000) return;
     _lastNowPlayingMs = positionMs;
+    _lastNowPlayingPlaying = playing;
     // While the system has paused us, freeze the elapsed time in Now Playing
     // so the notification doesn't keep counting up while the video is stopped.
     if (_systemPaused) {
@@ -1540,7 +1507,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!_appIsBackgrounded || !_backgroundAudioEnabled) return;
     _stoppedUnexpectedlyInBackground = true;
     _reassertAudioSession();
-    _activeController?.evaluateJavascript(source: _pageKeepAliveStartJs);
     BackgroundAudioKeepAlive.instance.start();
     _startPausedKeepAlive();
   }
@@ -1623,9 +1589,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       BackgroundAudioKeepAlive.instance.stop();
       _stopPausedKeepAlive();
     } else if (_backgroundAudioEnabled && !_systemPaused) {
-      // Started before the pause below so the page never has a moment with
-      // no media playing (that is when WebKit lets its process suspend).
-      _activeController?.evaluateJavascript(source: _pageKeepAliveStartJs);
       // Pausing while backgrounded ends the phantom-PiP keep-alive (iOS closes
       // the PiP window on pause), which lets iOS suspend the WebView — and then
       // the lock screen / Control Center play button can no longer reach it
@@ -1637,6 +1600,15 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     }
     ref.read(playerProvider.notifier).pause();
     controlVideo('pause');
+    // Tell iOS right away (rate 0, frozen time) instead of waiting for the
+    // next state report, so the lock screen shows paused immediately.
+    final state = ref.read(playerProvider);
+    _lastNowPlayingPlaying = false;
+    MediaControlsService.instance.updateProgress(
+      position: state.position,
+      duration: state.duration,
+      isPlaying: false,
+    );
   }
 
   /// The system took over our audio (another app, a phone call, a route
@@ -2126,7 +2098,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             var v = $_activeVideoJs;
             if (v) v.play().catch(function(){});
           })();
-          $_pageKeepAliveStopJs
         ''');
         break;
       case 'pause':
@@ -2138,7 +2109,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
             if (!window.__mrPauseGuard) {
               window.__mrPauseGuard = true;
               document.addEventListener('playing', function(e) {
-                if (e.target !== window.__mrSilentAudio) window.__mrUserPaused = false;
+                window.__mrUserPaused = false;
               }, true);
             }
             var v = $_activeVideoJs;
@@ -2443,6 +2414,12 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         var v = $_activeVideoJs;
         if (!v || !v.webkitSetPresentationMode) return;
         if (v.webkitPresentationMode === 'picture-in-picture') return;
+        // Re-entering PiP must never resume a video the user paused.
+        if (window.__mrUserPaused === true) {
+          var hold = function() { if (window.__mrUserPaused === true) v.pause(); };
+          v.addEventListener('play', hold);
+          setTimeout(function() { v.removeEventListener('play', hold); }, 3000);
+        }
         try { v.webkitSetPresentationMode('picture-in-picture'); } catch (e) {}
       })();
     ''');
@@ -2714,7 +2691,6 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       final result = await controller.callAsyncJavaScript(functionBody: '''
         if ($userPlay) {
           window.__mrUserPaused = false;
-          $_pageKeepAliveStopJs
         }
         var videos = document.querySelectorAll('video');
         var video = null;
@@ -3262,6 +3238,8 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   /// Public session reset for the app shell (e.g. backgrounded session
   /// expiry). Returns the user to the hub with all playback torn down.
   void resetToHub() => _goToHub();
+
+  bool get isPlaying => ref.read(playerProvider).isPlaying;
 
   void _minimizeVideoTab() {
     if (_videoTabUrl == null) return;

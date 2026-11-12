@@ -34,7 +34,7 @@ class MrPlayApp extends StatefulWidget {
       ValueNotifier(true);
 
   /// A backgrounded session older than this is reset when the app resumes.
-  static const Duration _sessionTimeout = Duration(hours: 2);
+  static const Duration _sessionTimeout = Duration(hours: 25);
 
   @override
   State<MrPlayApp> createState() => _MrPlayAppState();
@@ -78,8 +78,12 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
         final pausedAt = _pausedAt;
         if (pausedAt != null) {
           _pausedAt = null;
-          if (DateTime.now().difference(pausedAt) >= MrPlayApp._sessionTimeout) {
-            MrPlayApp.webViewKey.currentState?.resetToHub();
+          final webView = MrPlayApp.webViewKey.currentState;
+          // Never reset while something is still playing (background audio).
+          if (webView != null &&
+              !webView.isPlaying &&
+              DateTime.now().difference(pausedAt) >= MrPlayApp._sessionTimeout) {
+            webView.resetToHub();
           }
         }
         break;
