@@ -2,7 +2,7 @@ name: iOS TestFlight
 
 on:
   push:
-    branches: [master, v2-tabs]
+    branches: [master, v2-tabs, v2-tabs-version2]
   workflow_dispatch:
 
 jobs:
