@@ -139,12 +139,20 @@ jobs:
           echo "IPA_PATH=$IPA" >> $GITHUB_ENV
 
       - name: Upload to TestFlight
-        uses: apple-actions/upload-testflight-build@v3
-        with:
-          app-path: ${{ env.IPA_PATH }}
-          issuer-id: ${{ secrets.APPSTORE_ISSUER_ID }}
-          api-key-id: ${{ secrets.APPSTORE_KEY_ID }}
-          api-private-key: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+        run: |
+          set +e
+          xcrun altool --upload-app -f "$IPA_PATH" -t ios \
+            --apiKey "$APPSTORE_KEY_ID" --apiIssuer "$APPSTORE_ISSUER_ID" \
+            --output-format normal > $RUNNER_TEMP/upload.log 2>&1
+          STATUS=$?
+          cat $RUNNER_TEMP/upload.log
+          if [ $STATUS -ne 0 ] || grep -qiE "error|failed" $RUNNER_TEMP/upload.log; then
+            grep -iE "error|failed|ITMS" $RUNNER_TEMP/upload.log | head -20 | while read -r line; do echo "::error::$line"; done
+            exit 1
+          fi
 
       - name: Cleanup keychain
         if: always()
