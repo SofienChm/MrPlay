@@ -1,51 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'app_colors.dart';
 
-class AppTheme {
-  static ThemeData lightTheme(Color accent) {
-    return ThemeData(
-      brightness: Brightness.light,
-      primaryColor: accent,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: accent,
-        primary: accent,
-        brightness: Brightness.light,
-      ),
-      scaffoldBackgroundColor: AppColors.background,
-      textTheme: GoogleFonts.poppinsTextTheme(),
-      appBarTheme: AppBarTheme(
-        backgroundColor: accent,
-        foregroundColor: Colors.white,
-        elevation: 0,
-      ),
-      cardTheme: CardThemeData(
-        elevation: 2,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
+abstract final class AppTheme {
+  static ThemeData light(Color accent) => _build(accent, Brightness.light);
+
+  static ThemeData dark(Color accent) => _build(accent, Brightness.dark);
+
+  static ThemeData _build(Color accent, Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final scheme = ColorScheme.fromSeed(
+      seedColor: accent,
+      primary: accent,
+      brightness: brightness,
     );
-  }
-
-  static ThemeData darkTheme(Color accent) {
+    final base = isDark ? ThemeData.dark().textTheme : ThemeData.light().textTheme;
     return ThemeData(
-      brightness: Brightness.dark,
-      primaryColor: accent,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: accent,
-        primary: accent,
-        brightness: Brightness.dark,
-      ),
-      scaffoldBackgroundColor: const Color(0xFF121212),
-      textTheme: GoogleFonts.poppinsTextTheme(ThemeData.dark().textTheme),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: Color(0xFF121212),
+      useMaterial3: true,
+      brightness: brightness,
+      colorScheme: scheme,
+      scaffoldBackgroundColor: isDark ? const Color(0xFF121212) : const Color(0xFFF5F5F5),
+      textTheme: GoogleFonts.poppinsTextTheme(base),
+      appBarTheme: AppBarTheme(
+        backgroundColor: isDark ? const Color(0xFF121212) : accent,
         foregroundColor: Colors.white,
         elevation: 0,
+        centerTitle: true,
       ),
       cardTheme: CardThemeData(
         elevation: 2,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
+      snackBarTheme: const SnackBarThemeData(behavior: SnackBarBehavior.floating),
     );
   }
 }

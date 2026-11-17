@@ -18,14 +18,16 @@ Flutter, iOS-only app (Riverpod, flutter_inappwebview, Hive, AdMob). Main is `ma
 - Run `flutter analyze <file>` on touched files, not the whole project; run `flutter test <file>` for specific tests.
 
 ## Layout
-- `lib/main.dart`, `lib/app.dart` — entry/app shell
-- `lib/presentation/{pages,widgets}` — screens and UI
-- `lib/widgets/` — full player, link resolver sheet
-- `lib/providers/player_provider.dart` — player state (Riverpod)
-- `lib/services/` — background audio, media controls, PiP/spotlight/siri, sleep timer, share links, stats
-- `lib/data/`, `lib/models/` — repositories, models (Hive boxes)
-- `lib/core/` — constants, theme, utils
-- `lib/ad_config.dart` — AdMob IDs/config
+(`v3-rewrite` branch: full rewrite, same features)
+- `lib/main.dart`, `lib/app/` — bootstrap (startup order), providers, app, shell (hub → browser → player → banner)
+- `lib/features/player/playback_engine.dart` — THE orchestrator: webviews, background audio (phantom PiP / silent loop), interruptions, queue, lock screen
+- `lib/features/player/` — player state, pure `playback_policy.dart`, `video_bridge.dart` (JS commands), mini/full player, sleep timer, options sheet
+- `lib/features/browser/` — browser layer widgets, `web_policy.dart` (ad domains/popups), `web_scripts.dart`
+- `assets/js/` — ALL injected JS as real files; `runtime.js` (`window.__mr`) is loaded first and used by the others
+- `lib/features/{hub,search,library,stats,settings,share,ads}` — screens
+- `lib/data/` — immutable models, Hive adapters (type IDs/box names unchanged from v1), repositories
+- `lib/services/` — native channels (spotlight/siri/now playing), keep-alive audio, home widget, analytics
+- `lib/core/` — config (app info, ad units, feature flags, platforms), theme, utils
 - `ios/` — native Runner, HomeWidgetExtension, Info.plist
 - `web/` — static privacy/support pages (not the app)
 - `codemagic.yaml` — CI/TestFlight build

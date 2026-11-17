@@ -1,130 +1,113 @@
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/config/platforms.dart';
+import '../../core/theme/palettes.dart';
+
+/// Immutable snapshot of every user preference.
+@immutable
+class AppSettings {
+  const AppSettings({
+    this.themeMode = ThemeMode.system,
+    this.accentColor = AccentColors.fallback,
+    this.hubBackground = 0,
+    this.defaultPlatform = Platforms.defaultName,
+    this.adBlock = true,
+    this.blockPopups = true,
+    this.backgroundAudio = true,
+    this.historyEnabled = true,
+    this.fullscreenOnRotation = true,
+  });
+
+  final ThemeMode themeMode;
+  final Color accentColor;
+  final int hubBackground;
+  final String defaultPlatform;
+  final bool adBlock;
+  final bool blockPopups;
+  final bool backgroundAudio;
+  final bool historyEnabled;
+  final bool fullscreenOnRotation;
+
+  AppSettings copyWith({
+    ThemeMode? themeMode,
+    Color? accentColor,
+    int? hubBackground,
+    String? defaultPlatform,
+    bool? adBlock,
+    bool? blockPopups,
+    bool? backgroundAudio,
+    bool? historyEnabled,
+    bool? fullscreenOnRotation,
+  }) =>
+      AppSettings(
+        themeMode: themeMode ?? this.themeMode,
+        accentColor: accentColor ?? this.accentColor,
+        hubBackground: hubBackground ?? this.hubBackground,
+        defaultPlatform: defaultPlatform ?? this.defaultPlatform,
+        adBlock: adBlock ?? this.adBlock,
+        blockPopups: blockPopups ?? this.blockPopups,
+        backgroundAudio: backgroundAudio ?? this.backgroundAudio,
+        historyEnabled: historyEnabled ?? this.historyEnabled,
+        fullscreenOnRotation: fullscreenOnRotation ?? this.fullscreenOnRotation,
+      );
+}
+
+/// Persists [AppSettings] in SharedPreferences (same keys as v1).
 class SettingsRepository {
-  static const String _themeKey = 'theme_mode';
-  static const String _defaultPlatformKey = 'default_platform';
-  static const String _lastPlatformUrlKey = 'last_platform_url';
-  static const String _adBlockKey = 'ad_block_enabled';
-  static const String _blockPopupsKey = 'block_popups_enabled';
-  static const String _backgroundAudioKey = 'background_audio_enabled';
-  static const String _historyKey = 'history_enabled';
-  static const String _fullscreenOnRotationKey = 'fullscreen_on_rotation';
-  static const String _accentColorKey = 'accent_color';
-  static const String _hubBackgroundKey = 'hub_background';
+  SettingsRepository(this._prefs);
 
-  static Future<SharedPreferences> get _prefs =>
-      SharedPreferences.getInstance();
+  final SharedPreferences _prefs;
 
-  static Future<String> getThemeMode() async {
-    final prefs = await _prefs;
-    return prefs.getString(_themeKey) ?? 'system';
+  static const _theme = 'theme_mode';
+  static const _defaultPlatform = 'default_platform';
+  static const _adBlock = 'ad_block_enabled';
+  static const _blockPopups = 'block_popups_enabled';
+  static const _backgroundAudio = 'background_audio_enabled';
+  static const _history = 'history_enabled';
+  static const _fullscreenOnRotation = 'fullscreen_on_rotation';
+  static const _accent = 'accent_color';
+  static const _hubBackground = 'hub_background';
+
+  /// Keys reset by "Clear cache" (toggles are kept).
+  static const _appearanceKeys = [_theme, _defaultPlatform, _accent, _hubBackground];
+
+  AppSettings load() {
+    const d = AppSettings();
+    return AppSettings(
+      themeMode: switch (_prefs.getString(_theme)) {
+        'light' => ThemeMode.light,
+        'dark' => ThemeMode.dark,
+        _ => ThemeMode.system,
+      },
+      accentColor: Color(_prefs.getInt(_accent) ?? d.accentColor.toARGB32()),
+      hubBackground: _prefs.getInt(_hubBackground) ?? d.hubBackground,
+      defaultPlatform: _prefs.getString(_defaultPlatform) ?? d.defaultPlatform,
+      adBlock: _prefs.getBool(_adBlock) ?? d.adBlock,
+      blockPopups: _prefs.getBool(_blockPopups) ?? d.blockPopups,
+      backgroundAudio: _prefs.getBool(_backgroundAudio) ?? d.backgroundAudio,
+      historyEnabled: _prefs.getBool(_history) ?? d.historyEnabled,
+      fullscreenOnRotation: _prefs.getBool(_fullscreenOnRotation) ?? d.fullscreenOnRotation,
+    );
   }
 
-  static Future<void> setThemeMode(String mode) async {
-    final prefs = await _prefs;
-    await prefs.setString(_themeKey, mode);
+  Future<void> save(AppSettings s) async {
+    await Future.wait([
+      _prefs.setString(_theme, s.themeMode.name),
+      _prefs.setInt(_accent, s.accentColor.toARGB32()),
+      _prefs.setInt(_hubBackground, s.hubBackground),
+      _prefs.setString(_defaultPlatform, s.defaultPlatform),
+      _prefs.setBool(_adBlock, s.adBlock),
+      _prefs.setBool(_blockPopups, s.blockPopups),
+      _prefs.setBool(_backgroundAudio, s.backgroundAudio),
+      _prefs.setBool(_history, s.historyEnabled),
+      _prefs.setBool(_fullscreenOnRotation, s.fullscreenOnRotation),
+    ]);
   }
 
-  static Future<String> getDefaultPlatform() async {
-    final prefs = await _prefs;
-    return prefs.getString(_defaultPlatformKey) ?? 'YouTube';
-  }
-
-  static Future<void> setDefaultPlatform(String name) async {
-    final prefs = await _prefs;
-    await prefs.setString(_defaultPlatformKey, name);
-  }
-
-  static Future<String?> getLastPlatformUrl() async {
-    final prefs = await _prefs;
-    return prefs.getString(_lastPlatformUrlKey);
-  }
-
-  static Future<void> setLastPlatformUrl(String url) async {
-    final prefs = await _prefs;
-    await prefs.setString(_lastPlatformUrlKey, url);
-  }
-
-  static Future<bool> getAdBlockEnabled() async {
-    final prefs = await _prefs;
-    return prefs.getBool(_adBlockKey) ?? true;
-  }
-
-  static Future<void> setAdBlockEnabled(bool enabled) async {
-    final prefs = await _prefs;
-    await prefs.setBool(_adBlockKey, enabled);
-  }
-
-  static Future<bool> getBlockPopupsEnabled() async {
-    final prefs = await _prefs;
-    return prefs.getBool(_blockPopupsKey) ?? true;
-  }
-
-  static Future<void> setBlockPopupsEnabled(bool enabled) async {
-    final prefs = await _prefs;
-    await prefs.setBool(_blockPopupsKey, enabled);
-  }
-
-  static Future<bool> getBackgroundAudioEnabled() async {
-    final prefs = await _prefs;
-    return prefs.getBool(_backgroundAudioKey) ?? true;
-  }
-
-  static Future<void> setBackgroundAudioEnabled(bool enabled) async {
-    final prefs = await _prefs;
-    await prefs.setBool(_backgroundAudioKey, enabled);
-  }
-
-  static Future<void> clearCache() async {
-    final prefs = await _prefs;
-    await prefs.remove(_themeKey);
-    await prefs.remove(_defaultPlatformKey);
-    await prefs.remove(_lastPlatformUrlKey);
-    await prefs.remove(_adBlockKey);
-    await prefs.remove(_backgroundAudioKey);
-    await prefs.remove(_accentColorKey);
-    await prefs.remove(_hubBackgroundKey);
-  }
-
-  static Future<bool> getHistoryEnabled() async {
-    final prefs = await _prefs;
-    return prefs.getBool(_historyKey) ?? true;
-  }
-
-  static Future<void> setHistoryEnabled(bool enabled) async {
-    final prefs = await _prefs;
-    await prefs.setBool(_historyKey, enabled);
-  }
-
-  static Future<bool> getFullscreenOnRotation() async {
-    final prefs = await _prefs;
-    return prefs.getBool(_fullscreenOnRotationKey) ?? true;
-  }
-
-  static Future<void> setFullscreenOnRotation(bool enabled) async {
-    final prefs = await _prefs;
-    await prefs.setBool(_fullscreenOnRotationKey, enabled);
-  }
-
-  static const int defaultAccentColor = 0xFF2196F3;
-
-  static Future<int> getAccentColor() async {
-    final prefs = await _prefs;
-    return prefs.getInt(_accentColorKey) ?? defaultAccentColor;
-  }
-
-  static Future<void> setAccentColor(int value) async {
-    final prefs = await _prefs;
-    await prefs.setInt(_accentColorKey, value);
-  }
-
-  static Future<int> getHubBackground() async {
-    final prefs = await _prefs;
-    return prefs.getInt(_hubBackgroundKey) ?? 0;
-  }
-
-  static Future<void> setHubBackground(int index) async {
-    final prefs = await _prefs;
-    await prefs.setInt(_hubBackgroundKey, index);
+  Future<void> resetAppearance() async {
+    for (final key in _appearanceKeys) {
+      await _prefs.remove(key);
+    }
   }
 }
