@@ -525,6 +525,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
           _backgroundAudioEnabled;
       _appIsBackgrounded = false;
       _appIsInactive = false;
+      _activeController?.evaluateJavascript(source: 'window.__mrAppBg = false;');
       if (_userPausedInBackground) {
         _activeController?.evaluateJavascript(source: _softPauseToRealJs);
       }
@@ -586,6 +587,9 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
 
   void _enterBackground() {
     _appIsBackgrounded = true;
+    // Lets the Media Session bridge soft-pause a PiP video (see
+    // YouTubeJS.mediaSessionBridgeScript); document.hidden is spoofed.
+    _activeController?.evaluateJavascript(source: 'window.__mrAppBg = true;');
     _backgroundResumeAllowed = _backgroundAudioEnabled &&
         ref.read(playerProvider).isPlaying &&
         !_userPausedInBackground;

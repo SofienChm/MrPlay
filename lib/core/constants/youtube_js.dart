@@ -36,6 +36,31 @@ class YouTubeJS {
           } catch (e) {}
         }
 
+        // A really paused <video> in PiP while the app is backgrounded loses
+        // its PiP session and the page gets suspended, so play can't come back.
+        // Freeze it at rate 0 instead (same soft pause as the app's own);
+        // the app turns it into a real pause when it returns to the foreground.
+        function softPause(v) {
+          if (window.__mrAppBg !== true) return false;
+          if (v.webkitPresentationMode !== 'picture-in-picture') return false;
+          if (v.paused || v.ended) return false;
+          var r = v.playbackRate;
+          v.playbackRate = 0;
+          if (v.playbackRate !== 0) return false;
+          window.__mrSoftPaused = { el: v, rate: r > 0 ? r : 1 };
+          if (!v.__mrSoftPauseBound) {
+            v.__mrSoftPauseBound = true;
+            v.addEventListener('pause', function() {
+              var s = window.__mrSoftPaused;
+              if (s && s.el === v) {
+                window.__mrSoftPaused = null;
+                try { v.playbackRate = s.rate; } catch (e) {}
+              }
+            });
+          }
+          return true;
+        }
+
         function handlerFor(action) {
           return function(details) {
             window.__mrUserPaused = (action === 'pause');
@@ -44,9 +69,13 @@ class YouTubeJS {
             if (v) {
               try {
                 if (action === 'play') {
-                  if (v.playbackRate === 0) v.playbackRate = 1;
+                  var s = window.__mrSoftPaused;
+                  window.__mrSoftPaused = null;
+                  if (v.playbackRate === 0) v.playbackRate = (s && s.rate) || 1;
                   var p = v.play();
                   if (p && p.catch) p.catch(function() {});
+                } else if (softPause(v)) {
+                  return;
                 } else {
                   v.pause();
                 }
