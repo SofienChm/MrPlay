@@ -1,15 +1,12 @@
+import 'services/ad_config_service.dart';
+
 class AdConfig {
   AdConfig._();
 
-  static const String _testBannerAdUnitId =
-      'ca-app-pub-3940256099942544/6300978111';
-
-  /// The banner slot is intentionally a Google test unit (same as the original
-  /// app). The release build previously fell back to the prod unit
-  /// `ca-app-pub-2351054385499645/9979835900` while Info.plist still declared
-  /// a test GADApplicationIdentifier, which made AdMob fail every load with
-  /// "app ID mismatch" -> the banner silently disappeared in release builds.
-  static String get bannerAdUnitId {
-    return _testBannerAdUnitId;
-  }
+  /// The banner unit id is driven by Firebase Remote Config (`banner_ad_unit_id`
+  /// key) so the developer can swap the Google test unit for the production
+  /// unit from the Firebase console. Defaults to a Google test unit when
+  /// Firebase isn't configured / offline / the key is blank.
+  static String get bannerAdUnitId =>
+      AdConfigService.instance.bannerAdUnitId.value;
 }

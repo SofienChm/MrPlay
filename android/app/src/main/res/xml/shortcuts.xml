@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher icon shortcuts (long-press on MrPlay). They deep-link through the
+     same mrplay://open?url=... scheme the home widget uses; MainActivity pushes
+     the URL to the Dart side (channel "com.mrplay/app") which loads it in the
+     webview. Android's equivalent of the iOS Siri Shortcuts entries. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="youtube"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_youtube_short"
+        android:shortcutLongLabel="@string/shortcut_youtube_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="mrplay://open?url=https%3A%2F%2Fm.youtube.com" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="music"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_music_short"
+        android:shortcutLongLabel="@string/shortcut_music_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="mrplay://open?url=https%3A%2F%2Fmusic.youtube.com" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="twitch"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_twitch_short"
+        android:shortcutLongLabel="@string/shortcut_twitch_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="mrplay://open?url=https%3A%2F%2Fm.twitch.tv" />
+    </shortcut>
+</shortcuts>

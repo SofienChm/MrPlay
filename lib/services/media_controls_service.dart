@@ -3,10 +3,18 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 
+import 'picture_in_picture_service.dart';
+
 /// Bridges to the native `com.mrplay/media` channel (iOS only).
 ///
 /// Populates MPNowPlayingInfoCenter (lock screen / Control Center) and
 /// forwards remote command events (play/pause/skip/seek) back to Dart.
+///
+/// IMPORTANT: this class owns the only Dart-side MethodCallHandler for the
+/// `com.mrplay/media` channel. The native side also pushes `pipModeChanged`
+/// events on the same channel (see PictureInPictureService), so they must be
+/// dispatched here — a second `setMethodCallHandler` would silently replace
+/// these handlers and break remote commands.
 class MediaControlsService {
   MediaControlsService._();
 
@@ -21,15 +29,22 @@ class MediaControlsService {
   ) {
     _remoteHandler = handler;
     _channel.setMethodCallHandler((call) async {
-      if (call.method != 'remoteCommand') return;
-      final args = call.arguments as List<dynamic>? ?? const [];
-      final command = args.isNotEmpty ? args[0] as String? ?? '' : '';
-      Duration? position;
-      if (args.length > 1 && args[1] != null) {
-        final ms = (args[1] as num).toDouble();
-        position = Duration(milliseconds: ms.round());
+      switch (call.method) {
+        case 'remoteCommand':
+          final args = call.arguments as List<dynamic>? ?? const [];
+          final command = args.isNotEmpty ? args[0] as String? ?? '' : '';
+          Duration? position;
+          if (args.length > 1 && args[1] != null) {
+            final ms = (args[1] as num).toDouble();
+            position = Duration(milliseconds: ms.round());
+          }
+          _remoteHandler?.call(command, position: position);
+          break;
+        case 'pipModeChanged':
+          PictureInPictureService.instance.isInPip.value =
+              call.arguments == true;
+          break;
       }
-      _remoteHandler?.call(command, position: position);
     });
   }
 
@@ -51,6 +66,7 @@ class MediaControlsService {
       position: position,
       duration: duration,
       isPlaying: isPlaying,
+      artworkUrl: artworkUrl,
     );
     if (artworkUrl != null && artworkUrl.isNotEmpty) {
       final artwork = await _fetchArtwork(artworkUrl);
@@ -61,6 +77,7 @@ class MediaControlsService {
           position: position,
           duration: duration,
           isPlaying: isPlaying,
+          artworkUrl: artworkUrl,
           artwork: artwork,
         );
       }
@@ -74,6 +91,7 @@ class MediaControlsService {
     required Duration duration,
     required bool isPlaying,
     String? artwork,
+    String? artworkUrl,
   }) async {
     try {
       await _channel.invokeMethod('setNowPlaying', {
@@ -83,6 +101,7 @@ class MediaControlsService {
         'durationMs': duration.inMilliseconds.toDouble(),
         'isPlaying': isPlaying,
         if (artwork != null) 'artwork': artwork,
+        if (artworkUrl != null && artworkUrl.isNotEmpty) 'artworkUrl': artworkUrl,
       });
     } catch (_) {}
   }
@@ -111,6 +130,16 @@ class MediaControlsService {
   Future<void> clearNowPlaying() async {
     try {
       await _channel.invokeMethod('clearNowPlaying');
+    } catch (_) {}
+  }
+
+  /// Tells the native side whether background audio is allowed. Off => the
+  /// foreground service / media notification must not keep running while the
+  /// app is backgrounded (the WebView audio is paused by Dart). No-op on iOS
+  /// (unhandled channel method).
+  Future<void> setBackgroundAudioEnabled(bool enabled) async {
+    try {
+      await _channel.invokeMethod('setBackgroundAudioEnabled', enabled);
     } catch (_) {}
   }
 

@@ -11,15 +11,21 @@ class SleepTimerService {
   Timer? _fireTimer;
   Timer? _ticker;
   VoidCallback? _onFire;
+  Duration? _startedDuration;
 
   /// Remaining time, or null when no timer is armed.
   final ValueNotifier<Duration?> remaining = ValueNotifier<Duration?>(null);
+
+  /// The duration originally selected for the active timer (used to highlight
+  /// the chosen preset even after the remaining time has ticked down).
+  Duration? get startedDuration => _startedDuration;
 
   bool get isActive => remaining.value != null;
 
   void start(Duration duration, VoidCallback onFire) {
     cancel();
     _onFire = onFire;
+    _startedDuration = duration;
     remaining.value = duration;
     _fireTimer = Timer(duration, _fire);
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -42,6 +48,7 @@ class SleepTimerService {
     _ticker?.cancel();
     _ticker = null;
     _onFire = null;
+    _startedDuration = null;
     remaining.value = null;
   }
 }

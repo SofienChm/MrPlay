@@ -140,12 +140,17 @@ class PlaybackStatsService {
         _progress.remove(key);
       }
     }
+    // Persist resume progress even when a video is paused/closed before the
+    // watch-time accumulator crosses a whole second (recordTick only schedules
+    // a flush after banking full seconds).
+    _scheduleFlush();
   }
 
   Future<void> clearProgress(String id) async {
     if (id.isEmpty) return;
     await _ensureLoaded();
     _progress.remove(id);
+    _scheduleFlush();
   }
 
   Future<int> resumePosition(String id) async {

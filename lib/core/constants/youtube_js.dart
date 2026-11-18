@@ -30,7 +30,11 @@ class YouTubeJS {
 
         if (!isMusic) {
           var style = document.createElement('style');
-          style.textContent = 'video { visibility: visible !important; opacity: 1 !important; }';
+          // Force the video visible and hide YouTube's "Tap to unmute" prompt —
+          // we unmute programmatically, so the prompt is noise the user should
+          // never see.
+          style.textContent = 'video { visibility: visible !important; opacity: 1 !important; } ' +
+            '.ytp-unmute, .ytp-unmute-widget, .ytp-tap-unmute, [class*="unmute"], [aria-label="Tap to unmute"] { display: none !important; visibility: hidden !important; }';
           document.head.appendChild(style);
         }
 
@@ -105,7 +109,11 @@ class YouTubeJS {
 
           v.addEventListener('playing', function() {
             var el = this;
-            if (shouldUnmute && el.muted) unmute(el);
+            // Always unmute as soon as playback starts: YouTube autoplays a
+            // fresh or next/prev video muted (no user gesture), which is what
+            // shows the "Tap to unmute" prompt. Unmute immediately so the
+            // prompt never appears.
+            if (el.muted) unmute(el);
             if (!isMusic) {
               el.style.setProperty('visibility', 'visible', 'important');
               el.style.setProperty('opacity', '1', 'important');
@@ -263,10 +271,16 @@ class YouTubeJS {
         '#open-in-app',
         '.open-in-app',
         '[data-open-in-app]',
+        'ytmusic-guide-entry-point',
+        'ytmusic-open-in-app',
+        'ytmusic-navigation-button-renderer [data-open-in-app]',
         '[aria-label*="open" i][aria-label*="app" i]',
         '[aria-label*="open" i][aria-label*="youtube" i]',
+        '[aria-label*="open" i][aria-label*="music" i]',
         '[aria-label*="get" i][aria-label*="app" i]',
-        '[aria-label*="get" i][aria-label*="youtube" i]'
+        '[aria-label*="get" i][aria-label*="youtube" i]',
+        '[aria-label*="get" i][aria-label*="music" i]',
+        '[aria-label*="download" i][aria-label*="app" i]'
       ].join(',') + ' { display: none !important; visibility: hidden !important; height: 0 !important; }';
       (document.head || document.documentElement).appendChild(style);
 
@@ -279,9 +293,13 @@ class YouTubeJS {
           t = l;
         }
         if (!t) return false;
-        return /open[^a-z0-9]{0,20}(the )?(youtube )?app/.test(t) ||
-               /(get|download|install)[^a-z0-9]{0,20}(the )?(youtube )?app/.test(t) ||
-               t.indexOf('get youtube') > -1;
+        return /open[^a-z0-9]{0,30}(the )?(youtube )?(music )?(yt )?app/.test(t) ||
+               /open[^a-z0-9]{0,30}(in|the)[^a-z0-9]{0,30}(youtube|yt music|music)?[^a-z0-9]{0,30}app/.test(t) ||
+               /(get|download|install|watch)[^a-z0-9]{0,20}(the )?(youtube )?(music )?app/.test(t) ||
+               /(yt|youtube) music[^a-z0-9]{0,20}app/.test(t) ||
+               t.indexOf('open in the youtube') > -1 ||
+               t.indexOf('open in youtube') > -1 ||
+               t.indexOf('get youtube music') > -1;
       }
 
       function removeAppUI() {
@@ -289,7 +307,7 @@ class YouTubeJS {
           var href = el.getAttribute('href') || el.getAttribute('data-url') || '';
           if (linkSchemes.test(href)) el.remove();
         });
-        document.querySelectorAll('button, a, ytd-button-renderer, ytm-button-renderer, ytm-pivot-bar-item-renderer, ytd-compact-link-renderer, yt-chip-cloud-chip-renderer').forEach(function(el) {
+        document.querySelectorAll('button, a, ytd-button-renderer, ytm-button-renderer, ytm-pivot-bar-item-renderer, ytd-compact-link-renderer, yt-chip-cloud-chip-renderer, ytmusic-navigation-button-renderer, ytmusic-open-in-app, ytmusic-guide-entry-point').forEach(function(el) {
           if (isAppPrompt(el)) el.remove();
         });
       }
@@ -311,6 +329,30 @@ class YouTubeJS {
 
       new MutationObserver(requestRemove)
         .observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  ''';
+
+  /// Removes YouTube's "Tap to unmute" popup that overlays the player when a
+  /// video starts (autoplay) muted. Keeps stripping the widget on an interval
+  /// too, because the player re-renders it after every SPA navigation. The
+  /// actual unmuting is left to the Dart-side `_unmuteVideo` bridge, so the
+  /// popup is gone without ever breaking the mute toggle the user controls.
+  static const String unmutePopupRemoverScript = '''
+    (function() {
+      if (location.hostname.indexOf('youtube.com') === -1) return;
+      function hidePopups() {
+        try {
+          document.querySelectorAll('.ytp-unmute-widget, [class*="unmute"]').forEach(function(el) {
+            try {
+              el.style.setProperty('display', 'none', 'important');
+              el.style.setProperty('visibility', 'hidden', 'important');
+            } catch (e) {}
+          });
+        } catch (e) {}
+      }
+      hidePopups();
+      new MutationObserver(hidePopups).observe(document.documentElement, { childList: true, subtree: true });
+      setInterval(hidePopups, 1000);
     })();
   ''';
 
@@ -379,6 +421,117 @@ class YouTubeJS {
         .observe(document.documentElement, { childList: true, subtree: true });
 
       ensureBar();
+    })();
+  ''';
+}
+
+/// Scripts exclusive to the video tab (the dedicated /watch playback WebView).
+class VideoTabJS {
+  /// Hides the masthead/logo/search/topbar so the tab is a clean playback
+  /// surface. Re-applies as YouTube re-renders.
+  static const String headerRemoverScript = '''
+    (function() {
+      var SEL = [
+        '#masthead',
+        '#masthead-container',
+        'ytd-masthead',
+        'ytm-masthead',
+        'ytd-topbar-logo-renderer',
+        'ytm-topbar-logo-renderer',
+        '.mobile-topbar-header',
+        'ytm-topbar',
+        'ytd-banner-promo-renderer',
+        'ytd-ad-slot-renderer',
+        '#tabsContainer'
+      ];
+      function hide(el) {
+        el.style.display = 'none';
+        el.style.visibility = 'hidden';
+      }
+      function sweep() {
+        for (var i = 0; i < SEL.length; i++) {
+          var els = document.querySelectorAll(SEL[i]);
+          for (var j = 0; j < els.length; j++) hide(els[j]);
+        }
+      }
+      sweep();
+      new MutationObserver(sweep)
+        .observe(document.documentElement, { childList: true, subtree: true });
+    })();
+  ''';
+
+  /// Swipe-down-to-collapse detection. WKWebView/WebView eat native touches, so
+  /// JS listens and bridges to Dart via the 'videoTabSwipe' handler. Collapses
+  /// when a downward drag (dy>60, |dx|<40) starts on the video player OR when
+  /// the page is at the top (so scrolling comments still works elsewhere).
+  static const String swipeCollapseScript = '''
+    (function() {
+      var gesture = null;
+
+      function isVideoTarget(el) {
+        while (el && el.tagName) {
+          var tag = el.tagName.toUpperCase();
+          if (tag === 'VIDEO') return true;
+          if (el.id === 'movie_player' || el.id === 'video-stream') return true;
+          if (el.className && typeof el.className === 'string' &&
+              el.className.indexOf('html5-video') !== -1) return true;
+          el = el.parentNode;
+        }
+        return false;
+      }
+
+      function collapse() {
+        gesture = null;
+        if (window.flutter_inappwebview && window.flutter_inappwebview.callHandler) {
+          window.flutter_inappwebview.callHandler('videoTabSwipe');
+        }
+      }
+
+      // Capture phase so YouTube's own gesture handlers / the page scroll
+      // can't swallow the touch before this listener sees it.
+      document.addEventListener('touchstart', function(e) {
+        var t = e.touches[0];
+        gesture = { y: t.clientY, x: t.clientX, target: e.target };
+      }, { capture: true, passive: true });
+
+      document.addEventListener('touchmove', function(e) {
+        if (!gesture) return;
+        var t = e.touches[0];
+        var dy = t.clientY - gesture.y;
+        var dx = Math.abs(t.clientX - gesture.x);
+        if (dy > 60 && dx < 40 && isVideoTarget(gesture.target)) {
+          collapse();
+        } else if (dy > 70 && dx < 50 && (window.scrollY || 0) <= 2) {
+          collapse();
+        }
+      }, { capture: true, passive: true });
+
+      document.addEventListener('touchend', function() { gesture = null; }, { capture: true, passive: true });
+      document.addEventListener('touchcancel', function() { gesture = null; }, { capture: true, passive: true });
+    })();
+  ''';
+
+  /// Hides the comment / related-video sections so the Android activity PiP
+  /// window shows mostly the video. Restored when PiP exits.
+  static const String pipClutterHideScript = '''
+    (function() {
+      var s = document.getElementById('__mrplay_pip_clutter');
+      if (!s) {
+        s = document.createElement('style');
+        s.id = '__mrplay_pip_clutter';
+        s.textContent = '#comments, [id="comments"], #related, #secondary, ' +
+          'ytd-comments, yt-comments, ytd-item-section-renderer { ' +
+          'display: none !important; }';
+        (document.head || document.documentElement).appendChild(s);
+      }
+      window.scrollTo(0, 0);
+    })();
+  ''';
+
+  static const String pipClutterRestoreScript = '''
+    (function() {
+      var s = document.getElementById('__mrplay_pip_clutter');
+      if (s && s.parentNode) s.parentNode.removeChild(s);
     })();
   ''';
 }

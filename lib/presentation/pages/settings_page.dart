@@ -1,11 +1,17 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../app.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/theme/hub_backgrounds.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../../data/repositories/watch_history_repository.dart';
+import '../../services/recent_activity_service.dart';
+import 'history_page.dart';
+import 'toggles_page.dart';
+import 'faq_page.dart';
+import 'in_app_browser_page.dart';
 import 'stats_page.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -18,7 +24,20 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   String _themeMode = 'system';
   String _defaultPlatform = 'YouTube';
+  int _accent = SettingsRepository.defaultAccentColor;
+  int _hubBackground = SettingsRepository.defaultHubBackground;
   bool _disposed = false;
+
+  static const List<Color> _accentChoices = [
+    Color(0xFF2196F3),
+    Color(0xFF3F51B5),
+    Color(0xFF9C27B0),
+    Color(0xFFE91E63),
+    Color(0xFFF44336),
+    Color(0xFFFF9800),
+    Color(0xFF4CAF50),
+    Color(0xFF009688),
+  ];
 
   @override
   void initState() {
@@ -35,18 +54,25 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final theme = await SettingsRepository.getThemeMode();
     final platform = await SettingsRepository.getDefaultPlatform();
+    final accent = await SettingsRepository.getAccentColor();
+    final hubBackground = await SettingsRepository.getHubBackground();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = theme;
       _defaultPlatform = platform;
+      _accent = accent;
+      _hubBackground = hubBackground;
     });
   }
 
   ThemeMode get _currentThemeMode {
     switch (_themeMode) {
-      case 'light': return ThemeMode.light;
-      case 'dark': return ThemeMode.dark;
-      default: return ThemeMode.system;
+      case 'light':
+        return ThemeMode.light;
+      case 'dark':
+        return ThemeMode.dark;
+      default:
+        return ThemeMode.system;
     }
   }
 
@@ -63,32 +89,194 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() => _defaultPlatform = name);
   }
 
+  Future<void> _changeAccent(Color color) async {
+    await SettingsRepository.setAccentColor(color.toARGB32());
+    if (_disposed || !mounted) return;
+    setState(() => _accent = color.toARGB32());
+    MrPlayApp.accentColorNotifier.value = color;
+  }
+
+  Future<void> _changeHubBackground(int index) async {
+    await SettingsRepository.setHubBackground(index);
+    if (_disposed || !mounted) return;
+    setState(() => _hubBackground = index);
+    MrPlayApp.hubBackgroundNotifier.value = index;
+  }
+
+  Future<void> _clearHistory() async {
+    await WatchHistoryRepository.clear();
+    await RecentActivityService.instance.clear();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('History cleared')),
+      );
+    }
+  }
+
+  void _showClearHistoryDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear Watch History'),
+        content: const Text(
+            'This will remove all watched videos from your history. This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _clearHistory();
+            },
+            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _shareApp() async {
+    const text =
+        'Check out MrPlay – your all-in-one video hub!\n${AppConstants.playStoreUrl}';
+    try {
+      final box = context.findRenderObject() as RenderBox?;
+      await Share.share(
+        text,
+        sharePositionOrigin:
+            box != null && box.hasSize && box.size.width > 0
+                ? box.localToGlobal(Offset.zero) & box.size
+                : null,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the share sheet')),
+        );
+      }
+    }
+  }
+
+  Future<void> _rateApp() async {
+    if (!AppConstants.isOnAppStore) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('MrPlay is coming soon to the Google Play Store')),
+      );
+      return;
+    }
+    final uri = Uri.parse(AppConstants.playStoreUrl);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _sendEmail(String subject) async {
+    final uri = Uri(
+      scheme: 'mailto',
+      path: 'mrplayapp@gmail.com',
+      queryParameters: {'subject': subject},
+    );
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open your email app')),
+        );
+      }
+    }
+  }
+
+  void _showAboutMrPlayDialog() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Center(child: Text('Mrplay')),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Your all-in-one video hub',
+              style: TextStyle(fontSize: 16),
+            ),
+            SizedBox(height: 16),
+            Text('Version ${AppConstants.appVersion}'),
+            SizedBox(height: 8),
+            Text('©2026 sofien'),
+            SizedBox(height: 8),
+            Text('Made with love in Tunisia 🇹🇳'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Dismiss'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Opens the privacy policy inside a dedicated in-app browser page (with a
+  /// back button) instead of an external browser or the main webview.
+  void _openPrivacyInApp() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: 'PrivacyPolicy'),
+        builder: (_) => const InAppBrowserPage(
+          url: 'https://mrplay.app-miniminds.com/',
+          title: 'Privacy Policy',
+        ),
+      ),
+    );
+  }
+
+  void _confirmClearCache() {
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Clear Cache'),
+        content: const Text(
+            'This resets all settings (theme, accent color, hub background, platform choice) to their defaults. Continue?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              _clearCache();
+            },
+            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _clearCache() async {
     await SettingsRepository.clearCache();
     if (_disposed || !mounted) return;
     setState(() {
       _themeMode = 'system';
       _defaultPlatform = 'YouTube';
+      _accent = SettingsRepository.defaultAccentColor;
+      _hubBackground = SettingsRepository.defaultHubBackground;
     });
     MrPlayApp.themeModeNotifier.value = ThemeMode.system;
+    MrPlayApp.accentColorNotifier.value =
+        const Color(SettingsRepository.defaultAccentColor);
+    MrPlayApp.hubBackgroundNotifier.value =
+        SettingsRepository.defaultHubBackground;
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cache cleared')),
       );
     }
   }
-
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
-  String get _storeUrl =>
-      Platform.isAndroid ? AppConstants.playStoreUrl : AppConstants.appStoreUrl;
-
-  String get _storeLabel => Platform.isAndroid ? 'Google Play' : 'the App Store';
 
   @override
   Widget build(BuildContext context) {
@@ -103,11 +291,29 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: _themeMode.toUpperCase(),
             onTap: () => _showThemePicker(),
           ),
-          const _SectionHeader(title: 'Platforms'),
           _SettingsTile(
-            icon: Icons.home,
-            title: 'Default Platform',
-            subtitle: _defaultPlatform,
+            icon: Icons.palette_outlined,
+            title: 'Accent Color',
+            subtitle: 'Pick your highlight color',
+            trailing: CircleAvatar(
+              radius: 10,
+              backgroundColor: Color(_accent),
+            ),
+            onTap: () => _showAccentPicker(),
+          ),
+          _SettingsTile(
+            icon: Icons.wallpaper_outlined,
+            title: 'Hub Background',
+            subtitle: HubBackgrounds.names[
+                _hubBackground.clamp(0, HubBackgrounds.palettes.length - 1)],
+            onTap: () => _showHubBackgroundPicker(),
+          ),
+          const _SectionHeader(title: 'Manage Apps'),
+          _SettingsTile(
+            icon: Icons.apps,
+            title: 'Choose Platforms',
+            subtitle: 'Select which platforms appear in your hub',
+            trailing: const Icon(Icons.chevron_right),
             onTap: () => _showPlatformPicker(),
           ),
           const _SectionHeader(title: 'Data'),
@@ -116,14 +322,22 @@ class _SettingsPageState extends State<SettingsPage> {
             title: 'Watch Stats',
             subtitle: 'Your watch time and usage',
             onTap: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const StatsPage()),
+              MaterialPageRoute(settings: const RouteSettings(name: 'Stats'), builder: (_) => const StatsPage()),
             ),
           ),
           _SettingsTile(
             icon: Icons.delete_outline,
             title: 'Clear Cache',
             subtitle: 'Reset all settings to default',
-            onTap: _clearCache,
+            onTap: _confirmClearCache,
+          ),
+          _SettingsTile(
+            icon: Icons.history,
+            title: 'View History',
+            subtitle: 'Watch history records',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(settings: const RouteSettings(name: 'History'), builder: (_) => const HistoryPage()),
+            ),
           ),
           const _SectionHeader(title: 'About'),
           _SettingsTile(
@@ -136,13 +350,21 @@ class _SettingsPageState extends State<SettingsPage> {
             icon: Icons.privacy_tip_outlined,
             title: 'Privacy Policy',
             subtitle: 'How we handle your data',
-            onTap: () => _openUrl('https://mrplay.app-miniminds.com/'),
+            onTap: _openPrivacyInApp,
+          ),
+          _SettingsTile(
+            icon: Icons.info_outline,
+            title: 'About MrPlay',
+            subtitle: 'Learn more about the app',
+            onTap: _showAboutMrPlayDialog,
           ),
           _SettingsTile(
             icon: Icons.star_outline,
             title: 'Rate App',
-            subtitle: 'Rate us on $_storeLabel',
-            onTap: () => _openUrl(_storeUrl),
+            subtitle: AppConstants.isOnAppStore
+                ? 'Rate us on the Google Play Store'
+                : 'Coming soon to the store',
+            onTap: _rateApp,
           ),
           _SettingsTile(
             icon: Icons.share,
@@ -150,16 +372,164 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: 'Tell your friends about MrPlay',
             onTap: () => _shareApp(),
           ),
+          _SettingsTile(
+            icon: Icons.quiz_outlined,
+            title: 'FAQ',
+            subtitle: 'Frequently asked questions',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(settings: const RouteSettings(name: 'Faq'), builder: (_) => const FaqPage()),
+            ),
+          ),
+          const _SectionHeader(title: 'Privacy & Security'),
+          _SettingsTile(
+            icon: Icons.toggle_on_outlined,
+            title: 'Toggles',
+            subtitle: 'Playback & content switches',
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(settings: const RouteSettings(name: 'Toggles'), builder: (_) => const TogglesPage()),
+            ),
+          ),
+          _SettingsTile(
+            icon: Icons.delete_outline,
+            title: 'Clear History',
+            subtitle: 'Clear watched videos record',
+            onTap: _showClearHistoryDialog,
+          ),
+          const _SectionHeader(title: 'Contact Us'),
+          _SettingsTile(
+            icon: Icons.bug_report_outlined,
+            title: 'Report a Bug',
+            subtitle: 'Something not working? Tell us',
+            onTap: () => _sendEmail('MrPlay - Bug Report'),
+          ),
+          _SettingsTile(
+            icon: Icons.lightbulb_outline,
+            title: 'Suggest New Features',
+            subtitle: 'Share your ideas with us',
+            onTap: () => _sendEmail('MrPlay - Feature Suggestion'),
+          ),
         ],
       ),
     );
   }
 
-  Future<void> _shareApp() async {
-    final uri = Uri.parse(_storeUrl);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
+  void _showAccentPicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Accent Color',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Wrap(
+                spacing: 18,
+                runSpacing: 18,
+                children: _accentChoices.map((color) {
+                  final selected = color.toARGB32() == _accent;
+                  return GestureDetector(
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _changeAccent(color);
+                    },
+                    child: Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: selected
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Colors.transparent,
+                          width: 3,
+                        ),
+                      ),
+                      child: selected
+                          ? const Icon(Icons.check,
+                              color: Colors.white, size: 22)
+                          : null,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showHubBackgroundPicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 12),
+                child: Text(
+                  'Hub Background',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+              ),
+              Wrap(
+                spacing: 16,
+                runSpacing: 14,
+                children: [
+                  for (var i = 0; i < HubBackgrounds.palettes.length; i++)
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _changeHubBackground(i);
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: HubBackgrounds.palettes[i],
+                              ),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: _hubBackground == i
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.transparent,
+                                width: 3,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            HubBackgrounds.names[i],
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _showThemePicker() {
@@ -172,20 +542,35 @@ class _SettingsPageState extends State<SettingsPage> {
             ListTile(
               leading: const Icon(Icons.brightness_5),
               title: const Text('Light'),
-              trailing: _themeMode == 'light' ? const Icon(Icons.check, color: Colors.blue) : null,
-              onTap: () { _changeTheme('light'); Navigator.pop(context); },
+              trailing: _themeMode == 'light'
+                  ? const Icon(Icons.check, color: Colors.blue)
+                  : null,
+              onTap: () {
+                _changeTheme('light');
+                Navigator.pop(context);
+              },
             ),
             ListTile(
               leading: const Icon(Icons.brightness_3),
               title: const Text('Dark'),
-              trailing: _themeMode == 'dark' ? const Icon(Icons.check, color: Colors.blue) : null,
-              onTap: () { _changeTheme('dark'); Navigator.pop(context); },
+              trailing: _themeMode == 'dark'
+                  ? const Icon(Icons.check, color: Colors.blue)
+                  : null,
+              onTap: () {
+                _changeTheme('dark');
+                Navigator.pop(context);
+              },
             ),
             ListTile(
               leading: const Icon(Icons.brightness_auto),
               title: const Text('System'),
-              trailing: _themeMode == 'system' ? const Icon(Icons.check, color: Colors.blue) : null,
-              onTap: () { _changeTheme('system'); Navigator.pop(context); },
+              trailing: _themeMode == 'system'
+                  ? const Icon(Icons.check, color: Colors.blue)
+                  : null,
+              onTap: () {
+                _changeTheme('system');
+                Navigator.pop(context);
+              },
             ),
           ],
         ),
@@ -248,12 +633,14 @@ class _SettingsTile extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final Widget? trailing;
 
   const _SettingsTile({
     required this.icon,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.trailing,
   });
 
   @override
@@ -262,7 +649,7 @@ class _SettingsTile extends StatelessWidget {
       leading: Icon(icon),
       title: Text(title),
       subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: trailing ?? const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }

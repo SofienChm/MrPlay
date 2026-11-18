@@ -1,15 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import '../../core/constants/platform_constants.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/hub_backgrounds.dart';
 import '../../data/models/custom_bookmark.dart';
 import '../../data/models/platform_model.dart';
 import '../../data/repositories/custom_bookmarks_repository.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../services/analytics_service.dart';
+import '../../services/ad_config_service.dart';
+import '../../widgets/native_ad_slot.dart';
+import '../../widgets/unified_banner_ad_slot.dart';
 import '../widgets/platform_card.dart';
 import '../pages/search_page.dart';
 import 'favorites_page.dart';
 import 'history_page.dart';
+import 'playlists_page.dart';
 import 'settings_page.dart';
 import 'stats_page.dart';
 import '../../app.dart';
@@ -26,6 +32,7 @@ class _HubPageState extends State<HubPage> {
   List<CustomBookmark> _customBookmarks = [];
   List<PlatformModel> _filteredPlatforms = PlatformConstants.platforms;
   bool _showResults = false;
+  String _defaultPlatform = 'YouTube';
 
   List<PlatformModel> get _allPlatforms {
     final bookmarks = _customBookmarks
@@ -40,10 +47,18 @@ class _HubPageState extends State<HubPage> {
           ),
         )
         .toList();
-    bookmarks.sort(
+    final platforms = [...PlatformConstants.platforms, ...bookmarks];
+    platforms.sort(
       (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
     );
-    return [...PlatformConstants.platforms, ...bookmarks];
+    if (_defaultPlatform != 'YouTube') {
+      final idx = platforms.indexWhere((p) => p.name == _defaultPlatform);
+      if (idx > 0) {
+        final def = platforms.removeAt(idx);
+        platforms.insert(0, def);
+      }
+    }
+    return platforms;
   }
 
   @override
@@ -51,6 +66,16 @@ class _HubPageState extends State<HubPage> {
     super.initState();
     _searchController.addListener(_syncSearchFromController);
     _loadCustomBookmarks();
+    _loadDefaultPlatform();
+  }
+
+  Future<void> _loadDefaultPlatform() async {
+    final platform = await SettingsRepository.getDefaultPlatform();
+    if (!mounted) return;
+    setState(() {
+      _defaultPlatform = platform;
+      if (!_showResults) _filteredPlatforms = _allPlatforms;
+    });
   }
 
   Future<void> _loadCustomBookmarks() async {
@@ -146,7 +171,6 @@ class _HubPageState extends State<HubPage> {
   }
 
   void _onPlatformTap(PlatformModel platform) {
-    SettingsRepository.setLastPlatformUrl(platform.url);
     AnalyticsService.logPlatformOpened(platform.name);
     MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
   }
@@ -154,184 +178,204 @@ class _HubPageState extends State<HubPage> {
   void _openMoreChannels() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const SearchPage()),
+      MaterialPageRoute(
+          settings: const RouteSettings(name: 'Search'),
+          builder: (_) => const SearchPage()),
     );
   }
 
   void _openFavorites() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const FavoritesPage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'Favorites'), builder: (_) => const FavoritesPage()),
     );
   }
 
-  void _openWatchLater() {
+  void _openPlaylists() {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => const FavoritesPage(initialIndex: 1),
-      ),
+      MaterialPageRoute(settings: const RouteSettings(name: 'Playlists'), builder: (_) => const PlaylistsPage()),
     );
   }
 
   void _openHistory() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const HistoryPage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'History'), builder: (_) => const HistoryPage()),
     );
   }
 
   void _openStats() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const StatsPage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'Stats'), builder: (_) => const StatsPage()),
     );
   }
 
   void _openSettings() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const SettingsPage()),
+      MaterialPageRoute(settings: const RouteSettings(name: 'Settings'), builder: (_) => const SettingsPage()),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'MrPlay',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.add, color: Colors.white70),
-                    tooltip: 'Add shortcut',
-                    onPressed: _showAddBookmarkDialog,
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Container(
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.cardDark,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border, width: 1),
-                ),
-                child: TextField(
-                  controller: _searchController,
-                  onSubmitted: _onSearchSubmitted,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'Search',
-                    hintStyle:
-                        const TextStyle(color: Colors.white38, fontSize: 14),
-                    prefixIcon:
-                        const Icon(Icons.search, color: Colors.white38, size: 20),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear,
-                                color: Colors.white38, size: 18),
-                            onPressed: _searchController.clear,
-                          )
-                        : null,
-                    border: InputBorder.none,
-                    contentPadding:
-                        const EdgeInsets.symmetric(vertical: 13),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            Expanded(
-              child: _showResults && _filteredPlatforms.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.search_off,
-                              size: 64, color: Colors.white38),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No platforms match "${_searchController.text}"',
-                            style: const TextStyle(
-                                color: Colors.white70, fontSize: 14),
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Press Enter to search Google',
-                            style: TextStyle(
-                                color: Colors.white38, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    )
-                  : Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20),
-                      child: GridView.builder(
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 16,
-                          mainAxisSpacing: 16,
-                          childAspectRatio: 1.35,
+    return ValueListenableBuilder<int>(
+      valueListenable: MrPlayApp.hubBackgroundNotifier,
+      builder: (context, background, _) => Scaffold(
+        backgroundColor: Colors.transparent,
+        body: Container(
+          decoration: HubBackgrounds.decorationFor(background),
+          child: SafeArea(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'MrPlay',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
                         ),
-                        itemCount: _filteredPlatforms.length +
-                            (_showResults ? 0 : 1),
-                        itemBuilder: (context, index) {
-                          if (index >= _filteredPlatforms.length) {
-                            return _MoreCard(onTap: _openMoreChannels);
-                          }
-                          final platform = _filteredPlatforms[index];
-                          return PlatformCard(
-                            platform: platform,
-                            onTap: () => _onPlatformTap(platform),
-                            onLongPress: platform.category == 'custom'
-                                ? () => _confirmDeleteBookmark(platform)
-                                : null,
-                          );
-                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add, color: Colors.white70),
+                        tooltip: 'Add shortcut',
+                        onPressed: _showAddBookmarkDialog,
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Container(
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppColors.cardDark,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.border, width: 1),
+                    ),
+                    child: TextField(
+                      controller: _searchController,
+                      onSubmitted: _onSearchSubmitted,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      decoration: InputDecoration(
+                        hintText: 'Search',
+                        hintStyle: const TextStyle(
+                            color: Colors.white38, fontSize: 14),
+                        prefixIcon: const Icon(Icons.search,
+                            color: Colors.white38, size: 20),
+                        suffixIcon: _searchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear,
+                                    color: Colors.white38, size: 18),
+                                onPressed: _searchController.clear,
+                              )
+                            : null,
+                        border: InputBorder.none,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 13),
                       ),
                     ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Center(
+                  child: UnifiedBannerAdSlot(
+                    adSize: AdSize.banner,
+                    alignment: Alignment.center,
+                    showDismissButton: false,
+                    adUnitNotifier: AdConfigService.instance.hubBannerAdUnitId,
+                    enabledNotifier: AdConfigService.instance.hubBannerEnabled,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: _showResults && _filteredPlatforms.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.search_off,
+                                  size: 64, color: Colors.white38),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No platforms match "${_searchController.text}"',
+                                style: const TextStyle(
+                                    color: Colors.white70, fontSize: 14),
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'Press Enter to search Google',
+                                style: TextStyle(
+                                    color: Colors.white38, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        )
+                      : Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: GridView.builder(
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 3,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                              childAspectRatio: 0.95,
+                            ),
+                            itemCount: _filteredPlatforms.length +
+                                (_showResults ? 0 : 1),
+                            itemBuilder: (context, index) {
+                              if (index >= _filteredPlatforms.length) {
+                                return _MoreCard(onTap: _openMoreChannels);
+                              }
+                              final platform = _filteredPlatforms[index];
+                              return PlatformCard(
+                                platform: platform,
+                                onTap: () => _onPlatformTap(platform),
+                                onLongPress: platform.category == 'custom'
+                                    ? () => _confirmDeleteBookmark(platform)
+                                    : null,
+                              );
+                            },
+                          ),
+                        ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: Center(child: NativeAdSlot()),
+                ),
+                _QuickActionBar(
+                  onFavorite: _openFavorites,
+                  onPlaylist: _openPlaylists,
+                  onHistory: _openHistory,
+                  onStats: _openStats,
+                ),
+              ],
             ),
-            _QuickActionBar(
-              onFavorite: _openFavorites,
-              onLater: _openWatchLater,
-              onHistory: _openHistory,
-              onStats: _openStats,
-            ),
-          ],
+          ),
         ),
+        bottomNavigationBar: _HubBottomNav(onSettings: _openSettings),
       ),
-      bottomNavigationBar: _HubBottomNav(onSettings: _openSettings),
     );
   }
 }
 
 class _QuickActionBar extends StatelessWidget {
   final VoidCallback onFavorite;
-  final VoidCallback onLater;
+  final VoidCallback onPlaylist;
   final VoidCallback onHistory;
   final VoidCallback onStats;
 
   const _QuickActionBar({
     required this.onFavorite,
-    required this.onLater,
+    required this.onPlaylist,
     required this.onHistory,
     required this.onStats,
   });
@@ -339,7 +383,7 @@ class _QuickActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
       child: Row(
         children: [
           _QuickAction(
@@ -348,9 +392,9 @@ class _QuickActionBar extends StatelessWidget {
             onTap: onFavorite,
           ),
           _QuickAction(
-            icon: Icons.format_list_bulleted,
-            label: 'Later',
-            onTap: onLater,
+            icon: Icons.queue_music,
+            label: 'Playlist',
+            onTap: onPlaylist,
           ),
           _QuickAction(
             icon: Icons.history,
@@ -428,7 +472,7 @@ class _MoreCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border, width: 1),
         ),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -436,14 +480,14 @@ class _MoreCard extends StatelessWidget {
               'More',
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 16,
+                fontSize: 15,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 2),
             const Text(
               'Channels',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
+              style: TextStyle(color: Colors.white54, fontSize: 11),
             ),
             const Spacer(),
             Align(
@@ -455,8 +499,8 @@ class _MoreCard extends StatelessWidget {
                   color: AppColors.border,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child:
-                    const Icon(Icons.more_horiz, color: Colors.white70, size: 20),
+                child: const Icon(Icons.more_horiz,
+                    color: Colors.white70, size: 20),
               ),
             ),
           ],

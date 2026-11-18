@@ -4,10 +4,15 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -36,11 +41,18 @@ object MediaSessionManager {
     private set
 
   private var foregroundStarted = false
+  private var backgroundAudioEnabled = true
   private var lastTitle: String? = null
   private var lastArtist: String? = null
   private var lastDuration: Long = -1L
   private var lastArtwork: Bitmap? = null
+  private var lastArtworkUrl: String? = null
   private var lastPlaying: Boolean? = null
+
+  private var audioManager: AudioManager? = null
+  private var deviceCallback: AudioDeviceCallback? = null
+  private var noisyReceiver: BroadcastReceiver? = null
+  private var appContext: Context? = null
 
   fun attach(channel: MethodChannel?) {
     this.channel = channel
@@ -78,17 +90,41 @@ object MediaSessionManager {
     } catch (_: Exception) {
     }
     session = s
+    registerDeviceCallback(context)
+    registerNoisyReceiver(context)
   }
 
   fun release() {
+    try {
+      appContext?.let { ctx ->
+        noisyReceiver?.let { ctx.unregisterReceiver(it) }
+      }
+    } catch (_: Exception) {
+    }
+    noisyReceiver = null
+    appContext = null
+    deviceCallback?.let { audioManager?.unregisterAudioDeviceCallback(it) }
+    deviceCallback = null
+    audioManager = null
     session?.isActive = false
     session?.release()
     session = null
     foregroundStarted = false
+    backgroundAudioEnabled = true
   }
 
   fun isPlaying(): Boolean =
       session?.controller?.playbackState?.state == PlaybackStateCompat.STATE_PLAYING
+
+  /** Mirrors the "Background audio" toggle. When disabled the foreground
+   *  service (which is what keeps the WebView audio alive in the background)
+   *  must not run; Dart pauses the video when the app is backgrounded. */
+  fun setBackgroundAudioEnabled(context: Context, enabled: Boolean) {
+    backgroundAudioEnabled = enabled
+    if (!enabled && foregroundStarted) {
+      stopForegroundService(context)
+    }
+  }
 
   fun sendRemoteCommand(command: String, positionMs: Double? = null) {
     Log.d("MrPlay", "sendRemoteCommand: $command")
@@ -105,32 +141,70 @@ object MediaSessionManager {
     val s = session ?: return
     if (args == null) return
 
-    val existing = s.controller.metadata
-    val title = args["title"] as? String ?: existing?.getString(MediaMetadataCompat.METADATA_KEY_TITLE)
-    val artist = args["artist"] as? String ?: existing?.getString(MediaMetadataCompat.METADATA_KEY_ARTIST)
+    // Source of truth is our own cache (lastTitle/lastArtwork/...), NOT the
+    // session's metadata read back: the round-trip can drop the bitmap or
+    // duration, and the next rebuild would then erase them from the
+    // notification / system media controls.
+    val newTitle = args["title"] as? String
+    val title = newTitle ?: lastTitle
+    val artist = args["artist"] as? String ?: lastArtist
+    val isNewTrack = newTitle != null && newTitle != lastTitle
+    val reportedDuration = (args["durationMs"] as? Number)?.toLong() ?: 0L
+    // A zero/invalid duration (page still loading, NaN) must not wipe a known
+    // one for the same track.
     val durationMs =
-        (args["durationMs"] as? Number)?.toLong()
-            ?: existing?.getLong(MediaMetadataCompat.METADATA_KEY_DURATION) ?: 0L
+        if (reportedDuration > 0) reportedDuration
+        else if (isNewTrack) 0L
+        else maxOf(lastDuration, 0L)
     val positionMs = (args["positionMs"] as? Number)?.toLong() ?: 0L
     val isPlaying = args["isPlaying"] as? Boolean == true
-    val artwork = decodeArtwork(args["artwork"] as? String)
-        ?: existing?.getBitmap(MediaMetadataCompat.METADATA_KEY_ART)
+    val newArtwork = decodeArtwork(args["artwork"] as? String)
+    val artwork = newArtwork ?: if (isNewTrack) null else lastArtwork
+    val artworkUrl =
+        (args["artworkUrl"] as? String)?.takeIf { it.isNotEmpty() }
+            ?: if (isNewTrack) null else lastArtworkUrl
 
-    // Only rewrite metadata when something actually changed (not every 1s
-    // position tick); rebuilding MediaMetadata + the notification is what made
-    // the app janky.
     val metaChanged =
-        title != lastTitle || artist != lastArtist || durationMs != lastDuration || artwork !== lastArtwork
+        artworkUrl != lastArtworkUrl ||
+        title != lastTitle ||
+            artist != lastArtist ||
+            durationMs != lastDuration ||
+            newArtwork != null ||
+            (isNewTrack && artwork == null)
     if (metaChanged) {
       lastTitle = title
       lastArtist = artist
       lastDuration = durationMs
       lastArtwork = artwork
+      lastArtworkUrl = artworkUrl
+      Log.d(
+          "MrPlay",
+          "setMetadata title=$title duration=$durationMs " +
+              "art=${artwork?.let { "${it.width}x${it.height}" } ?: "none"} url=${artworkUrl != null}")
       val meta = MediaMetadataCompat.Builder()
-      if (!title.isNullOrEmpty()) meta.putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-      if (!artist.isNullOrEmpty()) meta.putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
-      if (durationMs > 0) meta.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, durationMs)
-      artwork?.let { meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it) }
+      // Some System UI versions (stock-like ROMs) load the cover from a URI
+      // instead of the bitmap, so provide both.
+      artworkUrl?.let {
+        meta.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, it)
+        meta.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, it)
+        meta.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, it)
+      }
+      if (!title.isNullOrEmpty()) {
+        meta.putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+        meta.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, title)
+      }
+      if (!artist.isNullOrEmpty()) {
+        meta.putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+        meta.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, artist)
+      }
+      // Always written (even 0) so the system keeps the key; >0 enables the
+      // Android 13+ seek bar with elapsed / total time.
+      meta.putLong(MediaMetadataCompat.METADATA_KEY_DURATION, maxOf(durationMs, 0L))
+      artwork?.let {
+        meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, it)
+        meta.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
+        meta.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, it)
+      }
       s.setMetadata(meta.build())
     }
 
@@ -148,7 +222,7 @@ object MediaSessionManager {
     val s = session ?: return
     val state = s.controller.playbackState
     val positionMs = state?.position ?: 0L
-    val durationMs = s.controller.metadata?.getLong(MediaMetadataCompat.METADATA_KEY_DURATION) ?: 0L
+    val durationMs = maxOf(lastDuration, 0L)
     updatePlaybackState(positionMs, durationMs, isPlaying)
     if (isPlaying != lastPlaying) {
       lastPlaying = isPlaying
@@ -171,6 +245,7 @@ object MediaSessionManager {
     lastArtist = null
     lastDuration = -1L
     lastArtwork = null
+    lastArtworkUrl = null
     lastPlaying = null
   }
 
@@ -194,12 +269,11 @@ object MediaSessionManager {
     s.setPlaybackState(b.build())
   }
 
-  fun buildNotification(context: Context): Notification {
-    val s = session ?: throw IllegalStateException("MediaSession not created")
-    val metadata = s.controller.metadata
-    val title = metadata?.getString(MediaMetadataCompat.METADATA_KEY_TITLE)
-    val artist = metadata?.getString(MediaMetadataCompat.METADATA_KEY_ARTIST)
-    val artwork = metadata?.getBitmap(MediaMetadataCompat.METADATA_KEY_ART)
+  fun buildNotification(context: Context): Notification? {
+    val s = session ?: return null
+    val title = lastTitle
+    val artist = lastArtist
+    val artwork = lastArtwork
     val isPlaying = isPlaying()
 
     val contentIntent =
@@ -240,7 +314,8 @@ object MediaSessionManager {
     return builder.build()
   }
 
-  private fun notify(context: Context, notification: Notification) {
+  private fun notify(context: Context, notification: Notification?) {
+    if (notification == null) return
     try {
       val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       nm.notify(NOTIFICATION_ID, notification)
@@ -249,6 +324,10 @@ object MediaSessionManager {
   }
 
   private fun startForegroundService(context: Context) {
+    // "Background audio" is a user choice. Without the foreground service the
+    // OS kills the WebView audio as soon as the app goes to the background —
+    // which is exactly the "plain browser" behavior the toggle promises.
+    if (!backgroundAudioEnabled) return
     if (foregroundStarted) return
     foregroundStarted = true
     Log.d("MrPlay", "startForegroundService")
@@ -282,11 +361,93 @@ object MediaSessionManager {
     }
   }
 
+  /**
+   * Pauses playback when a Bluetooth audio device (car, headset, earbuds) is
+   * disconnected. `ACTION_AUDIO_BECOMING_NOISY` is the primary signal but is not
+   * fired reliably for Bluetooth on every device, so we also watch
+   * `AudioDeviceCallback` — the modern, permission-free signal for output-device
+   * removal. Either path pauses unconditionally: the old `isPlaying()` gate was
+   * a silent no-op whenever the MediaSession state was stale (the WebView plays
+   * its own audio stream regardless), and pausing an already-paused video is
+   * harmless.
+   */
+  private fun registerDeviceCallback(context: Context) {
+    if (deviceCallback != null) return
+    val am =
+        context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            ?: return
+    audioManager = am
+    val cb =
+        object : AudioDeviceCallback() {
+          override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+            val bluetoothGone = removedDevices.any { it.isBluetoothDevice() }
+            if (bluetoothGone) {
+              Log.d("MrPlay", "Bluetooth device removed — pausing")
+              pausePlayback()
+            }
+          }
+        }
+    deviceCallback = cb
+    am.registerAudioDeviceCallback(cb, Handler(Looper.getMainLooper()))
+  }
+
+  /**
+   * Detects when audio output falls back to a noisier source — headphones
+   * unplugged, or a Bluetooth car kit / earbuds disconnecting (exactly what
+   * happens when you leave the car). The `audio_session` plugin also exposes
+   * this stream, but it only works while the plugin holds audio focus and the
+   * WebView's Chromium engine takes focus for itself, so it never fires here;
+   * registering the system broadcast natively is the reliable path. Only the
+   * system decides when output became noisy, so receiving it is unconditionally
+   * the right moment to pause.
+   */
+  private fun registerNoisyReceiver(context: Context) {
+    if (noisyReceiver != null) return
+    appContext = context.applicationContext
+    val filter = IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+    val receiver =
+        object : BroadcastReceiver() {
+          override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action == AudioManager.ACTION_AUDIO_BECOMING_NOISY) {
+              Log.d("MrPlay", "ACTION_AUDIO_BECOMING_NOISY — pausing")
+              pausePlayback()
+            }
+          }
+        }
+    noisyReceiver = receiver
+    ContextCompat.registerReceiver(
+        context.applicationContext,
+        receiver,
+        filter,
+        ContextCompat.RECEIVER_NOT_EXPORTED)
+  }
+
+  /** Sends the pause command to Dart, where the WebView video is actually
+   *  stopped. Never gated: Dart's pause path is idempotent for a paused video. */
+  private fun pausePlayback() {
+    sendRemoteCommand("pause")
+  }
+
+  private fun AudioDeviceInfo.isBluetoothDevice(): Boolean =
+      type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+          type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+          type == AudioDeviceInfo.TYPE_BLE_HEADSET ||
+          type == AudioDeviceInfo.TYPE_HEARING_AID
+
   private fun decodeArtwork(base64: String?): Bitmap? {
     if (base64.isNullOrEmpty()) return null
     return try {
       val bytes = Base64.decode(base64, Base64.DEFAULT)
-      BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+      val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: return null
+      // Keep it well under the binder limit used to hand it to System UI.
+      val maxSide = 512
+      if (bmp.width > maxSide || bmp.height > maxSide) {
+        val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height)
+        Bitmap.createScaledBitmap(
+            bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true)
+      } else {
+        bmp
+      }
     } catch (_: Exception) {
       null
     }

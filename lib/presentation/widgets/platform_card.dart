@@ -126,7 +126,7 @@ class _PlatformCardState extends State<PlatformCard>
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border, width: 1),
           ),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -136,7 +136,7 @@ class _PlatformCardState extends State<PlatformCard>
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: Colors.white,
-                  fontSize: 16,
+                  fontSize: 15,
                   fontWeight: FontWeight.bold,
                 ),
               ),
@@ -148,7 +148,7 @@ class _PlatformCardState extends State<PlatformCard>
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white54,
-                    fontSize: 12,
+                    fontSize: 11,
                   ),
                 ),
               const Spacer(),
@@ -156,7 +156,7 @@ class _PlatformCardState extends State<PlatformCard>
                 alignment: Alignment.bottomRight,
                 child: Icon(
                   _getIconData(widget.platform.icon),
-                  size: 26,
+                  size: 24,
                   color: color,
                 ),
               ),

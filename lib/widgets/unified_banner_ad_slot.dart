@@ -1,18 +1,46 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
-import '../ad_config.dart';
 import '../core/theme/app_colors.dart';
+import '../data/repositories/settings_repository.dart';
+import '../services/ad_config_service.dart';
 
 class UnifiedBannerAdSlot extends StatefulWidget {
   final Color backgroundColor;
   final bool isVisible;
+  final AdSize adSize;
+  final bool showDismissButton;
+  final AlignmentGeometry alignment;
 
-  const UnifiedBannerAdSlot({
+  /// Which remote-config-driven ad unit this slot loads. Defaults to the
+  /// floating banner unit; the hub slot passes the hub-specific one.
+  final ValueNotifier<String> adUnitNotifier;
+
+  /// Remote-config-driven master switch for this slot (defaults to the
+  /// floating banner enable flag; the hub slot passes the hub-specific one).
+  /// When `false`, the slot loads nothing and renders nothing; flipping it
+  /// back on reloads the banner.
+  final ValueNotifier<bool> enabledNotifier;
+
+  /// SharedPreferences key used to remember that the user dismissed this slot.
+  /// When set, dismissing the banner persists across app restarts so it does
+  /// not reopen. When null, the dismiss is in-memory only.
+  final String? dismissKey;
+
+  UnifiedBannerAdSlot({
     super.key,
     this.backgroundColor = AppColors.surface,
     this.isVisible = true,
-  });
+    this.adSize = AdSize.largeBanner,
+    this.showDismissButton = true,
+    this.alignment = Alignment.centerLeft,
+    ValueNotifier<String>? adUnitNotifier,
+    ValueNotifier<bool>? enabledNotifier,
+    this.dismissKey,
+  })  : adUnitNotifier =
+            adUnitNotifier ?? AdConfigService.instance.bannerAdUnitId,
+        enabledNotifier =
+            enabledNotifier ?? AdConfigService.instance.bannerEnabled;
 
   @override
   State<UnifiedBannerAdSlot> createState() => _UnifiedBannerAdSlotState();
@@ -25,18 +53,80 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
   bool _adLoaded = false;
   bool _isDismissed = false;
   bool _isAppBackgrounded = false;
-  Timer? _reappearTimer;
+  DateTime? _backgroundedAt;
   Timer? _retryTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.adUnitNotifier.addListener(_onAdConfigChanged);
+    widget.enabledNotifier.addListener(_onEnabledChanged);
+    _loadBannerAd();
+    _restoreDismissed();
+  }
+
+  /// Applies the persisted "dismissed" flag so a closed banner stays closed
+  /// after an app restart. Loaded asynchronously; the slot is hidden the moment
+  /// the value lands.
+  Future<void> _restoreDismissed() async {
+    final key = widget.dismissKey;
+    if (key == null) return;
+    final dismissed = await SettingsRepository.getBannerDismissed(key);
+    if (dismissed && mounted) {
+      setState(() => _isDismissed = true);
+    }
+  }
+
+  /// Remote Config delivered a different (e.g. production) banner unit:
+  /// dispose the ad loaded with the previous unit and reload with the new one.
+  void _onAdConfigChanged() {
+    if (!mounted) return;
+    _bannerAd?.dispose();
+    _bannerAd = null;
+    setState(() {
+      _adLoaded = false;
+      _adWidget = null;
+    });
     _loadBannerAd();
   }
 
+  /// Remote Config flipped this slot's master switch. Off: unload the ad and
+  /// render nothing. Back on: reload the banner.
+  void _onEnabledChanged() {
+    if (!mounted) return;
+    final enabled = widget.enabledNotifier.value;
+    _retryTimer?.cancel();
+    if (!enabled) {
+      _bannerAd?.dispose();
+      _bannerAd = null;
+      setState(() {
+        _adLoaded = false;
+        _adWidget = null;
+      });
+      return;
+    }
+    if (!_adLoaded && !_isDismissed) {
+      _loadBannerAd();
+    }
+  }
+
+  /// Time spent in the background that counts as a new session. Once exceeded,
+  /// a banner dismissed earlier in the session is shown again on return.
+  static const Duration _sessionRefreshAfter = Duration(hours: 2);
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      _backgroundedAt ??= DateTime.now();
+    } else if (state == AppLifecycleState.resumed) {
+      final backgroundedAt = _backgroundedAt;
+      _backgroundedAt = null;
+      if (backgroundedAt != null &&
+          DateTime.now().difference(backgroundedAt) >= _sessionRefreshAfter) {
+        _isDismissed = false;
+      }
+    }
     final bg = state == AppLifecycleState.paused;
     if (bg != _isAppBackgrounded) {
       setState(() => _isAppBackgrounded = bg);
@@ -45,8 +135,8 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
 
   void _loadBannerAd() {
     _bannerAd = BannerAd(
-      adUnitId: AdConfig.bannerAdUnitId,
-      size: AdSize.largeBanner,
+      adUnitId: widget.adUnitNotifier.value,
+      size: widget.adSize,
       request: const AdRequest(),
       listener: BannerAdListener(
         onAdLoaded: (ad) {
@@ -64,7 +154,14 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
           setState(() => _bannerAd = null);
           _retryTimer?.cancel();
           _retryTimer = Timer(const Duration(seconds: 30), () {
-            if (mounted && !_adLoaded) _loadBannerAd();
+            if (mounted &&
+                widget.enabledNotifier.value &&
+                !_adLoaded &&
+                !_isDismissed &&
+                !_isAppBackgrounded &&
+                widget.isVisible) {
+              _loadBannerAd();
+            }
           });
         },
         // A banner click opens the advertiser's page in the browser (standard
@@ -82,20 +179,17 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
 
   void _handleDismiss() {
     setState(() => _isDismissed = true);
-    _reappearTimer?.cancel();
-    _reappearTimer = Timer(
-      const Duration(minutes: 5),
-      () {
-        if (!mounted) return;
-        setState(() => _isDismissed = false);
-      },
-    );
+    final key = widget.dismissKey;
+    if (key != null) {
+      SettingsRepository.setBannerDismissed(key, true);
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _reappearTimer?.cancel();
+    widget.adUnitNotifier.removeListener(_onAdConfigChanged);
+    widget.enabledNotifier.removeListener(_onEnabledChanged);
     _retryTimer?.cancel();
     _bannerAd?.dispose();
     super.dispose();
@@ -103,7 +197,8 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
 
   @override
   Widget build(BuildContext context) {
-    if (!_adLoaded ||
+    if (!widget.enabledNotifier.value ||
+        !_adLoaded ||
         _bannerAd == null ||
         _isDismissed ||
         !widget.isVisible ||
@@ -112,14 +207,14 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       child: Align(
-        alignment: Alignment.centerLeft,
+        alignment: widget.alignment,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
           child: SizedBox(
-            width: 320,
-            height: 100,
+            width: widget.adSize.width.toDouble(),
+            height: widget.adSize.height.toDouble(),
             child: Stack(
               children: [
                 Positioned.fill(
@@ -128,31 +223,33 @@ class _UnifiedBannerAdSlotState extends State<UnifiedBannerAdSlot>
                     child: Center(child: _adWidget!),
                   ),
                 ),
-                Positioned(
-                  top: 4,
-                  right: 4,
-                  child: GestureDetector(
-                    onTap: _handleDismiss,
-                    behavior: HitTestBehavior.opaque,
-                    child: Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          width: 1,
+                if (widget.showDismissButton)
+                  Positioned(
+                    top: 4,
+                    right: 4,
+                    child: GestureDetector(
+                      onTap: _handleDismiss,
+                      behavior: HitTestBehavior.opaque,
+                      child: Container(
+                        width: 32,
+                        height: 32,
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF2D2D2D).withValues(alpha: 0.90),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            width: 1,
+                          ),
                         ),
-                      ),
-                      child: const Icon(
-                        Icons.close,
-                        size: 16,
-                        color: Colors.white70,
+                        child: const Icon(
+                          Icons.close,
+                          size: 16,
+                          color: Colors.white70,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),

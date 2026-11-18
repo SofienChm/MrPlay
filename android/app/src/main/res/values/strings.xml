@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher app shortcuts -->
+    <string name="shortcut_youtube_short">YouTube</string>
+    <string name="shortcut_youtube_long">Open YouTube</string>
+    <string name="shortcut_music_short">Music</string>
+    <string name="shortcut_music_long">Open YouTube Music</string>
+    <string name="shortcut_twitch_short">Twitch</string>
+    <string name="shortcut_twitch_long">Open Twitch</string>
+</resources>

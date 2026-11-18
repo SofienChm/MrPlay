@@ -22,7 +22,12 @@ class PlaybackService : Service() {
     Log.d("MrPlay", "PlaybackService.onStartCommand")
     try {
       val notification = MediaSessionManager.buildNotification(this)
-      startForeground(MediaSessionManager.NOTIFICATION_ID, notification)
+      if (notification == null) {
+        // MediaSession not ready (shouldn't happen, but don't crash).
+        stopSelf()
+      } else {
+        startForeground(MediaSessionManager.NOTIFICATION_ID, notification)
+      }
     } catch (e: Exception) {
       Log.e("MrPlay", "PlaybackService failed to start foreground", e)
       stopSelf()

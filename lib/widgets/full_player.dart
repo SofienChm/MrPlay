@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/player_provider.dart';
 import '../models/video.dart';
 import '../data/models/favorite_video.dart';
@@ -43,7 +42,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     ));
     _slideController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        MrPlayApp.webViewKey.currentState?.stopVideoAlignmentWatchdog();
+        MrPlayApp.stopAlignmentWatchdog();
         ref.read(playerProvider.notifier).minimize();
         _slideController.reset();
       }
@@ -61,10 +60,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
         (details.primaryVelocity != null && details.primaryVelocity! > 500) ||
             _dragOffset > 150;
     if (shouldMinimize) {
-      final webView = MrPlayApp.webViewKey.currentState;
-      if (webView == null || !webView.isInPictureInPicture) {
-        webView?.enterPiP();
-      }
+      MrPlayApp.enterPiP();
       _slideController.forward();
     } else {
       _slideController.reverse();
@@ -113,20 +109,21 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
 
   void _openQueue() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const QueuePage()),
+      MaterialPageRoute(
+          settings: const RouteSettings(name: 'Queue'),
+          builder: (_) => const QueuePage()),
     );
   }
 
   void _togglePlayPause() {
     final notifier = ref.read(playerProvider.notifier);
-    final webView = MrPlayApp.webViewKey.currentState;
     final current = ref.read(playerProvider);
     if (current.isPlaying) {
       notifier.pause();
-      webView?.controlVideo('pause');
+      MrPlayApp.sendControl('pause');
     } else {
       notifier.resume();
-      webView?.controlVideo('play');
+      MrPlayApp.sendControl('play');
     }
   }
 
@@ -140,7 +137,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
             ? current.duration
             : target);
     ref.read(playerProvider.notifier).seekTo(clamped);
-    MrPlayApp.webViewKey.currentState?.controlVideo(
+    MrPlayApp.sendControl(
       'seek',
       position: clamped.inMilliseconds / 1000.0,
     );
@@ -148,7 +145,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
 
   void _toggleCaptions() {
     setState(() => _captionsEnabled = !_captionsEnabled);
-    MrPlayApp.webViewKey.currentState?.controlVideo('toggleCaptions');
+    MrPlayApp.sendControl('toggleCaptions');
   }
 
   @override
@@ -157,7 +154,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
       final justExpanded = (prev?.isMinimized ?? true) && !next.isMinimized;
       final videoChanged = prev?.currentVideo?.id != next.currentVideo?.id;
       if (!next.isMinimized && (justExpanded || videoChanged)) {
-        MrPlayApp.webViewKey.currentState?.startVideoAlignmentWatchdog();
+        MrPlayApp.startAlignmentWatchdog();
       }
     });
 
@@ -166,11 +163,19 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
     if (video == null || state.isMinimized) return const SizedBox.shrink();
 
     final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
     final topPadding = MediaQuery.of(context).padding.top;
     final progress = (_dragOffset / screenHeight).clamp(0.0, 1.0);
     final translateY = _dragOffset * (1 - progress * 0.3);
     final scale = 1 - progress * 0.05;
     final opacity = 1 - progress;
+
+    // The 16:9 "video" region is a transparent hole in the overlay so the real
+    // webview video shows through (texture-rendered WebView composites like a
+    // Flutter layer). It sits below safe-area padding + the drag handle.
+    final videoHeight = screenWidth * 9 / 16;
+    final holeTop = topPadding + 20 + 27;
+    final videoHole = Rect.fromLTWH(0, holeTop, screenWidth, videoHeight);
 
     final isSliding = _slideController.isAnimating ||
         _slideController.status == AnimationStatus.completed;
@@ -179,7 +184,18 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
       fit: StackFit.expand,
       children: [
         Positioned.fill(
-          child: Container(color: Colors.black),
+          child: Opacity(
+            opacity: opacity,
+            child: Transform.translate(
+              offset: Offset(0, translateY),
+              child: Transform.scale(
+                scale: scale,
+                child: CustomPaint(
+                  painter: _VideoHolePainter(hole: videoHole),
+                ),
+              ),
+            ),
+          ),
         ),
         Positioned.fill(
           child: Builder(builder: (ctx) {
@@ -212,25 +228,6 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                 child: Stack(
                                   fit: StackFit.expand,
                                   children: [
-                                    Positioned.fill(
-                                      child: video.thumbnailUrl.isNotEmpty
-                                          ? CachedNetworkImage(
-                                              imageUrl: video.thumbnailUrl,
-                                              fit: BoxFit.cover,
-                                              placeholder: (_, __) => Container(
-                                                  color: Colors.grey[900]),
-                                              errorWidget: (_, __, ___) =>
-                                                  Container(
-                                                      color: Colors.grey[900]),
-                                            )
-                                          : Container(color: Colors.grey[900]),
-                                    ),
-                                    Container(
-                                      decoration: BoxDecoration(
-                                        color:
-                                            Colors.black.withValues(alpha: 0.3),
-                                      ),
-                                    ),
                                     Center(
                                       child: Row(
                                         mainAxisAlignment:
@@ -287,9 +284,8 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                       child: _OverlayButton(
                                         icon: Icons.fullscreen,
                                         tooltip: 'Fullscreen',
-                                        onTap: () => MrPlayApp
-                                            .webViewKey.currentState
-                                            ?.controlVideo('fullscreen'),
+                                        onTap: () => MrPlayApp.sendControl(
+                                            'fullscreen'),
                                       ),
                                     ),
                                   ],
@@ -366,8 +362,7 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                                             .round(),
                                   );
                                   ref.read(playerProvider.notifier).seekTo(pos);
-                                  MrPlayApp.webViewKey.currentState
-                                      ?.controlVideo(
+                                  MrPlayApp.sendControl(
                                     'seek',
                                     position: pos.inMilliseconds / 1000.0,
                                   );
@@ -461,15 +456,12 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                       color: Colors.white),
                   tooltip: 'Minimize to picture-in-picture',
                   onPressed: () {
-                    final webView = MrPlayApp.webViewKey.currentState;
-                    webView?.stopVideoAlignmentWatchdog();
+                    MrPlayApp.stopAlignmentWatchdog();
                     // Collapsing straight back to the native page leaves the
                     // in-page video black (frames only render in PiP) on iOS.
                     // Enter PiP instead so the video stays visible in its
                     // floating window, matching the swipe-down gesture.
-                    if (webView == null || !webView.isInPictureInPicture) {
-                      webView?.enterPiP();
-                    }
+                    MrPlayApp.enterPiP();
                     ref.read(playerProvider.notifier).minimize();
                   },
                 ),
@@ -499,9 +491,8 @@ class _FullPlayerWidgetState extends ConsumerState<FullPlayerWidget>
                     IconButton(
                       icon: const Icon(Icons.close, color: Colors.white54),
                       onPressed: () {
-                        MrPlayApp.webViewKey.currentState
-                            ?.stopVideoAlignmentWatchdog();
-                        ref.read(playerProvider.notifier).dismiss();
+                        MrPlayApp.stopAlignmentWatchdog();
+                        MrPlayApp.closePlayer();
                       },
                     ),
                   ],
@@ -733,4 +724,26 @@ class _OverlayButton extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Black covers the overlay screen except a transparent 16:9 "hole" at the
+/// video area, so the real (texture-rendered) webview video shows through.
+class _VideoHolePainter extends CustomPainter {
+  final Rect hole;
+
+  const _VideoHolePainter({required this.hole});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final bounds = Offset.zero & size;
+    canvas.drawRect(bounds, Paint()..color = Colors.black);
+    if (hole.isEmpty) return;
+    canvas.saveLayer(bounds, Paint());
+    canvas.drawRect(hole, Paint()..blendMode = BlendMode.clear);
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _VideoHolePainter oldDelegate) =>
+      oldDelegate.hole != hole;
 }

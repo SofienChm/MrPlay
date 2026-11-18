@@ -8,6 +8,11 @@ class ShareLinkHandler {
   void Function(String url)? _onLink;
   void Function(String filePath, String type)? _onImport;
 
+  /// Paths already delivered this session. Some platforms deliver the initial
+  /// shared media on both `getInitialMedia()` and `getMediaStream()`, which
+  /// would otherwise open the link resolver / trigger the import twice.
+  final Set<String> _handledPaths = <String>{};
+
   void init({
     required void Function(String url) onLink,
     void Function(String filePath, String type)? onImport,
@@ -20,6 +25,10 @@ class ShareLinkHandler {
 
   void _handle(List<SharedMediaFile> files) {
     for (final file in files) {
+      // De-duplicate the initial-media / media-stream overlap: a file already
+      // handled this session is skipped.
+      if (!_handledPaths.add(file.path)) continue;
+
       final isLink =
           file.type == SharedMediaType.url || file.type == SharedMediaType.text;
       if (isLink && file.path.isNotEmpty) {

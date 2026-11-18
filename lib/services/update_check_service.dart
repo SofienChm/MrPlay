@@ -1,6 +1,8 @@
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import 'firebase_apps.dart';
+
 class AppUpdate {
   final int versionCode;
   final String downloadUrl;
@@ -21,11 +23,15 @@ class UpdateCheckService {
 
   Future<AppUpdate?> check() async {
     try {
-      final remoteConfig = FirebaseRemoteConfig.instance;
+      final remoteConfig = FirebaseApps.remoteConfig;
       await remoteConfig.setConfigSettings(
         RemoteConfigSettings(
           fetchTimeout: const Duration(seconds: 15),
-          minimumFetchInterval: Duration.zero,
+          // Throttle real network fetches: the update check runs on every
+          // launch, so a zero interval would hit Firebase's fetch quota. 30 min
+          // keeps it fresh without spamming — repeat launches within the window
+          // just reuse the cached values.
+          minimumFetchInterval: const Duration(minutes: 30),
         ),
       );
       await remoteConfig.fetchAndActivate();

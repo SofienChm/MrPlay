@@ -26,7 +26,7 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
         (details.primaryVelocity != null && details.primaryVelocity! > 400) ||
             _dragOffset > 150;
     if (shouldEnterPiP) {
-      MrPlayApp.webViewKey.currentState?.enterPiP();
+      MrPlayApp.enterPiP();
     }
     setState(() => _dragOffset = 0);
   }
@@ -38,8 +38,7 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
       milliseconds: (fraction * duration.inMilliseconds).round(),
     );
     ref.read(playerProvider.notifier).seekTo(pos);
-    MrPlayApp.webViewKey.currentState
-        ?.controlVideo('seek', position: pos.inMilliseconds / 1000.0);
+    MrPlayApp.sendControl('seek', position: pos.inMilliseconds / 1000.0);
   }
 
   @override
@@ -58,7 +57,7 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
         opacity: 1 - dragProgress * 0.7,
         child: GestureDetector(
           onTap: () {
-            MrPlayApp.webViewKey.currentState?.exitPiP();
+            MrPlayApp.exitPiP();
             ref.read(playerProvider.notifier).expand();
           },
           onVerticalDragUpdate: _onVerticalDragUpdate,
@@ -118,14 +117,14 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
                 Expanded(
                   child: Padding(
                     padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     child: Row(
                       children: [
                         ClipRRect(
                           borderRadius: BorderRadius.circular(6),
                           child: SizedBox(
-                            width: 56,
-                            height: 56,
+                            width: 44,
+                            height: 44,
                             child: video.thumbnailUrl.isNotEmpty
                                 ? CachedNetworkImage(
                                     imageUrl: video.thumbnailUrl,
@@ -171,6 +170,10 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
                           ),
                         ),
                         IconButton(
+                          constraints: const BoxConstraints(
+                              minWidth: 40, minHeight: 40),
+                          padding: EdgeInsets.zero,
+                          iconSize: 22,
                           icon: Icon(
                             state.isPlaying
                                 ? Icons.pause_rounded
@@ -179,21 +182,24 @@ class _MiniPlayerWidgetState extends ConsumerState<MiniPlayerWidget> {
                           ),
                           onPressed: () {
                             final notifier = ref.read(playerProvider.notifier);
-                            final webView = MrPlayApp.webViewKey.currentState;
                             if (state.isPlaying) {
                               notifier.pause();
-                              webView?.controlVideo('pause');
+                              MrPlayApp.sendControl('pause');
                             } else {
                               notifier.resume();
-                              webView?.controlVideo('play');
+                              MrPlayApp.sendControl('play');
                             }
                           },
                         ),
                         IconButton(
+                          constraints: const BoxConstraints(
+                              minWidth: 40, minHeight: 40),
+                          padding: EdgeInsets.zero,
+                          iconSize: 20,
                           icon: const Icon(Icons.close,
-                              color: Colors.white54, size: 20),
+                              color: Colors.white54),
                           onPressed: () {
-                            MrPlayApp.webViewKey.currentState?.closePlayer();
+                            MrPlayApp.closePlayer();
                           },
                         ),
                       ],
