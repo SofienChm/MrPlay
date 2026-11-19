@@ -5,7 +5,7 @@ import '../ad_config.dart';
 
 /// Floating Native Advanced ad shown over the webview (browse page and the
 /// expanded video tab), in the old floating banner's spot. Uses the hub's
-/// `mrplayNative` layout. The user can close it; a new video tab
+/// `mrplayNative` layout. The user can close it; it returns after 5 minutes or when a new video tab
 /// ([showToken] changes) brings it back with a fresh ad (at most once a
 /// minute). The close button sits above the ad so it never covers AdChoices.
 class FloatingNativeAdSlot extends StatefulWidget {
@@ -41,6 +41,9 @@ class _FloatingNativeAdSlotState extends State<FloatingNativeAdSlot>
   bool _isAppBackgrounded = false;
   int _retryCount = 0;
   Timer? _retryTimer;
+  // A closed ad comes back after [_dismissDuration].
+  Timer? _dismissTimer;
+  static const Duration _dismissDuration = Duration(minutes: 5);
 
   bool get _isActive =>
       widget.isVisible && !_isDismissed && !_isAppBackgrounded;
@@ -62,6 +65,7 @@ class _FloatingNativeAdSlotState extends State<FloatingNativeAdSlot>
     if (widget.showToken != null && widget.showToken != oldWidget.showToken) {
       // A new video tab: show the ad again even if it was closed.
       _isDismissed = false;
+      _dismissTimer?.cancel();
     }
     if (_isActive) {
       _loadIfNeeded();
@@ -139,12 +143,19 @@ class _FloatingNativeAdSlotState extends State<FloatingNativeAdSlot>
   void _handleDismiss() {
     _retryTimer?.cancel();
     setState(() => _isDismissed = true);
+    _dismissTimer?.cancel();
+    _dismissTimer = Timer(_dismissDuration, () {
+      if (!mounted) return;
+      setState(() => _isDismissed = false);
+      _loadIfNeeded();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _retryTimer?.cancel();
+    _dismissTimer?.cancel();
     _loadingAd?.dispose();
     _nativeAd?.dispose();
     super.dispose();
