@@ -14,4 +14,8 @@ class AdConfig {
   /// Native Advanced slot on the hub page (small template).
   static const String hubNativeAdUnitId =
       'ca-app-pub-2351054385499645/6399771207';
+
+  /// Floating Native Advanced ad over the webview / video tab. Shares the hub
+  /// unit until its own "floating native" unit is created in AdMob.
+  static const String floatingNativeAdUnitId = hubNativeAdUnitId;
 }

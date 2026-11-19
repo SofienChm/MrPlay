@@ -15,7 +15,7 @@ import 'services/spotlight_service.dart';
 import 'services/siri_shortcuts_service.dart';
 import 'services/data_export_service.dart';
 import 'widgets/persistent_player_shell.dart';
-import 'widgets/unified_banner_ad_slot.dart';
+import 'widgets/floating_native_ad_slot.dart';
 import 'widgets/link_resolver_sheet.dart';
 
 @visibleForTesting
@@ -222,14 +222,20 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
                   child: Consumer(
                     builder: (context, ref, _) {
                       final state = ref.watch(playerProvider);
-                      final hide = state.isVideoTab ||
-                          (state.currentVideo != null && !state.isMinimized);
+                      // Shown on the expanded video tab too (clear of its
+                      // right-hand buttons); hidden when the tab is collapsed
+                      // (its X sat on the mini bar) or the full player is up.
+                      final hide = state.isVideoTab
+                          ? state.isMinimized
+                          : state.currentVideo != null && !state.isMinimized;
                       return ValueListenableBuilder<bool>(
                         valueListenable: PersistentWebViewState.hubVisible,
                         builder: (context, hubVisible, _) {
-                          return UnifiedBannerAdSlot(
+                          return FloatingNativeAdSlot(
                             isVisible: !hubVisible && !hide,
-                            alignment: Alignment.centerLeft,
+                            showToken: state.isVideoTab
+                                ? state.currentVideo?.videoUrl
+                                : null,
                           );
                         },
                       );
