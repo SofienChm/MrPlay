@@ -171,6 +171,7 @@ class _HubPageState extends State<HubPage> {
       name: platform.name,
       url: platform.url,
     );
+    SettingsRepository.setLastPlatformUrl(platform.url);
     MrPlayApp.webViewKey.currentState?.loadUrl(platform.url);
   }
 

@@ -4,6 +4,7 @@ class SettingsRepository {
   static const String _themeKey = 'theme_mode';
   static const String _defaultPlatformKey = 'default_platform';
   static const String _lastPlatformUrlKey = 'last_platform_url';
+  static const String _lastActiveAtKey = 'last_active_at';
   static const String _adBlockKey = 'ad_block_enabled';
   static const String _blockPopupsKey = 'block_popups_enabled';
   static const String _backgroundAudioKey = 'background_audio_enabled';
@@ -43,6 +44,20 @@ class SettingsRepository {
   static Future<void> setLastPlatformUrl(String url) async {
     final prefs = await _prefs;
     await prefs.setString(_lastPlatformUrlKey, url);
+    await prefs.setInt(
+        _lastActiveAtKey, DateTime.now().millisecondsSinceEpoch);
+  }
+
+  /// When the app was last left (or a platform last chosen).
+  static Future<DateTime?> getLastActiveAt() async {
+    final prefs = await _prefs;
+    final ms = prefs.getInt(_lastActiveAtKey);
+    return ms == null ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  static Future<void> setLastActiveAt(DateTime time) async {
+    final prefs = await _prefs;
+    await prefs.setInt(_lastActiveAtKey, time.millisecondsSinceEpoch);
   }
 
   static Future<bool> getAdBlockEnabled() async {
@@ -80,6 +95,7 @@ class SettingsRepository {
     await prefs.remove(_themeKey);
     await prefs.remove(_defaultPlatformKey);
     await prefs.remove(_lastPlatformUrlKey);
+    await prefs.remove(_lastActiveAtKey);
     await prefs.remove(_adBlockKey);
     await prefs.remove(_backgroundAudioKey);
     await prefs.remove(_accentColorKey);

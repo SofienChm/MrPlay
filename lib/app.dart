@@ -49,7 +49,28 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadAccent();
+    _restoreLastPlatform();
     _initNativeIntegrations();
+  }
+
+  /// Cold start: reopen the platform the user last chose from the hub, unless
+  /// the app has been left for the session timeout (then stay on the hub).
+  Future<void> _restoreLastPlatform() async {
+    final url = await SettingsRepository.getLastPlatformUrl();
+    final lastActive = await SettingsRepository.getLastActiveAt();
+    if (url == null || url.isEmpty || lastActive == null) return;
+    if (DateTime.now().difference(lastActive) >= MrPlayApp._sessionTimeout) {
+      return;
+    }
+    for (var i = 0; i < 20; i++) {
+      final controller = MrPlayApp.webViewKey.currentState;
+      if (controller != null) {
+        // A widget / Siri / shared link already opened something: it wins.
+        if (PersistentWebViewState.hubVisible.value) controller.loadUrl(url);
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 250));
+    }
   }
 
   Future<void> _loadAccent() async {
@@ -73,6 +94,7 @@ class _MrPlayAppState extends State<MrPlayApp> with WidgetsBindingObserver {
     switch (state) {
       case AppLifecycleState.paused:
         _pausedAt ??= DateTime.now();
+        SettingsRepository.setLastActiveAt(DateTime.now());
         break;
       case AppLifecycleState.resumed:
         final pausedAt = _pausedAt;
