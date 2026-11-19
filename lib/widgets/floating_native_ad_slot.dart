@@ -5,9 +5,9 @@ import '../ad_config.dart';
 
 /// Floating Native Advanced ad shown over the webview (browse page and the
 /// expanded video tab), in the old floating banner's spot. Uses the hub's
-/// `mrplayNative` layout. The user can close it; it returns after 5 minutes or when a new video tab
-/// ([showToken] changes) brings it back with a fresh ad (at most once a
-/// minute). The close button sits above the ad so it never covers AdChoices.
+/// `mrplayNative` layout. The user can close it; it comes back after 5 minutes
+/// or on a new video tab ([showToken] changes), with a fresh ad at most once a
+/// minute. The close button takes the top-right corner (AdChoices is top-left).
 class FloatingNativeAdSlot extends StatefulWidget {
   final bool isVisible;
   final Object? showToken;
