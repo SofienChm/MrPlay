@@ -30,7 +30,9 @@ class _FloatingNativeAdSlotState extends State<FloatingNativeAdSlot>
   static const double _adHeight = 136;
   static const double _maxAdWidth = 320;
   // Left gutter + the video tab's right-hand button column (16 + 40 + gap).
-  static const double _reservedWidth = 16 + 64;
+  static const double _reservedWidth = 16 + 64 + _closeOverhang;
+  static const double _closeSize = 36;
+  static const double _closeOverhang = 12;
 
   NativeAd? _nativeAd;
   NativeAd? _loadingAd;
@@ -93,6 +95,10 @@ class _FloatingNativeAdSlotState extends State<FloatingNativeAdSlot>
       adUnitId: unitId,
       request: const AdRequest(),
       factoryId: 'mrplayNative',
+      // AdChoices goes top-left so the close button can take the top-right.
+      nativeAdOptions: NativeAdOptions(
+        adChoicesPlacement: AdChoicesPlacement.topLeftCorner,
+      ),
       listener: NativeAdListener(
         onAdLoaded: (ad) {
           if (!mounted || !identical(_loadingAd, ad)) {
@@ -154,40 +160,48 @@ class _FloatingNativeAdSlotState extends State<FloatingNativeAdSlot>
       padding: const EdgeInsets.only(left: 16),
       child: Align(
         alignment: Alignment.centerLeft,
+        // The close button sits on the ad's top-right corner, half outside it,
+        // so it stays clear of the headline (AdChoices is top-left).
         child: SizedBox(
-          width: width,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
+          width: width + _closeOverhang,
+          height: _adHeight + _closeOverhang,
+          child: Stack(
             children: [
-              GestureDetector(
-                onTap: _handleDismiss,
-                behavior: HitTestBehavior.opaque,
-                child: Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2D2D2D).withValues(alpha: 0.90),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      width: 1,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.close,
-                    size: 16,
-                    color: Colors.white70,
+              Positioned(
+                left: 0,
+                bottom: 0,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    height: _adHeight,
+                    width: width,
+                    child: AdWidget(key: ValueKey(ad.hashCode), ad: ad),
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  height: _adHeight,
-                  width: width,
-                  child: AdWidget(key: ValueKey(ad.hashCode), ad: ad),
+              Positioned(
+                top: 0,
+                right: 0,
+                child: GestureDetector(
+                  onTap: _handleDismiss,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(
+                    width: _closeSize,
+                    height: _closeSize,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2D2D2D),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.25),
+                        width: 1,
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.close,
+                      size: 22,
+                      color: Colors.white,
+                    ),
+                  ),
                 ),
               ),
             ],
