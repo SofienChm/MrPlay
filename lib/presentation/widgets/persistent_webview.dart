@@ -104,6 +104,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
   // seizing the audio session). Used to hold the Now Playing elapsed time
   // steady so iOS doesn't keep counting up while the video is actually paused.
   double _systemPausedElapsed = 0;
+  // A PiP window the user opened in the foreground (phantom PiP only ever
+  // starts in the background) and that is still open.
+  bool _userPipOpen = false;
+  // iOS sends a media-session pause while the app leaves with a user PiP open;
+  // that isn't the user's pause, so it is undone once backgrounded.
+  bool _undoLeavePause = false;
+  DateTime _enteredBackgroundAt = DateTime.fromMillisecondsSinceEpoch(0);
   // True while the tracked video is a YouTube Music (music.youtube.com) page.
   bool _isMusic = false;
   int _lastNowPlayingMs = 0;
@@ -526,6 +533,7 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
       _appIsBackgrounded = false;
       _appIsInactive = false;
       _activeController?.evaluateJavascript(source: 'window.__mrAppBg = false;');
+      _undoLeavePause = false;
       if (_userPausedInBackground) {
         _activeController?.evaluateJavascript(source: _softPauseToRealJs);
       }
@@ -590,6 +598,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     // Lets the Media Session bridge soft-pause a PiP video (see
     // YouTubeJS.mediaSessionBridgeScript); document.hidden is spoofed.
     _activeController?.evaluateJavascript(source: 'window.__mrAppBg = true;');
+    _enteredBackgroundAt = DateTime.now();
+    if (_undoLeavePause) {
+      _undoLeavePause = false;
+      if (_backgroundAudioEnabled) {
+        resumePlayback();
+        return;
+      }
+    }
     _backgroundResumeAllowed = _backgroundAudioEnabled &&
         ref.read(playerProvider).isPlaying &&
         !_userPausedInBackground;
@@ -705,6 +721,13 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         // remote command); only sync our state and background keep-alive.
         if (action == 'pause') {
           userInitiatedPause(pageHandled: true);
+          if (_userPipOpen && _isLeavingApp()) {
+            if (_appIsBackgrounded) {
+              if (_backgroundAudioEnabled) resumePlayback();
+            } else {
+              _undoLeavePause = true;
+            }
+          }
         } else if (action == 'play') {
           resumePlayback(pageHandled: true);
         }
@@ -716,6 +739,17 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
         if (_acceptsPlayerEvents(controller)) _minimizeVideoTab();
       },
     );
+  }
+
+  /// Between `inactive` and just after `paused`: the app is on its way out.
+  /// (Control Center over the app is also `inactive`, but the flag set then is
+  /// dropped on `resumed` since the app never backgrounds.)
+  bool _isLeavingApp() {
+    if (_appIsBackgrounded) {
+      return DateTime.now().difference(_enteredBackgroundAt) <
+          const Duration(milliseconds: 1500);
+    }
+    return _appIsInactive;
   }
 
   bool _acceptsPlayerEvents(InAppWebViewController source) {
@@ -1051,7 +1085,14 @@ class PersistentWebViewState extends ConsumerState<PersistentWebView>
     if (!_acceptsPlayerEvents(source)) return;
     try {
       var playing = data['playing'] == true;
+      if (data['pipActive'] != true) {
+        _userPipOpen = false;
+      } else if (!_appIsBackgrounded && !_appIsInactive) {
+        _userPipOpen = true;
+      }
+      // A play from the user's own PiP window is never undone.
       if (playing &&
+          !_userPipOpen &&
           data['ended'] != true &&
           _appIsBackgrounded &&
           _userPausedInBackground &&
